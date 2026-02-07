@@ -20,3 +20,10 @@ export function pickOpenDistribution<T extends DistributionLike>(items: T[]) {
     return aOpened.getTime() - bOpened.getTime();
   })[openItems.length - 1];
 }
+
+export function distributionLabel(item?: DistributionLike | null) {
+  const firstDate = item?.dates?.[0]?.toDate?.();
+  if (!firstDate) return "Distribution";
+  const month = firstDate.toLocaleDateString("fr-FR", { month: "long" });
+  return `Distribution ${month}`;
+}

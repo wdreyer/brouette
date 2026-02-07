@@ -12,6 +12,7 @@ import {
   writeBatch,
 } from "firebase/firestore";
 import { firebaseDb } from "@/lib/firebase/client";
+import { distributionLabel } from "@/lib/distributions";
 
 type Distribution = {
   id: string;
@@ -41,7 +42,7 @@ type Product = {
   imageUrl?: string;
   isOrganic?: boolean;
   categoryId?: string;
-  saleDates?: { toDate: () => Date }[];
+  saleDates?: { toDate?: () => Date }[];
 };
 
 type Variant = {
@@ -100,7 +101,11 @@ function shortDate(date?: Date) {
   });
 }
 
-export default function OpenSalesWizard() {
+type OpenSalesWizardProps = {
+  onFocusChange?: (focused: boolean) => void;
+};
+
+export default function OpenSalesWizard({ onFocusChange }: OpenSalesWizardProps) {
   const [loading, setLoading] = useState(true);
   const [distributions, setDistributions] = useState<Distribution[]>([]);
   const [producers, setProducers] = useState<Producer[]>([]);
@@ -264,6 +269,10 @@ export default function OpenSalesWizard() {
       setSelectedDistributionId(nextDistribution.id);
     }
   }, [nextDistribution, selectedDistributionId]);
+
+  useEffect(() => {
+    onFocusChange?.(step > 0);
+  }, [step, onFocusChange]);
 
   useEffect(() => {
     if (!currentProducer) return;
@@ -466,6 +475,80 @@ export default function OpenSalesWizard() {
       batch.set(doc(collection(distRef, "producers"), producerId), { producerId, active: true });
     });
     await batch.commit();
+
+    const dateKeys = dates.map((date) => dateKey(date));
+    if (!dateKeys.length) return;
+
+    const deselected = producers
+      .map((producer) => producer.id)
+      .filter((id) => !selectedProducerIds.includes(id));
+    if (!deselected.length) return;
+
+    const updatedVariants: { productId: string; id: string; activeDates: string[] }[] = [];
+    const updatedProducts: { id: string; saleDates: Timestamp[] }[] = [];
+
+    deselected.forEach((producerId) => {
+      const producerProducts = productsByProducer[producerId] ?? [];
+      producerProducts.forEach((product) => {
+        const productVariants = variantsByProduct[product.id] ?? [];
+        const fallbackKeys = (product.saleDates ?? [])
+          .map((date) => date.toDate?.())
+          .filter(Boolean)
+          .map((date) => dateKey(date as Date));
+        const nextDates = new Set<string>();
+        productVariants.forEach((variant) => {
+          const currentKeys =
+            Array.isArray(variant.activeDates) && variant.activeDates.length
+              ? variant.activeDates
+              : fallbackKeys;
+          const nextKeys = currentKeys.filter((key) => !dateKeys.includes(key));
+          nextKeys.forEach((key) => nextDates.add(key));
+          updatedVariants.push({ productId: product.id, id: variant.id, activeDates: nextKeys });
+        });
+        updatedProducts.push({
+          id: product.id,
+          saleDates: Array.from(nextDates).map((key) => Timestamp.fromDate(dateFromKey(key))),
+        });
+      });
+    });
+
+    await Promise.all(
+      updatedVariants.map((variant) =>
+        setDoc(
+          doc(firebaseDb, "products", variant.productId, "variants", variant.id),
+          { activeDates: variant.activeDates },
+          { merge: true },
+        ),
+      ),
+    );
+
+    await Promise.all(
+      updatedProducts.map((product) =>
+        setDoc(doc(firebaseDb, "products", product.id), { saleDates: product.saleDates }, { merge: true }),
+      ),
+    );
+
+    if (updatedVariants.length) {
+      const updateMap = new Map(
+        updatedVariants.map((variant) => [`${variant.productId}:${variant.id}`, variant.activeDates]),
+      );
+      setVariants((prev) =>
+        prev.map((variant) => {
+          const key = `${variant.productId}:${variant.id}`;
+          const activeDates = updateMap.get(key);
+          return activeDates ? { ...variant, activeDates } : variant;
+        }),
+      );
+    }
+    if (updatedProducts.length) {
+      const productMap = new Map(updatedProducts.map((product) => [product.id, product.saleDates]));
+      setProducts((prev) =>
+        prev.map((product) => {
+          const saleDates = productMap.get(product.id);
+          return saleDates ? { ...product, saleDates } : product;
+        }),
+      );
+    }
   };
 
   const openSale = async () => {
@@ -571,7 +654,7 @@ export default function OpenSalesWizard() {
                 Vente ouverte
               </p>
               <p className="mt-2 text-sm text-amber-800">
-                Distribution {openDistribution.id}. Tu dois la fermer avant d&apos;en ouvrir une
+                {distributionLabel(openDistribution)}. Tu dois la fermer avant d&apos;en ouvrir une
                 nouvelle.
               </p>
               <div className="mt-3 flex flex-wrap gap-2">
@@ -600,7 +683,7 @@ export default function OpenSalesWizard() {
             {nextDistribution ? (
               <>
                 <p className="mt-2 text-sm text-ink/70">
-                  Distribution {nextDistribution.id}
+                  {distributionLabel(nextDistribution)}
                 </p>
                 <div className="mt-3 flex flex-wrap gap-2 text-xs text-ink/70">
                   {(nextDistribution.dates ?? []).slice(0, 3).map((date, index) => (
@@ -620,7 +703,7 @@ export default function OpenSalesWizard() {
                     onClick={goNext}
                     disabled={Boolean(openDistribution)}
                   >
-                    Continuer la preparation
+                    Ouvrir la vente
                   </button>
                 </div>
               </>

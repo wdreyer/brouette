@@ -132,6 +132,7 @@ export default function ProductsEditor({
   const [editVariantDates, setEditVariantDates] = useState<Record<string, string[]>>({});
   const [removedVariantIds, setRemovedVariantIds] = useState<string[]>([]);
   const [openPeriodDates, setOpenPeriodDates] = useState<string[]>([]);
+  const [openDistributionId, setOpenDistributionId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [createDraft, setCreateDraft] = useState<Record<string, unknown>>({});
   const [createTags, setCreateTags] = useState("");
@@ -177,9 +178,11 @@ export default function ProductsEditor({
         ...(docSnap.data() as Omit<Category, "id">),
       })),
     );
-    const openDist = openDistSnap.docs[0]?.data() as Distribution | undefined;
+    const openDistDoc = openDistSnap.docs[0];
+    const openDist = openDistDoc?.data() as Distribution | undefined;
     const openDates = (openDist?.dates ?? []).map((date) => dateKey(date.toDate()));
     setOpenPeriodDates(openDates);
+    setOpenDistributionId(openDistDoc?.id ?? null);
     setLoading(false);
   };
 
@@ -368,6 +371,21 @@ export default function ProductsEditor({
         } else {
           await addDoc(collection(firebaseDb, "products", editingId, "variants"), data);
         }
+      }
+
+      const producerId = String(getByPath(editDraft, "producerId") ?? "");
+      const hasOpenDates =
+        openDistributionId &&
+        openPeriodDates.length > 0 &&
+        Object.values(editVariantDates).some((dates) =>
+          dates.some((key) => openPeriodDates.includes(key)),
+        );
+      if (producerId && openDistributionId && hasOpenDates) {
+        await setDoc(
+          doc(firebaseDb, "distributionDates", openDistributionId, "producers", producerId),
+          { producerId, active: true },
+          { merge: true },
+        );
       }
 
       setMessage("Produit mis a jour.");

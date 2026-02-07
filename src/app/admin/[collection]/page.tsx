@@ -84,7 +84,7 @@ const COLLECTIONS: Record<
     title: "Commandes",
     description: "Commandes par adherent. Lignes dans orders/{id}/items.",
     fields: [
-      { label: "Distribution ID", path: "distributionId", type: "text", table: true },
+      { label: "Distribution", path: "distributionId", type: "text", table: true },
       { label: "Adherent ID", path: "memberId", type: "text", table: true },
       { label: "Statut", path: "status", type: "text", table: true },
       { label: "Total EUR", path: "totals.totalAmount", type: "number", table: true },
@@ -98,7 +98,7 @@ const COLLECTIONS: Record<
     description: "Logs d'envoi et files de messages.",
     fields: [
       { label: "Cible", path: "target", type: "text", table: true },
-      { label: "Distribution ID", path: "distributionId", type: "text" },
+      { label: "Distribution", path: "distributionId", type: "text" },
       { label: "Objet", path: "subject", type: "text", table: true },
       { label: "Statut", path: "status", type: "text", table: true },
       { label: "Contenu", path: "content", type: "text" },
@@ -111,7 +111,7 @@ const COLLECTIONS: Record<
     description: "Historique des exports et chemins Storage.",
     fields: [
       { label: "Type", path: "type", type: "text", table: true },
-      { label: "Distribution ID", path: "distributionId", type: "text", table: true },
+      { label: "Distribution", path: "distributionId", type: "text", table: true },
       { label: "Producteur ID", path: "producerId", type: "text" },
       { label: "Chemin Storage", path: "storagePath", type: "text" },
       { label: "Genere le", path: "generatedAt", type: "datetime" },

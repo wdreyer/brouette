@@ -3,7 +3,7 @@
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { collection, getDocs } from "firebase/firestore";
 import { firebaseDb } from "@/lib/firebase/client";
-import { pickOpenDistribution } from "@/lib/distributions";
+import { distributionLabel, pickOpenDistribution } from "@/lib/distributions";
 
 type Distribution = {
   id: string;
@@ -28,9 +28,13 @@ function dateKey(date: Date) {
 
 type AdminDashboardProps = {
   children?: ReactNode;
+  focusMode?: boolean;
 };
 
-export default function AdminDashboard({ children }: AdminDashboardProps) {
+export default function AdminDashboard({ children, focusMode = false }: AdminDashboardProps) {
+  if (focusMode) {
+    return <div>{children}</div>;
+  }
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({
     members: 0,
@@ -164,7 +168,7 @@ export default function AdminDashboard({ children }: AdminDashboardProps) {
           </p>
           {openDistribution ? (
             <div className="mt-3">
-              <p className="text-sm text-ink/70">Distribution {openDistribution.id}</p>
+              <p className="text-sm text-ink/70">{distributionLabel(openDistribution)}</p>
               <div className="mt-3 flex flex-wrap gap-2">
                 {openDates.map((date) => (
                   <span

@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { addDoc, collection, doc, getDocs, limit, query, setDoc, Timestamp } from "firebase/firestore";
 import { firebaseDb } from "@/lib/firebase/client";
+import { distributionLabel } from "@/lib/distributions";
 
 type FieldType = "text" | "number" | "boolean" | "date" | "datetime";
 
@@ -85,8 +86,13 @@ export default function CollectionEditor({
   const [editDraft, setEditDraft] = useState<Record<string, unknown>>({});
   const [createOpen, setCreateOpen] = useState(false);
   const [createDraft, setCreateDraft] = useState<Record<string, unknown>>({});
+  const [distributionOptions, setDistributionOptions] = useState<{ id: string; label: string }[]>([]);
 
   const tableFields = useMemo(() => fields.filter((field) => field.table), [fields]);
+  const hasDistributionField = useMemo(
+    () => fields.some((field) => field.path === "distributionId"),
+    [fields],
+  );
 
   const load = async () => {
     setLoading(true);
@@ -103,6 +109,22 @@ export default function CollectionEditor({
   useEffect(() => {
     load().catch(() => setLoading(false));
   }, [collectionName]);
+
+  useEffect(() => {
+    if (!hasDistributionField) return;
+    const loadDistributions = async () => {
+      const snapshot = await getDocs(collection(firebaseDb, "distributionDates"));
+      const items = snapshot.docs.map((docSnap) => ({
+        id: docSnap.id,
+        label: distributionLabel({
+          id: docSnap.id,
+          dates: (docSnap.data() as { dates?: { toDate?: () => Date }[] }).dates,
+        }),
+      }));
+      setDistributionOptions(items);
+    };
+    loadDistributions().catch(() => setDistributionOptions([]));
+  }, [hasDistributionField]);
 
   const openEdit = (entry: DocEntry) => {
     setEditingId(entry.id);
@@ -190,7 +212,23 @@ export default function CollectionEditor({
                         const fieldId = `${entry.id}-${field.path}`;
                         return (
                           <td key={field.path} className="px-4 py-3">
-                            {field.type === "boolean" ? (
+                            {field.path === "distributionId" ? (
+                              <select
+                                id={fieldId}
+                                className="w-48 rounded-full border border-ink/20 bg-white px-3 py-2 text-xs"
+                                defaultValue={String(inputValue)}
+                                onChange={(event) =>
+                                  setByPath(rowDraft, field.path, fromInputValue(event.target.value, field.type))
+                                }
+                              >
+                                <option value="">Distribution</option>
+                                {distributionOptions.map((option) => (
+                                  <option key={option.id} value={option.id}>
+                                    {option.label}
+                                  </option>
+                                ))}
+                              </select>
+                            ) : field.type === "boolean" ? (
                               <select
                                 id={fieldId}
                                 className="rounded-full border border-ink/20 bg-white px-3 py-2 text-xs"
@@ -264,7 +302,24 @@ export default function CollectionEditor({
                 return (
                   <label key={field.path} className="flex flex-col gap-2 text-sm font-semibold text-ink/70">
                     {field.label}
-                    {field.type === "boolean" ? (
+                    {field.path === "distributionId" ? (
+                      <select
+                        className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
+                        value={String(inputValue)}
+                        onChange={(event) => {
+                          const next = { ...editDraft };
+                          setByPath(next, field.path, fromInputValue(event.target.value, field.type));
+                          setEditDraft(next);
+                        }}
+                      >
+                        <option value="">Distribution</option>
+                        {distributionOptions.map((option) => (
+                          <option key={option.id} value={option.id}>
+                            {option.label}
+                          </option>
+                        ))}
+                      </select>
+                    ) : field.type === "boolean" ? (
                       <select
                         className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
                         value={String(inputValue)}
@@ -330,7 +385,24 @@ export default function CollectionEditor({
               {fields.map((field) => (
                 <label key={field.path} className="flex flex-col gap-2 text-sm font-semibold text-ink/70">
                   {field.label}
-                  {field.type === "boolean" ? (
+                  {field.path === "distributionId" ? (
+                    <select
+                      className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
+                      value={String(toInputValue(getByPath(createDraft, field.path), field.type))}
+                      onChange={(event) => {
+                        const next = { ...createDraft };
+                        setByPath(next, field.path, fromInputValue(event.target.value, field.type));
+                        setCreateDraft(next);
+                      }}
+                    >
+                      <option value="">Distribution</option>
+                      {distributionOptions.map((option) => (
+                        <option key={option.id} value={option.id}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  ) : field.type === "boolean" ? (
                     <select
                       className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
                       value={String(toInputValue(getByPath(createDraft, field.path), field.type))}
