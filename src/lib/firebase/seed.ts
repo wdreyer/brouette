@@ -1,5 +1,5 @@
 
-import { Timestamp, doc, writeBatch } from "firebase/firestore";
+import { Timestamp, collection, doc, getDocs, writeBatch } from "firebase/firestore";
 import { firebaseDb } from "./client";
 
 type BatchItem = {
@@ -288,7 +288,7 @@ export async function seedDatabase() {
     },
   ];
 
-  const products = [
+  let products = [
     {
       id: "pr1",
       producerId: "p4",
@@ -433,85 +433,40 @@ export async function seedDatabase() {
   const distributions = [
     {
       id: "d1",
-      date: t("2026-02-06T18:00:00.000Z"),
-      title: "Distribution Fevrier 1",
-      window: { open: t("2026-01-25T08:00:00.000Z"), close: t("2026-02-04T20:00:00.000Z") },
+      dates: [t("2026-02-06T18:00:00.000Z"), t("2026-02-20T18:00:00.000Z"), t("2026-03-06T18:00:00.000Z")],
       status: "planned",
-      pickup: { place: "Salle municipale", hours: "18:00-19:30", instructions: "Apporter sacs." },
     },
     {
       id: "d2",
-      date: t("2026-02-20T18:00:00.000Z"),
-      title: "Distribution Fevrier 2",
-      window: { open: t("2026-02-08T08:00:00.000Z"), close: t("2026-02-18T20:00:00.000Z") },
-      status: "planned",
-      pickup: { place: "Salle municipale", hours: "18:00-19:30", instructions: "Venez a l'heure." },
+      dates: [t("2026-03-20T18:00:00.000Z"), t("2026-04-03T18:00:00.000Z"), t("2026-04-17T18:00:00.000Z")],
+      status: "open",
     },
     {
       id: "d3",
-      date: t("2026-03-06T18:00:00.000Z"),
-      title: "Distribution Mars 1",
-      window: { open: t("2026-02-22T08:00:00.000Z"), close: t("2026-03-04T20:00:00.000Z") },
-      status: "planned",
-      pickup: { place: "Gymnase", hours: "18:30-20:00", instructions: "Parking cote nord." },
-    },
-    {
-      id: "d4",
-      date: t("2026-03-20T18:00:00.000Z"),
-      title: "Distribution Mars 2",
-      window: { open: t("2026-03-08T08:00:00.000Z"), close: t("2026-03-18T20:00:00.000Z") },
-      status: "planned",
-      pickup: { place: "Gymnase", hours: "18:30-20:00", instructions: "Cheque possible." },
-    },
-    {
-      id: "d5",
-      date: t("2026-04-03T18:00:00.000Z"),
-      title: "Distribution Avril 1",
-      window: { open: t("2026-03-22T08:00:00.000Z"), close: t("2026-04-01T20:00:00.000Z") },
-      status: "planned",
-      pickup: { place: "Salle municipale", hours: "18:00-19:30", instructions: "Livraison par l'arriere." },
-    },
-    {
-      id: "d6",
-      date: t("2026-04-17T18:00:00.000Z"),
-      title: "Distribution Avril 2",
-      window: { open: t("2026-04-05T08:00:00.000Z"), close: t("2026-04-15T20:00:00.000Z") },
-      status: "planned",
-      pickup: { place: "Salle des fetes", hours: "18:00-19:30", instructions: "Respecter le flux." },
-    },
-    {
-      id: "d7",
-      date: t("2026-05-01T18:00:00.000Z"),
-      title: "Distribution Mai 1",
-      window: { open: t("2026-04-19T08:00:00.000Z"), close: t("2026-04-29T20:00:00.000Z") },
-      status: "planned",
-      pickup: { place: "Salle municipale", hours: "18:00-19:30", instructions: "Pensez aux sacs." },
-    },
-    {
-      id: "d8",
-      date: t("2026-05-15T18:00:00.000Z"),
-      title: "Distribution Mai 2",
-      window: { open: t("2026-05-03T08:00:00.000Z"), close: t("2026-05-13T20:00:00.000Z") },
-      status: "planned",
-      pickup: { place: "Gymnase", hours: "18:30-20:00", instructions: "Acces velo." },
-    },
-    {
-      id: "d9",
-      date: t("2026-05-29T18:00:00.000Z"),
-      title: "Distribution Mai 3",
-      window: { open: t("2026-05-17T08:00:00.000Z"), close: t("2026-05-27T20:00:00.000Z") },
-      status: "planned",
-      pickup: { place: "Salle des fetes", hours: "18:00-19:30", instructions: "Eviter la rue centrale." },
-    },
-    {
-      id: "d10",
-      date: t("2026-06-12T18:00:00.000Z"),
-      title: "Distribution Juin 1",
-      window: { open: t("2026-05-31T08:00:00.000Z"), close: t("2026-06-10T20:00:00.000Z") },
-      status: "planned",
-      pickup: { place: "Salle municipale", hours: "18:00-19:30", instructions: "Rangement a 19:40." },
+      dates: [t("2026-05-01T18:00:00.000Z"), t("2026-05-15T18:00:00.000Z"), t("2026-05-29T18:00:00.000Z")],
+      status: "finished",
     },
   ];
+
+  const periodDates = distributions.map((dist) => dist.dates);
+  const productSaleMap: Record<string, number[]> = {
+    pr1: [0],
+    pr2: [0, 1],
+    pr3: [0],
+    pr4: [1],
+    pr5: [0, 1],
+    pr6: [1],
+    pr7: [2],
+    pr8: [2],
+    pr9: [1],
+    pr10: [2],
+  };
+
+  products = products.map((product) => {
+    const indexes = productSaleMap[product.id] ?? [0];
+    const saleDates = indexes.flatMap((index) => periodDates[index] ?? []);
+    return { ...product, saleDates };
+  });
 
   const documents = [
     {
@@ -1085,3 +1040,150 @@ export async function seedDatabase() {
       ],
     },
   ];
+  const batchItems: BatchItem[] = [];
+
+  for (const member of members) {
+    const { id, ...data } = member;
+    batchItems.push({ refPath: ["members", id], data });
+  }
+
+  for (const producer of producers) {
+    const { id, ...data } = producer;
+    batchItems.push({ refPath: ["producers", id], data });
+  }
+
+  for (const product of products) {
+    const { id, variants, ...data } = product;
+    batchItems.push({ refPath: ["products", id], data });
+    for (const variant of variants) {
+      const { id: variantId, ...variantData } = variant;
+      batchItems.push({
+        refPath: ["products", id, "variants", variantId],
+        data: variantData,
+      });
+    }
+  }
+
+  for (const distribution of distributions) {
+    const { id, ...data } = distribution;
+    batchItems.push({ refPath: ["distributionDates", id], data });
+
+    const producerLinks = ["p1", "p2", "p3", "p4", "p6"].map((pid, index) => ({
+      id: `dp${index + 1}`,
+      producerId: pid,
+      active: true,
+      note: index % 2 === 0 ? "Present" : "Livraison partielle",
+    }));
+
+    for (const link of producerLinks) {
+      const { id: linkId, ...linkData } = link;
+      batchItems.push({
+        refPath: ["distributionDates", id, "producers", linkId],
+        data: linkData,
+      });
+    }
+
+    const offerItems = [
+      { id: "oi1", producerId: "p4", productId: "pr1", variantId: "v1", title: "Pommes", variantLabel: "1kg", imageUrl: "/images/pommes.jpg", isOrganic: true, price: 3.5 },
+      { id: "oi2", producerId: "p8", productId: "pr3", variantId: "v1", title: "Oeufs", variantLabel: "Boite de 6", imageUrl: "/images/oeufs.jpg", isOrganic: false, price: 3.2 },
+      { id: "oi3", producerId: "p1", productId: "pr2", variantId: "v1", title: "Pommes de terre", variantLabel: "2kg", imageUrl: "/images/pdt.jpg", isOrganic: true, price: 4.2 },
+      { id: "oi4", producerId: "p7", productId: "pr4", variantId: "v1", title: "Fromage de chevre", variantLabel: "120g", imageUrl: "/images/chevre.jpg", isOrganic: true, price: 2.8 },
+      { id: "oi5", producerId: "p2", productId: "pr5", variantId: "v1", title: "Tomates", variantLabel: "1kg", imageUrl: "/images/tomates.jpg", isOrganic: true, price: 4.8 },
+      { id: "oi6", producerId: "p3", productId: "pr6", variantId: "v2", title: "Miel", variantLabel: "500g", imageUrl: "/images/miel.jpg", isOrganic: true, price: 9.0 },
+      { id: "oi7", producerId: "p6", productId: "pr7", variantId: "v1", title: "Carottes", variantLabel: "1kg", imageUrl: "/images/carottes.jpg", isOrganic: false, price: 3.1 },
+      { id: "oi8", producerId: "p9", productId: "pr8", variantId: "v1", title: "Basilic", variantLabel: "Botte", imageUrl: "/images/basilic.jpg", isOrganic: true, price: 2.2 },
+      { id: "oi9", producerId: "p4", productId: "pr1", variantId: "v2", title: "Pommes", variantLabel: "2kg", imageUrl: "/images/pommes.jpg", isOrganic: true, price: 6.5 },
+      { id: "oi10", producerId: "p1", productId: "pr2", variantId: "v2", title: "Pommes de terre", variantLabel: "5kg", imageUrl: "/images/pdt.jpg", isOrganic: true, price: 9.5 },
+    ];
+
+    for (const offer of offerItems) {
+      const { id: offerId, ...offerData } = offer;
+      batchItems.push({
+        refPath: ["distributionDates", id, "offerItems", offerId],
+        data: {
+          ...offerData,
+          status: "active",
+          limitQuantity: 20,
+          remainingQuantity: 20,
+        },
+      });
+    }
+  }
+
+  for (const order of orders) {
+    const { id, items, ...data } = order;
+    batchItems.push({ refPath: ["orders", id], data });
+    for (const item of items) {
+      const { id: itemId, ...itemData } = item;
+      batchItems.push({
+        refPath: ["orders", id, "items", itemId],
+        data: itemData,
+      });
+    }
+  }
+
+  for (const docEntry of documents) {
+    const { id, ...data } = docEntry;
+    batchItems.push({ refPath: ["documents", id], data });
+  }
+
+  for (const message of messages) {
+    const { id, ...data } = message;
+    batchItems.push({ refPath: ["messages", id], data });
+  }
+
+  batchItems.push({ refPath: ["settings", settings.id], data: settings });
+
+  const batches = chunk(batchItems, 400);
+  for (const items of batches) {
+    const batch = writeBatch(firebaseDb);
+    for (const item of items) {
+      batch.set(docRefFromPath(item.refPath), item.data, { merge: false });
+    }
+    await batch.commit();
+  }
+
+  return { writes: batchItems.length };
+}
+
+function nextWeekday(base: Date, weekday: number) {
+  const date = new Date(base);
+  date.setHours(18, 0, 0, 0);
+  while (date.getDay() !== weekday) {
+    date.setDate(date.getDate() + 1);
+  }
+  if (date <= base) {
+    date.setDate(date.getDate() + 7);
+  }
+  return date;
+}
+
+export async function resetDistributions() {
+  const snapshot = await getDocs(collection(firebaseDb, "distributionDates"));
+  const deleteBatch = writeBatch(firebaseDb);
+  snapshot.docs.forEach((docSnap) => {
+    deleteBatch.delete(doc(firebaseDb, "distributionDates", docSnap.id));
+  });
+  await deleteBatch.commit();
+
+  const now = new Date();
+  const base = nextWeekday(now, 5);
+  const createBatch = writeBatch(firebaseDb);
+  const dates: Date[] = [];
+  for (let i = 0; i < 3; i += 1) {
+    const date = new Date(base);
+    date.setDate(base.getDate() + i * 14);
+    dates.push(date);
+  }
+
+  const docRef = doc(collection(firebaseDb, "distributionDates"));
+  createBatch.set(docRef, {
+    title: "Periode 1",
+    dates: dates.map((date) => Timestamp.fromDate(date)),
+    status: "planned",
+  });
+
+  await createBatch.commit();
+
+  return { deleted: snapshot.size, created: 1 };
+}
