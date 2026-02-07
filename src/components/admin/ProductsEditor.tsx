@@ -15,7 +15,7 @@ import {
 } from "firebase/firestore";
 import { firebaseDb } from "@/lib/firebase/client";
 
-type FieldType = "text" | "number" | "boolean";
+type FieldType = "text" | "number" | "boolean" | "date" | "datetime";
 
 type FieldConfig = {
   label: string;
@@ -99,6 +99,15 @@ function dateFromKey(key: string) {
 function toInputValue(value: unknown, type: FieldType) {
   if (type === "boolean") return Boolean(value);
   if (type === "number") return value === undefined || value === null ? "" : String(value);
+  if (value instanceof Timestamp) {
+    const date = value.toDate();
+    return type === "date"
+      ? date.toISOString().slice(0, 10)
+      : date.toISOString().slice(0, 16);
+  }
+  if (value instanceof Date) {
+    return type === "date" ? value.toISOString().slice(0, 10) : value.toISOString().slice(0, 16);
+  }
   return value === undefined || value === null ? "" : String(value);
 }
 
