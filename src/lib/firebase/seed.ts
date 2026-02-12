@@ -3,7 +3,7 @@ import { Timestamp, collection, doc, getDocs, writeBatch } from "firebase/firest
 import { firebaseDb } from "./client";
 
 type BatchItem = {
-  refPath: string[];
+  refPath: [string, ...string[]];
   data: Record<string, unknown>;
 };
 
