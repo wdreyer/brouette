@@ -3,23 +3,8 @@ import HeaderBar from "@/components/HeaderBar";
 import { AuthProvider } from "@/components/auth/AuthProvider";
 import AuthGate from "@/components/auth/AuthGate";
 import ProfileGate from "@/components/profile/ProfileGate";
-import { Cormorant_Garamond, Work_Sans } from "next/font/google";
 import { Toaster } from "sonner";
 import "./globals.css";
-
-const workSans = Work_Sans({
-  variable: "--font-sans",
-  subsets: ["latin"],
-  display: "swap",
-  weight: ["300", "400", "500", "600", "700"],
-});
-
-const cormorant = Cormorant_Garamond({
-  variable: "--font-serif",
-  subsets: ["latin"],
-  display: "swap",
-  weight: ["400", "500", "600", "700"],
-});
 
 export const metadata: Metadata = {
   title: "Brouette - Coop Locale",
@@ -34,7 +19,7 @@ export default function RootLayout({
   return (
     <html lang="fr">
       <body
-        className={`${workSans.variable} ${cormorant.variable} bg-stone text-ink font-sans antialiased`}
+        className="bg-stone text-ink font-sans antialiased"
         suppressHydrationWarning
       >
         <div className="relative min-h-screen bg-stone">

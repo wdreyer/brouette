@@ -1,3 +1,10 @@
+@import url("https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=Work+Sans:wght@300;400;500;600;700&display=swap");
+
+:root {
+  --font-sans: "Work Sans";
+  --font-serif: "Cormorant Garamond";
+}
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;

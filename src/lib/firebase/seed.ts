@@ -15,8 +15,9 @@ function chunk<T>(items: T[], size: number): T[][] {
   return chunks;
 }
 
-function docRefFromPath(path: string[]) {
-  return doc(firebaseDb, ...path);
+function docRefFromPath(path: [string, ...string[]]) {
+  const [first, ...rest] = path;
+  return doc(firebaseDb, first, ...rest);
 }
 
 export async function seedDatabase() {
