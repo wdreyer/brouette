@@ -276,7 +276,7 @@ export default function ProductsEditor({
       id: docSnap.id,
       ...(docSnap.data() as Omit<VariantDraft, "id">),
     }));
-    const variants = variantItems.map((variant) => ({
+    const variants: VariantDraft[] = variantItems.map((variant) => ({
       id: variant.id,
       label: variant.label ?? "",
       type: variant.type ?? "",

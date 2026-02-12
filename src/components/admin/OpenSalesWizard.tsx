@@ -1,14 +1,17 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   Timestamp,
   addDoc,
   collection,
   doc,
   getDocs,
+  query,
   setDoc,
   updateDoc,
+  where,
   writeBatch,
 } from "firebase/firestore";
 import { firebaseDb } from "@/lib/firebase/client";
@@ -55,7 +58,6 @@ type Variant = {
 
 type OfferDraft = {
   enabled: boolean;
-  limitPerMember: string;
   limitTotal: string;
 };
 
@@ -101,11 +103,19 @@ function shortDate(date?: Date) {
   });
 }
 
+function daysUntil(date?: Date) {
+  if (!date) return null;
+  const now = new Date();
+  const diff = date.getTime() - now.getTime();
+  return Math.ceil(diff / (1000 * 60 * 60 * 24));
+}
+
 type OpenSalesWizardProps = {
   onFocusChange?: (focused: boolean) => void;
 };
 
 export default function OpenSalesWizard({ onFocusChange }: OpenSalesWizardProps) {
+  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [distributions, setDistributions] = useState<Distribution[]>([]);
   const [producers, setProducers] = useState<Producer[]>([]);
@@ -118,6 +128,8 @@ export default function OpenSalesWizard({ onFocusChange }: OpenSalesWizardProps)
   const [step, setStep] = useState(0);
   const [message, setMessage] = useState("");
   const [status, setStatus] = useState<"idle" | "saving" | "opening" | "error">("idle");
+  const [openOrdersCount, setOpenOrdersCount] = useState<number | null>(null);
+  const [openOrdersLoading, setOpenOrdersLoading] = useState(false);
 
   const [editProductId, setEditProductId] = useState<string | null>(null);
   const [editProductDraft, setEditProductDraft] = useState<ProductDraft | null>(null);
@@ -163,6 +175,16 @@ export default function OpenSalesWizard({ onFocusChange }: OpenSalesWizardProps)
     [selectedDistribution],
   );
 
+  const openDates = useMemo(
+    () => (openDistribution?.dates ?? []).slice(0, 3).map((d) => d.toDate()),
+    [openDistribution],
+  );
+
+  const nextDates = useMemo(
+    () => (nextDistribution?.dates ?? []).slice(0, 3).map((d) => d.toDate()),
+    [nextDistribution],
+  );
+
   const selectedProducers = useMemo(
     () => producers.filter((producer) => selectedProducerIds.includes(producer.id)),
     [producers, selectedProducerIds],
@@ -191,6 +213,50 @@ export default function OpenSalesWizard({ onFocusChange }: OpenSalesWizardProps)
   }, [variants]);
 
   const totalSteps = 2 + producerSteps.length + 1;
+  const recapRows = useMemo(() => {
+    if (!dates.length) return [];
+    const dateLabels = dates.map((date) => shortDate(date));
+    const rows: {
+      producerName: string;
+      productName: string;
+      variants: string;
+      dates: string;
+    }[] = [];
+
+    selectedProducers.forEach((producer) => {
+      const producerProducts = productsByProducer[producer.id] ?? [];
+      producerProducts.forEach((product) => {
+        const productVariants = variantsByProduct[product.id] ?? [];
+        const enabledDates = new Set<string>();
+        const enabledVariants: string[] = [];
+
+        productVariants.forEach((variant) => {
+          let hasAny = false;
+          dates.forEach((_, index) => {
+            const key = offerKey(product.id, variant.id, index);
+            if (offerDraft[key]?.enabled) {
+              enabledDates.add(dateLabels[index]);
+              hasAny = true;
+            }
+          });
+          if (hasAny) {
+            enabledVariants.push(variant.label || "Variante");
+          }
+        });
+
+        if (!enabledVariants.length) return;
+
+        rows.push({
+          producerName: producer.name ?? "Producteur",
+          productName: product.name ?? "Produit",
+          variants: enabledVariants.join(", "),
+          dates: Array.from(enabledDates).join(" · "),
+        });
+      });
+    });
+
+    return rows;
+  }, [dates, offerDraft, productsByProducer, selectedProducers, variantsByProduct]);
   useEffect(() => {
     const load = async () => {
       setLoading(true);
@@ -275,6 +341,35 @@ export default function OpenSalesWizard({ onFocusChange }: OpenSalesWizardProps)
   }, [step, onFocusChange]);
 
   useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, [step]);
+
+  useEffect(() => {
+    if (!openDistribution?.id) {
+      setOpenOrdersCount(null);
+      return;
+    }
+    const loadOrders = async () => {
+      setOpenOrdersLoading(true);
+      try {
+        const ordersSnap = await getDocs(
+          query(
+            collection(firebaseDb, "orders"),
+            where("distributionId", "==", openDistribution.id),
+          ),
+        );
+        setOpenOrdersCount(ordersSnap.size);
+      } catch {
+        setOpenOrdersCount(null);
+      } finally {
+        setOpenOrdersLoading(false);
+      }
+    };
+    loadOrders().catch(() => {});
+  }, [openDistribution?.id]);
+
+  useEffect(() => {
     if (!currentProducer) return;
     const producerProducts = productsByProducer[currentProducer.id] ?? [];
     if (!producerProducts.length) return;
@@ -289,8 +384,7 @@ export default function OpenSalesWizard({ onFocusChange }: OpenSalesWizardProps)
           dateKeys.forEach((dateValue, index) => {
             const key = offerKey(product.id, variant.id, index);
             if (!next[key]) {
-              const enabled = variantDates.length ? variantDates.includes(dateValue) : true;
-              next[key] = { enabled, limitPerMember: "", limitTotal: "" };
+              next[key] = { enabled: true, limitTotal: "" };
             }
           });
         });
@@ -313,18 +407,34 @@ export default function OpenSalesWizard({ onFocusChange }: OpenSalesWizardProps)
   ) => {
     const key = offerKey(productId, variantId, dateIndex);
     setOfferDraft((prev) => {
-      const current = prev[key] ?? { enabled: false, limitPerMember: "", limitTotal: "" };
+      const current = prev[key] ?? { enabled: false, limitTotal: "" };
       return { ...prev, [key]: { ...current, ...patch } };
     });
   };
 
-  const enableAllDatesForVariant = (productId: string, variantId: string) => {
-    dates.forEach((_, index) => updateOfferDraft(productId, variantId, index, { enabled: true }));
-  };
-
-  const enableAllDatesForProduct = (productId: string) => {
-    const productVariants = variantsByProduct[productId] ?? [];
-    productVariants.forEach((variant) => enableAllDatesForVariant(productId, variant.id));
+  const addVariantForProduct = (productId: string) => {
+    const tempId = `temp-${productId}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const dateKeys = dates.map((date) => dateKey(date));
+    setVariants((prev) => [
+      ...prev,
+      {
+        id: tempId,
+        productId,
+        label: "",
+        price: 0,
+        activeDates: dateKeys,
+      },
+    ]);
+    setOfferDraft((prev) => {
+      const next = { ...prev };
+      dateKeys.forEach((_, index) => {
+        const key = offerKey(productId, tempId, index);
+        if (!next[key]) {
+          next[key] = { enabled: true, limitTotal: "" };
+        }
+      });
+      return next;
+    });
   };
 
   const openEditProduct = (product: Product) => {
@@ -426,7 +536,6 @@ export default function OpenSalesWizard({ onFocusChange }: OpenSalesWizardProps)
       const product = productMap[productId];
       if (!product) return;
       const dateIndex = Number(dateIndexRaw);
-      const limitPerMember = draft.limitPerMember ? Number(draft.limitPerMember) : 0;
       const limitTotal = draft.limitTotal ? Number(draft.limitTotal) : 0;
 
       const ref = doc(collection(distRef, "offerItems"));
@@ -435,7 +544,6 @@ export default function OpenSalesWizard({ onFocusChange }: OpenSalesWizardProps)
         productId: product.id,
         variantId: variant.id,
         dateIndex,
-        limitPerMember,
         limitTotal,
         price: variant.price,
         title: product.name,
@@ -456,7 +564,6 @@ export default function OpenSalesWizard({ onFocusChange }: OpenSalesWizardProps)
       setMessage("");
       await saveVariantsForProducer(currentProducer.id);
       await saveOffersForProducer(currentProducer.id);
-      setMessage(`${currentProducer.name ?? "Producteur"} enregistre.`);
     } catch (error) {
       const err = error instanceof Error ? error.message : "Erreur inconnue.";
       setMessage(err);
@@ -579,6 +686,9 @@ export default function OpenSalesWizard({ onFocusChange }: OpenSalesWizardProps)
       });
       await batch.commit();
       setMessage("Vente ouverte.");
+      setTimeout(() => {
+        router.push("/admin");
+      }, 400);
     } catch (error) {
       const err = error instanceof Error ? error.message : "Erreur inconnue.";
       setMessage(err);
@@ -631,39 +741,59 @@ export default function OpenSalesWizard({ onFocusChange }: OpenSalesWizardProps)
 
   if (loading) {
     return (
-      <div className="rounded-3xl border border-clay/70 bg-white/80 p-8 shadow-card">
+      <div className="rounded-none border border-clay/70 bg-white/80 p-8 shadow-card">
         <p className="text-sm text-ink/70">Chargement...</p>
       </div>
     );
   }
   return (
-    <div className="rounded-3xl border border-clay/70 bg-white/90 p-8 shadow-card">
+    <div className="rounded-none border border-clay/70 bg-white/90 p-8 shadow-card">
       <div className="flex flex-col gap-3">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-moss">
-          Etape {Math.min(step + 1, totalSteps)} / {totalSteps}
-        </p>
-        <h2 className="font-serif text-3xl">{stepTitle}</h2>
-        {message ? <p className="text-sm text-ink/70">{message}</p> : null}
+        {step === totalSteps - 1 ? (
+          <>
+            <h2 className="font-serif text-3xl">Recapitulatif avant ouverture</h2>
+            <p className="text-sm text-ink/70">
+              Verifie rapidement la selection, puis ouvre la vente.
+            </p>
+            {message ? <p className="text-sm text-ink/70">{message}</p> : null}
+          </>
+        ) : (
+          <>
+            {step > 0 ? (
+              <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-moss">
+                Etape {step} / {Math.max(1, totalSteps - 1)}
+              </p>
+            ) : null}
+            <h2 className="font-serif text-3xl">{stepTitle}</h2>
+            {message ? <p className="text-sm text-ink/70">{message}</p> : null}
+          </>
+        )}
       </div>
 
       {step === 0 ? (
-        <div className="mt-6 flex flex-col gap-4">
+        <div className="mt-6">
           {openDistribution ? (
-            <div className="rounded-2xl border border-amber-200/60 bg-amber-50/80 p-4">
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-amber-700">
+            <div className="border border-clay/70 bg-white/90 p-5">
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">
                 Vente ouverte
               </p>
-              <p className="mt-2 text-sm text-amber-800">
-                {distributionLabel(openDistribution)}. Tu dois la fermer avant d&apos;en ouvrir une
-                nouvelle.
-              </p>
-              <div className="mt-3 flex flex-wrap gap-2">
-                <button
-                  className="rounded-full border border-amber-300 bg-white px-4 py-2 text-xs font-semibold text-amber-800"
-                  onClick={closeOpenSale}
-                >
-                  Fermer la vente
-                </button>
+              <div className="mt-2 flex flex-wrap items-center justify-between gap-4">
+                <div>
+                  <p className="text-sm text-ink/70">{distributionLabel(openDistribution)}</p>
+                  <div className="mt-2 flex flex-wrap gap-2 text-xs text-ink/60">
+                    {openDates.map((date, index) => (
+                      <span key={index} className="border border-clay/50 px-2 py-0.5">
+                        {shortDate(date)}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+                <div className="text-right text-xs text-ink/60">
+                  <p>Commandes: {openOrdersLoading ? "..." : openOrdersCount ?? "—"}</p>
+                  <p>J-{daysUntil(openDates[0]) ?? "—"} avant la premiere distribution</p>
+                </div>
+              </div>
+              <div className="mt-4 flex flex-wrap gap-2">
                 <button
                   className="rounded-full border border-ink/20 bg-white px-4 py-2 text-xs font-semibold text-ink"
                   onClick={() => {
@@ -671,63 +801,52 @@ export default function OpenSalesWizard({ onFocusChange }: OpenSalesWizardProps)
                     setStep(2);
                   }}
                 >
-                  Modifier la vente ouverte
+                  Modifier la vente
+                </button>
+                <button
+                  className="rounded-full border border-amber-300 bg-white px-4 py-2 text-xs font-semibold text-amber-800"
+                  onClick={closeOpenSale}
+                >
+                  Fermer la vente
                 </button>
               </div>
             </div>
-          ) : null}
-          <div className="rounded-2xl border border-clay/70 bg-white/80 p-4">
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">
-              Prochaine distribution
-            </p>
-            {nextDistribution ? (
-              <>
-                <p className="mt-2 text-sm text-ink/70">
-                  {distributionLabel(nextDistribution)}
-                </p>
-                <div className="mt-3 flex flex-wrap gap-2 text-xs text-ink/70">
-                  {(nextDistribution.dates ?? []).slice(0, 3).map((date, index) => (
-                    <span key={index} className="rounded-full border border-clay/70 px-2 py-0.5">
-                      {shortDate(date.toDate())}
-                    </span>
-                  ))}
-                </div>
-                {openDistribution ? (
-                  <p className="mt-2 text-xs text-ink/50">
-                    La vente actuelle doit etre fermee avant d&apos;ouvrir celle-ci.
-                  </p>
-                ) : null}
-                <div className="mt-4">
-                  <button
-                    className="rounded-full bg-ink px-5 py-2 text-sm font-semibold text-stone"
-                    onClick={goNext}
-                    disabled={Boolean(openDistribution)}
-                  >
-                    Ouvrir la vente
-                  </button>
-                </div>
-              </>
-            ) : (
-              <p className="mt-2 text-sm text-ink/70">Aucune distribution planifiee.</p>
-            )}
-          </div>
-        <div className="rounded-2xl border border-clay/70 bg-white/80 p-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">
-            {openDistribution ? "Vente ouverte" : "Aucune vente ouverte"}
-          </p>
-          {openDistribution ? (
-            <p className="mt-2 text-sm text-ink/70">La vente est deja ouverte.</p>
           ) : (
-            <p className="mt-2 text-sm text-ink/70">
-              Ouvrir la vente. La prochaine distribution est selectionnee automatiquement.
-            </p>
+            <div className="border border-clay/70 bg-white/90 p-5">
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">
+                Aucune vente ouverte
+              </p>
+              {nextDistribution ? (
+                <>
+                  <p className="mt-2 text-sm text-ink/70">
+                    Prochaine distribution: {distributionLabel(nextDistribution)}
+                  </p>
+                  <div className="mt-2 flex flex-wrap gap-2 text-xs text-ink/60">
+                    {nextDates.map((date, index) => (
+                      <span key={index} className="border border-clay/50 px-2 py-0.5">
+                        {shortDate(date)}
+                      </span>
+                    ))}
+                  </div>
+                  <div className="mt-4">
+                    <button
+                      className="rounded-full bg-ink px-5 py-2 text-sm font-semibold text-stone"
+                      onClick={goNext}
+                    >
+                      Ouvrir la vente
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <p className="mt-2 text-sm text-ink/70">Aucune distribution planifiee.</p>
+              )}
+            </div>
           )}
-        </div>
         </div>
       ) : null}
 
       {step === 1 ? (
-        <div className="mt-6 rounded-2xl border border-clay/70 bg-white/80 p-4">
+        <div className="mt-6 rounded-none border border-clay/70 bg-white/80 p-4">
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">Producteurs</p>
           <div className="mt-3 overflow-x-auto">
             <table className="min-w-full text-left text-sm">
@@ -764,7 +883,7 @@ export default function OpenSalesWizard({ onFocusChange }: OpenSalesWizardProps)
 
       {step >= 2 && step < 2 + producerSteps.length && currentProducer ? (
         <div className="mt-6 flex flex-col gap-6">
-          <div className="rounded-2xl border border-clay/70 bg-white/90 p-4">
+          <div className="rounded-none border border-clay/70 bg-white/90 p-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">Producteur</p>
@@ -779,7 +898,7 @@ export default function OpenSalesWizard({ onFocusChange }: OpenSalesWizardProps)
             </div>
             <div className="mt-3 flex flex-wrap gap-2 text-xs text-ink/60">
               {dates.map((date, index) => (
-                <span key={index} className="rounded-full border border-clay/70 bg-white px-3 py-1">
+                <span key={index} className="rounded-none border border-clay/70 bg-white px-3 py-1">
                   {dateLabel(date)}
                 </span>
               ))}
@@ -792,18 +911,18 @@ export default function OpenSalesWizard({ onFocusChange }: OpenSalesWizardProps)
             currentProducerProducts.map((product) => {
               const productVariants = variantsByProduct[product.id] ?? [];
               return (
-                <div key={product.id} className="rounded-2xl border border-clay/70 bg-white/95 p-5 shadow-card">
+                <div key={product.id} className="rounded-none border border-clay/70 bg-white/95 p-5 shadow-card">
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
                       <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">Produit</p>
                       <h4 className="font-serif text-xl">{product.name}</h4>
                     </div>
                     <div className="flex items-center gap-3">
-                  <button
-                    className="rounded-full border border-ink/20 px-3 py-1 text-[11px] font-semibold"
-                    onClick={() => enableAllDatesForProduct(product.id)}
-                  >
-                    Tout cocher
+                      <button
+                        className="rounded-full border border-ink/20 px-3 py-1 text-[11px] font-semibold"
+                        onClick={() => addVariantForProduct(product.id)}
+                      >
+                        Ajouter une variante
                       </button>
                       <button
                         className="rounded-full border border-ink/20 px-3 py-1 text-[11px] font-semibold"
@@ -814,7 +933,7 @@ export default function OpenSalesWizard({ onFocusChange }: OpenSalesWizardProps)
                     </div>
                   </div>
 
-                  <div className="mt-4 overflow-x-auto rounded-lg border border-clay/70 bg-white">
+                  <div className="mt-4 overflow-x-auto rounded-none border border-clay/70 bg-white">
                     <div
                       className="min-w-[720px] border-b border-clay/70 bg-stone px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-ink/60"
                       style={{
@@ -843,7 +962,7 @@ export default function OpenSalesWizard({ onFocusChange }: OpenSalesWizardProps)
                           >
                             <div>
                               <input
-                                className="w-full rounded-lg border border-ink/20 bg-white px-2 py-1 text-sm"
+                                className="w-full rounded-none border border-ink/20 bg-white px-2 py-1 text-sm"
                                 value={variant.label}
                                 onChange={(event) => {
                                   const value = event.target.value;
@@ -854,15 +973,9 @@ export default function OpenSalesWizard({ onFocusChange }: OpenSalesWizardProps)
                                   );
                                 }}
                               />
-                              <button
-                                className="mt-1 rounded-full border border-ink/20 px-2 py-0.5 text-[10px] font-semibold"
-                                onClick={() => enableAllDatesForVariant(product.id, variant.id)}
-                              >
-                                Tout cocher
-                              </button>
                             </div>
                             <input
-                              className="rounded-lg border border-ink/20 bg-white px-2 py-1 text-sm"
+                              className="rounded-none border border-ink/20 bg-white px-2 py-1 text-sm"
                               type="number"
                               min={0}
                               step="0.1"
@@ -881,7 +994,6 @@ export default function OpenSalesWizard({ onFocusChange }: OpenSalesWizardProps)
                                 const key = offerKey(product.id, variant.id, dateIndex);
                                 const draft = offerDraft[key] ?? {
                                   enabled: false,
-                                  limitPerMember: "",
                                   limitTotal: "",
                                 };
                                 return (
@@ -898,32 +1010,18 @@ export default function OpenSalesWizard({ onFocusChange }: OpenSalesWizardProps)
                                       />
                                       Actif
                                     </label>
-                                    <div className="grid grid-cols-2 gap-2">
-                                      <input
-                                        type="number"
-                                        min={0}
-                                        placeholder="Limite adh."
-                                        className="rounded-md border border-ink/20 bg-white px-2 py-1 text-[11px]"
-                                        value={draft.limitPerMember}
-                                        onChange={(event) =>
-                                          updateOfferDraft(product.id, variant.id, dateIndex, {
-                                            limitPerMember: event.target.value,
-                                          })
-                                        }
-                                      />
-                                      <input
-                                        type="number"
-                                        min={0}
-                                        placeholder="Limite totale"
-                                        className="rounded-md border border-ink/20 bg-white px-2 py-1 text-[11px]"
-                                        value={draft.limitTotal}
-                                        onChange={(event) =>
-                                          updateOfferDraft(product.id, variant.id, dateIndex, {
-                                            limitTotal: event.target.value,
-                                          })
-                                        }
-                                      />
-                                    </div>
+                                    <input
+                                      type="number"
+                                      min={0}
+                                      placeholder="Limite totale"
+                                      className="rounded-none border border-ink/20 bg-white px-2 py-1 text-[11px]"
+                                      value={draft.limitTotal}
+                                      onChange={(event) =>
+                                        updateOfferDraft(product.id, variant.id, dateIndex, {
+                                          limitTotal: event.target.value,
+                                        })
+                                      }
+                                    />
                                   </div>
                                 );
                               })
@@ -943,14 +1041,46 @@ export default function OpenSalesWizard({ onFocusChange }: OpenSalesWizardProps)
       ) : null}
 
       {step === totalSteps - 1 ? (
-        <div className="mt-6 rounded-2xl border border-clay/70 bg-white/90 p-6">
-          <h3 className="font-serif text-2xl">Vente prete</h3>
-          <p className="mt-2 text-sm text-ink/70">
-            Tu peux ouvrir la vente maintenant ou revenir pour ajuster un producteur.
-          </p>
-          <div className="mt-4 flex flex-wrap gap-3">
+        <div className="mt-6 bg-white/90 p-6">
+          <div className="mt-4 overflow-x-auto bg-white">
+            <table className="min-w-full text-left text-xs">
+              <thead className="border-b border-clay/50 text-[10px] uppercase tracking-[0.2em] text-ink/60">
+                <tr>
+                  <th className="px-2 py-2">Producteur</th>
+                  <th className="px-2 py-2">Produit</th>
+                  <th className="px-2 py-2">Variantes</th>
+                  <th className="px-2 py-2">Dates</th>
+                </tr>
+              </thead>
+              <tbody>
+                {recapRows.length ? (
+                  recapRows.map((row, index) => (
+                    <tr key={`${row.productName}-${index}`} className="border-b border-clay/50">
+                      <td className="px-2 py-1 font-semibold text-ink">{row.producerName}</td>
+                      <td className="px-2 py-1 text-ink">{row.productName}</td>
+                      <td className="px-2 py-1 text-ink/70">{row.variants}</td>
+                      <td className="px-2 py-1 text-ink/70">{row.dates || "-"}</td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td className="px-2 py-2 text-ink/70" colSpan={4}>
+                      Aucun produit selectionne.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+          <div className="mt-4 flex flex-wrap items-center gap-3">
             <button
-              className="rounded-full bg-ink px-5 py-2 text-sm font-semibold text-stone"
+              className="rounded-full border border-ink/20 px-5 py-2 text-sm font-semibold"
+              onClick={goPrev}
+            >
+              Precedent
+            </button>
+            <button
+              className="ml-auto rounded-full bg-ink px-5 py-2 text-sm font-semibold text-stone"
               onClick={openSale}
               disabled={status === "opening"}
             >
@@ -984,13 +1114,13 @@ export default function OpenSalesWizard({ onFocusChange }: OpenSalesWizardProps)
 
       {editProductId && editProductDraft ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-6">
-          <div className="w-full max-w-2xl rounded-3xl border border-clay/70 bg-white p-6 shadow-card">
+          <div className="w-full max-w-2xl rounded-none border border-clay/70 bg-white p-6 shadow-card">
             <h3 className="font-serif text-2xl">Modifier le produit</h3>
             <div className="mt-4 grid gap-4 md:grid-cols-2">
               <label className="flex flex-col gap-2 text-sm font-semibold text-ink/70">
                 Nom
                 <input
-                  className="rounded-lg border border-ink/20 px-3 py-2"
+                  className="rounded-none border border-ink/20 px-3 py-2"
                   value={editProductDraft.name}
                   onChange={(event) =>
                     setEditProductDraft((prev) => (prev ? { ...prev, name: event.target.value } : prev))
@@ -1000,7 +1130,7 @@ export default function OpenSalesWizard({ onFocusChange }: OpenSalesWizardProps)
               <label className="flex flex-col gap-2 text-sm font-semibold text-ink/70">
                 Image URL
                 <input
-                  className="rounded-lg border border-ink/20 px-3 py-2"
+                  className="rounded-none border border-ink/20 px-3 py-2"
                   value={editProductDraft.imageUrl}
                   onChange={(event) =>
                     setEditProductDraft((prev) => (prev ? { ...prev, imageUrl: event.target.value } : prev))
@@ -1010,7 +1140,7 @@ export default function OpenSalesWizard({ onFocusChange }: OpenSalesWizardProps)
               <label className="flex flex-col gap-2 text-sm font-semibold text-ink/70 md:col-span-2">
                 Description
                 <textarea
-                  className="min-h-[120px] rounded-lg border border-ink/20 px-3 py-2"
+                  className="min-h-[120px] rounded-none border border-ink/20 px-3 py-2"
                   value={editProductDraft.description}
                   onChange={(event) =>
                     setEditProductDraft((prev) => (prev ? { ...prev, description: event.target.value } : prev))
@@ -1030,7 +1160,7 @@ export default function OpenSalesWizard({ onFocusChange }: OpenSalesWizardProps)
               <label className="flex flex-col gap-2 text-sm font-semibold text-ink/70">
                 Categorie
                 <select
-                  className="rounded-lg border border-ink/20 px-3 py-2"
+                  className="rounded-none border border-ink/20 px-3 py-2"
                   value={editProductDraft.categoryId}
                   onChange={(event) =>
                     setEditProductDraft((prev) => (prev ? { ...prev, categoryId: event.target.value } : prev))
@@ -1068,13 +1198,13 @@ export default function OpenSalesWizard({ onFocusChange }: OpenSalesWizardProps)
 
       {addProductOpen && currentProducer ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-6">
-          <div className="w-full max-w-2xl rounded-3xl border border-clay/70 bg-white p-6 shadow-card">
+          <div className="w-full max-w-2xl rounded-none border border-clay/70 bg-white p-6 shadow-card">
             <h3 className="font-serif text-2xl">Ajouter un produit</h3>
             <div className="mt-4 grid gap-4 md:grid-cols-2">
               <label className="flex flex-col gap-2 text-sm font-semibold text-ink/70">
                 Nom
                 <input
-                  className="rounded-lg border border-ink/20 px-3 py-2"
+                  className="rounded-none border border-ink/20 px-3 py-2"
                   value={addProductDraft.name}
                   onChange={(event) => setAddProductDraft((prev) => ({ ...prev, name: event.target.value }))}
                 />
@@ -1082,7 +1212,7 @@ export default function OpenSalesWizard({ onFocusChange }: OpenSalesWizardProps)
               <label className="flex flex-col gap-2 text-sm font-semibold text-ink/70">
                 Image URL
                 <input
-                  className="rounded-lg border border-ink/20 px-3 py-2"
+                  className="rounded-none border border-ink/20 px-3 py-2"
                   value={addProductDraft.imageUrl}
                   onChange={(event) => setAddProductDraft((prev) => ({ ...prev, imageUrl: event.target.value }))}
                 />
@@ -1090,7 +1220,7 @@ export default function OpenSalesWizard({ onFocusChange }: OpenSalesWizardProps)
               <label className="flex flex-col gap-2 text-sm font-semibold text-ink/70 md:col-span-2">
                 Description
                 <textarea
-                  className="min-h-[120px] rounded-lg border border-ink/20 px-3 py-2"
+                  className="min-h-[120px] rounded-none border border-ink/20 px-3 py-2"
                   value={addProductDraft.description}
                   onChange={(event) => setAddProductDraft((prev) => ({ ...prev, description: event.target.value }))}
                 />
@@ -1106,7 +1236,7 @@ export default function OpenSalesWizard({ onFocusChange }: OpenSalesWizardProps)
               <label className="flex flex-col gap-2 text-sm font-semibold text-ink/70">
                 Categorie
                 <select
-                  className="rounded-lg border border-ink/20 px-3 py-2"
+                  className="rounded-none border border-ink/20 px-3 py-2"
                   value={addProductDraft.categoryId}
                   onChange={(event) => setAddProductDraft((prev) => ({ ...prev, categoryId: event.target.value }))}
                 >
@@ -1121,7 +1251,7 @@ export default function OpenSalesWizard({ onFocusChange }: OpenSalesWizardProps)
               <label className="flex flex-col gap-2 text-sm font-semibold text-ink/70">
                 Variante
                 <input
-                  className="rounded-lg border border-ink/20 px-3 py-2"
+                  className="rounded-none border border-ink/20 px-3 py-2"
                   value={addProductDraft.variantLabel}
                   onChange={(event) => setAddProductDraft((prev) => ({ ...prev, variantLabel: event.target.value }))}
                 />
@@ -1132,7 +1262,7 @@ export default function OpenSalesWizard({ onFocusChange }: OpenSalesWizardProps)
                   type="number"
                   min={0}
                   step="0.1"
-                  className="rounded-lg border border-ink/20 px-3 py-2"
+                  className="rounded-none border border-ink/20 px-3 py-2"
                   value={addProductDraft.variantPrice}
                   onChange={(event) => setAddProductDraft((prev) => ({ ...prev, variantPrice: event.target.value }))}
                 />

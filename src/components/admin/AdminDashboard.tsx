@@ -46,6 +46,7 @@ export default function AdminDashboard({ children, focusMode = false }: AdminDas
     recentDistributions: [] as { id: string; label: string; total: number }[],
   });
   const [openDistribution, setOpenDistribution] = useState<Distribution | null>(null);
+  const [nextDistribution, setNextDistribution] = useState<Distribution | null>(null);
   const [nextDistributions, setNextDistributions] = useState<string[]>([]);
 
   useEffect(() => {
@@ -72,6 +73,13 @@ export default function AdminDashboard({ children, focusMode = false }: AdminDas
       setOpenDistribution(openDist);
 
       const today = new Date();
+      const nextDist =
+        distItems.find((dist) => {
+          const firstDate = dist.dates?.[0]?.toDate?.() ?? new Date(0);
+          return dist.status !== "open" && firstDate >= today;
+        }) ?? null;
+      setNextDistribution(nextDist);
+
       const upcoming = distItems
         .filter((dist) => dist.dates?.[0]?.toDate?.() && dist.dates![0]!.toDate!() > today)
         .slice(0, 3)
@@ -138,6 +146,11 @@ export default function AdminDashboard({ children, focusMode = false }: AdminDas
     return openDistribution.dates.slice(0, 3).map((date) => date.toDate?.()).filter(Boolean) as Date[];
   }, [openDistribution]);
 
+  const nextDates = useMemo(() => {
+    if (!nextDistribution?.dates) return [];
+    return nextDistribution.dates.slice(0, 3).map((date) => date.toDate?.()).filter(Boolean) as Date[];
+  }, [nextDistribution]);
+
   return (
     <div className="flex flex-col gap-6">
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -157,6 +170,49 @@ export default function AdminDashboard({ children, focusMode = false }: AdminDas
             <p className="mt-2 font-serif text-3xl">{card.value}</p>
           </div>
         ))}
+      </div>
+
+      <div className="rounded-2xl border border-clay/70 bg-white/90 p-6 shadow-card">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-ink/60">Vente</p>
+        {openDistribution ? (
+          <>
+            <p className="mt-2 text-sm text-ink/70">{distributionLabel(openDistribution)}</p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {openDates.map((date) => (
+                <span
+                  key={dateKey(date)}
+                  className="rounded-full border border-clay/70 bg-white px-3 py-1 text-xs font-semibold text-ink/70"
+                >
+                  {date.toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}
+                </span>
+              ))}
+            </div>
+            <p className="mt-3 text-xs text-ink/60">Vente en cours.</p>
+          </>
+        ) : nextDistribution ? (
+          <>
+            <p className="mt-2 text-sm text-ink/70">{distributionLabel(nextDistribution)}</p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {nextDates.map((date) => (
+                <span
+                  key={dateKey(date)}
+                  className="rounded-full border border-clay/70 bg-white px-3 py-1 text-xs font-semibold text-ink/70"
+                >
+                  {date.toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}
+                </span>
+              ))}
+            </div>
+            <p className="mt-3 text-xs text-ink/60">Prochaine vente a preparer.</p>
+          </>
+        ) : (
+          <p className="mt-2 text-sm text-ink/70">Aucune distribution planifiee.</p>
+        )}
+        <a
+          className="mt-4 inline-flex rounded-full bg-ink px-5 py-2 text-sm font-semibold text-stone"
+          href="/admin/vente"
+        >
+          {openDistribution ? "Voir la vente" : "Ouvrir la vente"}
+        </a>
       </div>
 
       {children ? <div>{children}</div> : null}

@@ -44,7 +44,6 @@ type Variant = {
 
 type OfferItem = {
   productId?: string;
-  limitPerMember?: number;
   limitTotal?: number;
 };
 
@@ -161,15 +160,12 @@ export default function CatalogueGrid() {
         const offers = offerSnap?.docs.map((docSnap) => docSnap.data() as OfferItem) ?? [];
         offers.forEach((offer) => {
           if (!offer.productId) return;
-          const entry =
-            availability[offer.productId] ?? { dateKeys: [] };
+          const entry = availability[offer.productId] ?? { dateKeys: [] };
           const limitTotal = Number(offer.limitTotal ?? 0);
-          const limitPerMember = Number(offer.limitPerMember ?? 0);
-          if (limitTotal > 0 || limitPerMember > 0) {
+          if (limitTotal > 0) {
             entry.hasLimit = true;
-            const limitValue = limitTotal > 0 ? limitTotal : limitPerMember;
-            if (!entry.minLimit || limitValue < entry.minLimit) {
-              entry.minLimit = limitValue;
+            if (!entry.minLimit || limitTotal < entry.minLimit) {
+              entry.minLimit = limitTotal;
             }
           }
           availability[offer.productId] = entry;

@@ -48,14 +48,12 @@ type OfferItem = {
   variantId: string;
   producerId: string;
   dateIndex: number;
-  limitPerMember?: number;
   limitTotal?: number;
   price?: number;
 };
 
 type OfferDraft = {
   enabled: boolean;
-  limitPerMember: string;
   limitTotal: string;
 };
 
@@ -225,7 +223,6 @@ export default function OpenSalesPanel() {
       const key = `${offer.variantId}:${offer.dateIndex}`;
       nextDraft[key] = {
         enabled: true,
-        limitPerMember: offer.limitPerMember !== undefined ? String(offer.limitPerMember) : "",
         limitTotal: offer.limitTotal !== undefined ? String(offer.limitTotal) : "",
       };
     });
@@ -256,7 +253,7 @@ export default function OpenSalesPanel() {
   const updateOfferDraft = (variantId: string, dateIndex: number, patch: Partial<OfferDraft>) => {
     const key = `${variantId}:${dateIndex}`;
     setOfferDraft((prev) => {
-      const current = prev[key] ?? { enabled: false, limitPerMember: "", limitTotal: "" };
+      const current = prev[key] ?? { enabled: false, limitTotal: "" };
       return {
         ...prev,
         [key]: { ...current, ...patch },
@@ -400,7 +397,6 @@ export default function OpenSalesPanel() {
         if (!product) return;
         if (!selectedProducerIds.includes(product.producerId)) return;
 
-        const limitPerMember = draft.limitPerMember ? Number(draft.limitPerMember) : 0;
         const limitTotal = draft.limitTotal ? Number(draft.limitTotal) : 0;
 
         const ref = doc(collection(distRef, "offerItems"));
@@ -409,7 +405,6 @@ export default function OpenSalesPanel() {
           productId: product.id,
           variantId: variant.id,
           dateIndex,
-          limitPerMember,
           limitTotal,
           price: variant.price,
           title: product.name,
@@ -620,12 +615,6 @@ export default function OpenSalesPanel() {
                               <h4 className="font-serif text-xl">{product.name}</h4>
                             </div>
                             <div className="flex items-center gap-3">
-                              <button
-                                className="rounded-full border border-ink/20 px-3 py-1 text-[11px] font-semibold"
-                                onClick={() => enableAllDatesForProduct(product.id)}
-                              >
-                                Tout cocher
-                              </button>
                               <span className="text-xs text-ink/60">
                                 {product.isOrganic ? "Bio" : "Conventionnel"}
                               </span>
@@ -659,12 +648,6 @@ export default function OpenSalesPanel() {
                                 >
                                   <div>
                                     <p className="text-sm font-semibold text-ink">{variant.label}</p>
-                                    <button
-                                      className="mt-1 rounded-full border border-ink/20 px-2 py-0.5 text-[10px] font-semibold"
-                                      onClick={() => enableAllDatesForVariant(variant.id)}
-                                    >
-                                      Tout cocher
-                                    </button>
                                   </div>
                                   <div className="text-sm font-semibold">{variant.price.toFixed(2)} EUR</div>
                                   {dates.length ? (
@@ -672,7 +655,6 @@ export default function OpenSalesPanel() {
                                       const key = `${variant.id}:${dateIndex}`;
                                       const draft = offerDraft[key] ?? {
                                         enabled: false,
-                                        limitPerMember: "",
                                         limitTotal: "",
                                       };
                                       return (
@@ -689,32 +671,18 @@ export default function OpenSalesPanel() {
                                             />
                                             Actif
                                           </label>
-                                          <div className="grid grid-cols-2 gap-2">
-                                            <input
-                                              type="number"
-                                              min={0}
-                                              placeholder="Limite adh."
-                                              className="rounded-md border border-ink/20 bg-white px-2 py-1 text-[11px]"
-                                              value={draft.limitPerMember}
-                                              onChange={(event) =>
-                                                updateOfferDraft(variant.id, dateIndex, {
-                                                  limitPerMember: event.target.value,
-                                                })
-                                              }
-                                            />
-                                            <input
-                                              type="number"
-                                              min={0}
-                                              placeholder="Limite totale"
-                                              className="rounded-md border border-ink/20 bg-white px-2 py-1 text-[11px]"
-                                              value={draft.limitTotal}
-                                              onChange={(event) =>
-                                                updateOfferDraft(variant.id, dateIndex, {
-                                                  limitTotal: event.target.value,
-                                                })
-                                              }
-                                            />
-                                          </div>
+                                          <input
+                                            type="number"
+                                            min={0}
+                                            placeholder="Limite totale"
+                                            className="rounded-md border border-ink/20 bg-white px-2 py-1 text-[11px]"
+                                            value={draft.limitTotal}
+                                            onChange={(event) =>
+                                              updateOfferDraft(variant.id, dateIndex, {
+                                                limitTotal: event.target.value,
+                                              })
+                                            }
+                                          />
                                         </div>
                                       );
                                     })

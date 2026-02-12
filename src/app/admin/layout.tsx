@@ -20,6 +20,12 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
               </a>
               <a
                 className="rounded-full border border-ink/10 px-4 py-2 transition hover:border-ink/40"
+                href="/admin/vente"
+              >
+                Vente
+              </a>
+              <a
+                className="rounded-full border border-ink/10 px-4 py-2 transition hover:border-ink/40"
                 href="/admin/members"
               >
                 Adherents
