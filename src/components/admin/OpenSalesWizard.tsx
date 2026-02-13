@@ -742,7 +742,7 @@ export default function OpenSalesWizard({ onFocusChange }: OpenSalesWizardProps)
   if (loading) {
     return (
       <div className="rounded-none border border-clay/70 bg-white/80 p-8 shadow-card">
-        <p className="text-sm text-ink/70">Chargement</p>
+        <p className="text-sm text-ink/70">Chargement...</p>
       </div>
     );
   }
