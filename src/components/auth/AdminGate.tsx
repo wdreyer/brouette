@@ -8,7 +8,7 @@ export default function AdminGate({ children }: { children: React.ReactNode }) {
   const { user, loading, role, effectiveRole } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
-  const allowReferent = pathname === "/admin/vente" || pathname === "/admin";
+  const allowReferent = pathname.startsWith("/admin");
   const isAllowed =
     Boolean(user) && (role === "admin" || (effectiveRole === "referent" && allowReferent));
 
@@ -22,12 +22,8 @@ export default function AdminGate({ children }: { children: React.ReactNode }) {
       return;
     }
     if (effectiveRole === "referent") {
-      if (pathname === "/admin") {
-        router.replace("/admin/vente");
-        return;
-      }
       if (!allowReferent) {
-        router.replace("/admin/vente");
+        router.replace("/admin");
       }
       return;
     }

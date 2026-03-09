@@ -28,7 +28,7 @@ export default function MemberPage() {
   const params = useParams();
   const memberId = String(params?.memberId ?? "");
   const { role } = useAuth();
-  const isAdmin = role === "admin";
+  const isAdmin = role === "admin" || role === "referent";
   const [member, setMember] = useState<Member | null>(null);
   const [producers, setProducers] = useState<Producer[]>([]);
   const [selectedProducerIds, setSelectedProducerIds] = useState<string[]>([]);

@@ -89,6 +89,7 @@ export default function OpenSalesWizard() {
   const { effectiveRole, effectiveMemberId } = useAuth();
   const isAdmin = effectiveRole === "admin";
   const isReferent = effectiveRole === "referent";
+  const canManageAdmin = isAdmin || isReferent;
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -319,7 +320,7 @@ export default function OpenSalesWizard() {
 
   const validatedCount = rows.filter((row) => row.validatedByReferent).length;
   const pendingCount = Math.max(rows.length - validatedCount, 0);
-  const canOpen = isAdmin && !openDistribution && rows.length > 0 && pendingCount === 0;
+  const canOpen = canManageAdmin && !openDistribution && rows.length > 0 && pendingCount === 0;
   const openStats = openDistribution
     ? orderStats[openDistribution.id] ?? { count: 0, amount: 0 }
     : { count: 0, amount: 0 };
@@ -539,7 +540,7 @@ export default function OpenSalesWizard() {
   };
 
   const closeSale = async () => {
-    if (!openDistribution || !isAdmin) return;
+    if (!openDistribution || !canManageAdmin) return;
     setSaving(true);
     await updateDoc(doc(firebaseDb, "distributionDates", openDistribution.id), {
       status: "finished",
@@ -583,7 +584,7 @@ export default function OpenSalesWizard() {
             </p>
           </div>
           <div className="flex gap-2">
-            {isAdmin && openDistribution ? (
+            {canManageAdmin && openDistribution ? (
               <button
                 className="rounded-md border border-ink/25 px-4 py-2 text-sm font-semibold"
                 onClick={closeSale}
@@ -592,7 +593,7 @@ export default function OpenSalesWizard() {
                 Fermer la vente
               </button>
             ) : null}
-            {isAdmin && !openDistribution ? (
+            {canManageAdmin && !openDistribution ? (
               <button
                 className="rounded-md bg-forest px-5 py-2 text-sm font-semibold text-white disabled:opacity-50"
                 onClick={openSale}
@@ -648,7 +649,7 @@ export default function OpenSalesWizard() {
                 Gerer mes producteurs pour la vente
               </button>
             ) : null}
-            {isAdmin ? (
+            {canManageAdmin ? (
               <button
                 className="rounded-md border border-ink/25 px-4 py-2 text-sm font-semibold"
                 onClick={() => openFlow(rows.map((row) => row.producerId))}
@@ -686,7 +687,7 @@ export default function OpenSalesWizard() {
             <tbody>
               {groups.map((group) =>
                 group.rows.map((row, index) => {
-                  const canEdit = isAdmin || (isReferent && row.referentId === effectiveMemberId);
+                  const canEdit = canManageAdmin;
                   const myProducerIds = rows
                     .filter((item) => item.referentId === effectiveMemberId)
                     .map((item) => item.producerId);

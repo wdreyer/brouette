@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useAuth } from "@/components/auth/AuthProvider";
 
 type NavItem = {
   href: string;
@@ -50,11 +49,11 @@ function Icon({ kind }: { kind: NavItem["icon"] }) {
 
 const adminGroups: NavGroup[] = [
   {
-    label: "Vue",
+    label: "Résumé",
     defaultOpen: true,
     items: [
-      { href: "/admin", label: "Resume", icon: "home" },
-      { href: "/admin/vente", label: "Vente", icon: "sale" },
+      { href: "/admin", label: "Résumé", icon: "home" },
+      { href: "/admin/vente", label: "Ventes", icon: "sale" },
       { href: "/admin/orders", label: "Commandes", icon: "orders" },
     ],
   },
@@ -86,12 +85,7 @@ const adminGroups: NavGroup[] = [
 
 export default function AdminShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const { effectiveRole } = useAuth();
-
-  const isReferentView = effectiveRole === "referent";
-  const groups = isReferentView
-    ? [{ label: "Vente", defaultOpen: true, items: [{ href: "/admin/vente", label: "Vente", icon: "sale" as const }] }]
-    : adminGroups;
+  const groups = adminGroups;
 
   return (
     <div className="admin-app mx-auto flex w-full max-w-[1600px] flex-col gap-4 px-4 py-4 md:px-6 md:py-5">

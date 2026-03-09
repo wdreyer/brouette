@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { collection, getDocs } from "firebase/firestore";
+import { useAuth } from "@/components/auth/AuthProvider";
 import { firebaseDb } from "@/lib/firebase/client";
 import { distributionLabel, pickOpenDistribution } from "@/lib/distributions";
 
@@ -25,6 +26,22 @@ type SaleSummary = {
   totalProducerRows: number;
 };
 
+type MemberProfile = {
+  firstName?: string;
+  lastName?: string;
+};
+
+type ProducerProfile = {
+  name?: string;
+};
+
+type DistributionProducerRow = {
+  producerId: string;
+  referentId?: string | null;
+  active?: boolean;
+  validatedByReferent?: boolean;
+};
+
 function daysUntil(date?: Date | null) {
   if (!date) return null;
   const now = new Date();
@@ -45,8 +62,12 @@ function statusLabel(status?: string) {
 
 export default function AdminDashboard({ children, focusMode = false }: AdminDashboardProps) {
   if (focusMode) return <div>{children}</div>;
+  const { effectiveMemberId, effectiveRole } = useAuth();
 
   const [loading, setLoading] = useState(true);
+  const [viewer, setViewer] = useState<MemberProfile | null>(null);
+  const [producerMap, setProducerMap] = useState<Record<string, ProducerProfile>>({});
+  const [distributionProducerRows, setDistributionProducerRows] = useState<DistributionProducerRow[]>([]);
   const [entityStats, setEntityStats] = useState({
     members: 0,
     producers: 0,
@@ -78,6 +99,21 @@ export default function AdminDashboard({ children, focusMode = false }: AdminDas
         products: productsSnap.size,
         orders: ordersSnap.size,
       });
+      const nextProducerMap: Record<string, ProducerProfile> = {};
+      producersSnap.docs.forEach((docSnap) => {
+        nextProducerMap[docSnap.id] = docSnap.data() as ProducerProfile;
+      });
+      setProducerMap(nextProducerMap);
+      if (effectiveMemberId) {
+        const currentMemberDoc = membersSnap.docs.find((docSnap) => docSnap.id === effectiveMemberId);
+        if (currentMemberDoc) {
+          setViewer(currentMemberDoc.data() as MemberProfile);
+        } else {
+          setViewer(null);
+        }
+      } else {
+        setViewer(null);
+      }
 
       const distributions = distSnap.docs.map((docSnap) => ({
         id: docSnap.id,
@@ -108,6 +144,7 @@ export default function AdminDashboard({ children, focusMode = false }: AdminDas
 
       const targetDistribution = open ?? fallbackDistribution;
       if (!targetDistribution) {
+        setDistributionProducerRows([]);
         setSaleSummary({
           activeProducerCount: 0,
           validatedProducerCount: 0,
@@ -122,12 +159,15 @@ export default function AdminDashboard({ children, focusMode = false }: AdminDas
         collection(firebaseDb, "distributionDates", targetDistribution.id, "producers"),
       );
       const rows = producerRowsSnap.docs.map((docSnap) => {
-        const data = docSnap.data() as { active?: boolean; validatedByReferent?: boolean };
+        const data = docSnap.data() as DistributionProducerRow;
         return {
+          producerId: String(data.producerId ?? docSnap.id),
+          referentId: data.referentId ?? null,
           active: data.active !== false,
           validatedByReferent: data.validatedByReferent === true,
-        };
+        } satisfies DistributionProducerRow;
       });
+      setDistributionProducerRows(rows);
 
       const activeProducerCount = rows.filter((row) => row.active).length;
       const validatedProducerCount = rows.filter(
@@ -144,7 +184,7 @@ export default function AdminDashboard({ children, focusMode = false }: AdminDas
     };
 
     load().catch(() => setLoading(false));
-  }, []);
+  }, [effectiveMemberId]);
 
   const activeDistribution = openDistribution ?? nextDistribution;
   const saleDates = useMemo(
@@ -169,8 +209,78 @@ export default function AdminDashboard({ children, focusMode = false }: AdminDas
     { label: "Jours avant prochaine date", value: daysBefore ?? "-" },
   ];
 
+  const roleLabel =
+    effectiveRole === "admin" ? "Admin" : effectiveRole === "referent" ? "Referent" : "Membre";
+  const fullName = `${viewer?.firstName ?? ""} ${viewer?.lastName ?? ""}`.trim();
+  const referentProducerRows = useMemo(() => {
+    if (effectiveRole !== "referent" || !effectiveMemberId) return [];
+    return distributionProducerRows.filter((row) => row.referentId === effectiveMemberId);
+  }, [distributionProducerRows, effectiveMemberId, effectiveRole]);
+  const referentProducerIds = useMemo(
+    () => referentProducerRows.map((row) => row.producerId).filter(Boolean),
+    [referentProducerRows],
+  );
+  const referentManageAllHref = useMemo(() => {
+    if (!activeDistribution?.id || !referentProducerIds.length) return "";
+    return `/admin/vente/gerer?distributionId=${encodeURIComponent(activeDistribution.id)}&producerIds=${encodeURIComponent(
+      referentProducerIds.join(","),
+    )}&idx=0`;
+  }, [activeDistribution?.id, referentProducerIds]);
+
   return (
     <div className="flex flex-col gap-4">
+      <section className="rounded-[10px] border border-clay/90 bg-clay/25 p-4">
+        <p className="text-sm text-ink/75">
+          Bienvenue {fullName || "Utilisateur"}.
+        </p>
+        <p className="mt-1 text-sm font-semibold text-ink">Role : {roleLabel}</p>
+      </section>
+
+      {effectiveRole === "referent" ? (
+        <section className="rounded-[10px] border border-forest/30 bg-forest/10 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-forest">
+                Vente en cours
+              </p>
+              <p className="mt-1 text-sm text-ink/80">
+                {activeDistribution
+                  ? `${distributionLabel(activeDistribution)} - ${statusLabel(activeDistribution.status)}`
+                  : "Aucune distribution planifiee."}
+              </p>
+            </div>
+            {referentManageAllHref ? (
+              <Link
+                href={referentManageAllHref}
+                className="rounded bg-forest px-4 py-2 text-sm font-semibold text-white"
+              >
+                Gerer tous mes producteurs
+              </Link>
+            ) : null}
+          </div>
+
+          <div className="mt-3 flex flex-wrap gap-2">
+            {referentProducerRows.length ? (
+              referentProducerRows.map((row) => (
+                <Link
+                  key={row.producerId}
+                  href={`/admin/vente/gerer?distributionId=${encodeURIComponent(activeDistribution?.id ?? "")}&producerIds=${encodeURIComponent(row.producerId)}&idx=0`}
+                  className={`rounded-full border px-3 py-1 text-xs font-semibold ${
+                    row.validatedByReferent
+                      ? "border-forest/30 bg-forest/10 text-forest"
+                      : "border-ember/30 bg-ember/10 text-ember"
+                  }`}
+                >
+                  {producerMap[row.producerId]?.name ?? "Producteur"} · {row.validatedByReferent ? "Valide" : "A valider"}
+                </Link>
+              ))
+            ) : (
+              <span className="text-xs text-ink/65">Aucun producteur rattache pour cette distribution.</span>
+            )}
+          </div>
+        </section>
+      ) : null}
+
       <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         {miniCards.map((card) => (
           <article key={card.label} className="rounded-[10px] border border-clay/90 bg-stone p-4">

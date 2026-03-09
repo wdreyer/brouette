@@ -122,7 +122,7 @@ export default function MembersEditor({
   fields,
 }: EditorProps) {
   const { role } = useAuth();
-  const isAdmin = role === "admin";
+  const isAdmin = role === "admin" || role === "referent";
   const [docs, setDocs] = useState<DocEntry[]>([]);
   const [producers, setProducers] = useState<Producer[]>([]);
   const [loading, setLoading] = useState(true);
@@ -481,9 +481,10 @@ export default function MembersEditor({
 
       {editingId ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-6">
-          <div className="w-full max-w-2xl rounded-3xl border border-clay/70 bg-white p-6 shadow-card">
+          <div className="flex max-h-[88vh] w-full max-w-6xl flex-col rounded-3xl border border-clay/70 bg-white p-6 shadow-card">
             <h3 className="font-serif text-2xl">Editer adherent</h3>
-            <div className="mt-4 grid gap-4 md:grid-cols-2">
+            <div className="mt-4 grid flex-1 gap-6 overflow-y-auto pr-1 xl:grid-cols-[1.1fr_1fr]">
+              <div className="grid gap-4 md:grid-cols-2">
                 {fields.map((field) => {
                   const value = getByPath(editDraft, field.path);
                   const inputValue = toInputValue(value, field.type);
@@ -521,108 +522,131 @@ export default function MembersEditor({
                         <select
                           className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
                           value={String(inputValue)}
-                        onChange={(event) => {
-                          const next = { ...editDraft };
-                          setByPath(next, field.path, fromInputValue(event.target.value, field.type));
-                          setEditDraft(next);
-                        }}
-                      >
-                        <option value="true">Oui</option>
-                        <option value="false">Non</option>
-                      </select>
-                    ) : field.type === "date" || field.type === "datetime" ? (
-                      <input
-                        type={field.type === "date" ? "date" : "datetime-local"}
-                        className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
-                        value={String(inputValue)}
-                        onChange={(event) => {
-                          const next = { ...editDraft };
-                          setByPath(next, field.path, fromInputValue(event.target.value, field.type));
-                          setEditDraft(next);
-                        }}
-                      />
-                    ) : (
-                      <input
-                        type={field.type === "number" ? "number" : "text"}
-                        className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
-                        value={String(inputValue)}
-                        onChange={(event) => {
-                          const next = { ...editDraft };
-                          setByPath(next, field.path, fromInputValue(event.target.value, field.type));
-                          setEditDraft(next);
-                        }}
-                      />
-                    )}
-                  </label>
-                );
-              })}
-            </div>
-            {String(getByPath(editDraft, "auth.role") ?? "") === "referent" ? (
-              <div className="mt-6">
-                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">
-                  Producteurs geres
-                </p>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {selectedProducerIds.length ? (
-                    producers
-                      .filter((producer) => selectedProducerIds.includes(producer.id))
-                      .map((producer) => (
-                        <button
-                          key={producer.id}
-                          className="rounded-full border border-ink/15 px-3 py-1 text-xs text-ink/70"
-                          onClick={() =>
-                            setSelectedProducerIds((prev) =>
-                              prev.filter((id) => id !== producer.id),
-                            )
-                          }
+                          onChange={(event) => {
+                            const next = { ...editDraft };
+                            setByPath(next, field.path, fromInputValue(event.target.value, field.type));
+                            setEditDraft(next);
+                          }}
                         >
-                          {producer.name ?? "Producteur"} · retirer
-                        </button>
-                      ))
-                  ) : (
-                    <span className="text-xs text-ink/60">Aucun producteur attribue.</span>
-                  )}
-                </div>
-                <div className="mt-4">
-                  <label className="flex flex-col gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">
-                    Ajouter un producteur
-                    <input
-                      className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm normal-case"
-                      placeholder="Rechercher..."
-                      value={producerSearch}
-                      onChange={(event) => setProducerSearch(event.target.value)}
-                    />
-                  </label>
-                  <div className="mt-2 max-h-40 overflow-y-auto rounded-xl border border-ink/10 bg-white">
-                    {producers
-                      .filter((producer) => !selectedProducerIds.includes(producer.id))
-                      .filter((producer) =>
-                        producerSearch
-                          ? String(producer.name ?? "")
-                              .toLowerCase()
-                              .includes(producerSearch.toLowerCase())
-                          : true,
-                      )
-                      .map((producer) => (
-                        <button
-                          key={producer.id}
-                          className="flex w-full items-center justify-between border-b border-ink/5 px-3 py-2 text-left text-xs text-ink/70 hover:bg-stone/60"
-                          onClick={() =>
-                            setSelectedProducerIds((prev) => [...prev, producer.id])
-                          }
-                        >
-                          <span>{producer.name ?? "Producteur"}</span>
-                          <span className="text-[11px] font-semibold text-ink/50">Ajouter</span>
-                        </button>
-                      ))}
-                    {!producers.filter((producer) => !selectedProducerIds.includes(producer.id)).length ? (
-                      <p className="px-3 py-2 text-xs text-ink/50">Tout est deja attribue.</p>
-                    ) : null}
+                          <option value="true">Oui</option>
+                          <option value="false">Non</option>
+                        </select>
+                      ) : field.type === "date" || field.type === "datetime" ? (
+                        <input
+                          type={field.type === "date" ? "date" : "datetime-local"}
+                          className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
+                          value={String(inputValue)}
+                          onChange={(event) => {
+                            const next = { ...editDraft };
+                            setByPath(next, field.path, fromInputValue(event.target.value, field.type));
+                            setEditDraft(next);
+                          }}
+                        />
+                      ) : (
+                        <input
+                          type={field.type === "number" ? "number" : "text"}
+                          className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
+                          value={String(inputValue)}
+                          onChange={(event) => {
+                            const next = { ...editDraft };
+                            setByPath(next, field.path, fromInputValue(event.target.value, field.type));
+                            setEditDraft(next);
+                          }}
+                        />
+                      )}
+                    </label>
+                  );
+                })}
+              </div>
+
+              {String(getByPath(editDraft, "auth.role") ?? "") === "referent" ? (
+                <div className="flex flex-col gap-4 rounded-2xl border border-ink/10 bg-stone/60 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">
+                    Producteurs geres
+                  </p>
+                  <div className="grid gap-4 lg:grid-cols-2">
+                    <div>
+                      <p className="text-xs font-semibold text-ink/70">
+                        Attribues ({selectedProducerIds.length})
+                      </p>
+                      <div className="mt-2 max-h-64 overflow-y-auto rounded-xl border border-ink/10 bg-white">
+                        {producers
+                          .filter((producer) => selectedProducerIds.includes(producer.id))
+                          .sort((a, b) => String(a.name ?? "").localeCompare(String(b.name ?? "")))
+                          .map((producer) => (
+                            <div
+                              key={producer.id}
+                              className="flex items-center justify-between border-b border-ink/5 px-3 py-2 text-xs"
+                            >
+                              <a
+                                href={`/admin/producers/${producer.id}`}
+                                className="truncate text-ink/80 hover:underline"
+                              >
+                                {producer.name ?? "Producteur"}
+                              </a>
+                              <button
+                                className="ml-3 rounded-md border border-ink/20 px-2 py-1 text-[11px] font-semibold text-ink/70 hover:bg-stone"
+                                onClick={() =>
+                                  setSelectedProducerIds((prev) =>
+                                    prev.filter((id) => id !== producer.id),
+                                  )
+                                }
+                              >
+                                Supprimer
+                              </button>
+                            </div>
+                          ))}
+                        {!selectedProducerIds.length ? (
+                          <p className="px-3 py-2 text-xs text-ink/50">Aucun producteur attribue.</p>
+                        ) : null}
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="flex flex-col gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">
+                        Ajouter un producteur
+                        <input
+                          className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm normal-case"
+                          placeholder="Rechercher..."
+                          value={producerSearch}
+                          onChange={(event) => setProducerSearch(event.target.value)}
+                        />
+                      </label>
+                      <div className="mt-2 max-h-64 overflow-y-auto rounded-xl border border-ink/10 bg-white">
+                        {producers
+                          .filter((producer) => !selectedProducerIds.includes(producer.id))
+                          .filter((producer) =>
+                            producerSearch
+                              ? String(producer.name ?? "")
+                                  .toLowerCase()
+                                  .includes(producerSearch.toLowerCase())
+                              : true,
+                          )
+                          .sort((a, b) => String(a.name ?? "").localeCompare(String(b.name ?? "")))
+                          .map((producer) => (
+                            <button
+                              key={producer.id}
+                              className="flex w-full items-center justify-between border-b border-ink/5 px-3 py-2 text-left text-xs text-ink/70 hover:bg-stone/60"
+                              onClick={() =>
+                                setSelectedProducerIds((prev) =>
+                                  prev.includes(producer.id) ? prev : [...prev, producer.id],
+                                )
+                              }
+                            >
+                              <span className="truncate">{producer.name ?? "Producteur"}</span>
+                              <span className="text-[11px] font-semibold text-ink/55">Ajouter</span>
+                            </button>
+                          ))}
+                        {!producers.filter((producer) => !selectedProducerIds.includes(producer.id)).length ? (
+                          <p className="px-3 py-2 text-xs text-ink/50">Tout est deja attribue.</p>
+                        ) : null}
+                      </div>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ) : null}
-            <div className="mt-6 flex items-center gap-3">
+              ) : null}
+            </div>
+            <div className="mt-4 flex items-center gap-3 border-t border-ink/10 pt-4">
               <button
                 className="rounded-full bg-moss px-5 py-2 text-sm font-semibold text-white"
                 onClick={saveEdit}

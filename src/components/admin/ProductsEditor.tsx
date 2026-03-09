@@ -122,6 +122,13 @@ function formatDate(date: Date) {
   return date.toLocaleDateString("fr-FR", { day: "numeric", month: "long" });
 }
 
+function shortText(value: unknown, max = 90) {
+  const text = String(value ?? "").replace(/\s+/g, " ").trim();
+  if (!text) return "-";
+  if (text.length <= max) return text;
+  return `${text.slice(0, max).trimEnd()}...`;
+}
+
 export default function ProductsEditor({
   collectionName,
   title,
@@ -731,7 +738,7 @@ export default function ProductsEditor({
                   <th className="px-4 py-3">Producteur</th>
                   <th className="px-4 py-3">Categorie</th>
                   <th className="px-4 py-3">Bio</th>
-                  <th className="px-4 py-3">Tags</th>
+                  <th className="px-4 py-3">Description</th>
                   <th className="px-4 py-3">Actions</th>
                 </tr>
               </thead>
@@ -743,18 +750,16 @@ export default function ProductsEditor({
                     )?.label ?? "";
                   const categoryId = String(getByPath(entry.data, "categoryId") ?? "");
                   const categoryLabel = categories.find((category) => category.id === categoryId)?.name ?? "";
-                  const tags = Array.isArray(getByPath(entry.data, "tags"))
-                    ? (getByPath(entry.data, "tags") as string[])
-                    : [];
                   const isOrganic = Boolean(getByPath(entry.data, "isOrganic"));
                   return (
-                    <tr key={entry.id} className="border-b border-clay/60">
+                    <tr
+                      key={entry.id}
+                      className="cursor-pointer border-b border-clay/60 hover:bg-stone/50"
+                      onClick={() => openEdit(entry)}
+                    >
                       <td className="px-4 py-3">
                         <p className="font-semibold text-ink">
                           {String(getByPath(entry.data, "name") ?? "-")}
-                        </p>
-                        <p className="text-xs text-ink/60">
-                          {String(getByPath(entry.data, "description") ?? "")}
                         </p>
                       </td>
                       <td className="px-4 py-3 text-xs text-ink/70">{producerLabel}</td>
@@ -762,19 +767,16 @@ export default function ProductsEditor({
                       <td className="px-4 py-3 text-xs text-ink/70">
                         {isOrganic ? "Bio" : "Conv."}
                       </td>
-                      <td className="px-4 py-3">
-                        <div className="flex flex-wrap gap-1 text-[10px] text-ink/60">
-                          {tags.length ? tags.map((tag) => (
-                            <span key={tag} className="rounded-full bg-clay/70 px-2 py-0.5">
-                              {tag}
-                            </span>
-                          )) : <span>-</span>}
-                        </div>
+                      <td className="max-w-[360px] px-4 py-3 text-xs text-ink/60" title={String(getByPath(entry.data, "description") ?? "")}>
+                        <span className="block truncate">{shortText(getByPath(entry.data, "description"))}</span>
                       </td>
                       <td className="px-4 py-3">
                         <button
                           className="rounded-full border border-ink/20 px-4 py-2 text-xs font-semibold text-ink"
-                          onClick={() => openEdit(entry)}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            openEdit(entry);
+                          }}
                         >
                           Ouvrir la fiche
                         </button>
