@@ -9,7 +9,7 @@ type ProfileData = {
   lastName: string;
   email: string;
   phone: string;
-  membershipStatus: "adherent" | "non-adherent" | "en-attente";
+  membershipStatus: "active" | "inactive";
 };
 
 const DEFAULT_PROFILE: ProfileData = {
@@ -17,7 +17,7 @@ const DEFAULT_PROFILE: ProfileData = {
   lastName: "",
   email: "",
   phone: "",
-  membershipStatus: "en-attente",
+  membershipStatus: "active",
 };
 
 export default function ProfileForm({
@@ -39,12 +39,15 @@ export default function ProfileForm({
       const snap = await getDoc(doc(firebaseDb, "members", userId));
       if (snap.exists()) {
         const data = snap.data() as Partial<ProfileData>;
+        const rawStatus = String(data.membershipStatus ?? "");
+        const normalizedStatus =
+          rawStatus === "inactive" || rawStatus === "non-adherent" ? "inactive" : "active";
         setDraft({
           firstName: data.firstName ?? "",
           lastName: data.lastName ?? "",
           email: data.email ?? "",
           phone: data.phone ?? "",
-          membershipStatus: (data.membershipStatus as ProfileData["membershipStatus"]) ?? "en-attente",
+          membershipStatus: normalizedStatus,
         });
       } else {
         setDraft(DEFAULT_PROFILE);
@@ -125,9 +128,8 @@ export default function ProfileForm({
               }
               disabled={locked}
             >
-              <option value="adherent">Adherent</option>
-              <option value="non-adherent">Non adherent</option>
-              <option value="en-attente">En attente</option>
+              <option value="active">Actif</option>
+              <option value="inactive">Non</option>
             </select>
           </label>
 

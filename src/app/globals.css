@@ -68,3 +68,25 @@ img {
   font-weight: 600;
   margin: 0.5rem 0 0.4rem;
 }
+
+.admin-app {
+  color: #1f1b16;
+}
+
+.admin-app [class~="bg-white"],
+.admin-app [class*="bg-white/"] {
+  background-color: rgba(248, 242, 232, 0.9) !important;
+}
+
+.admin-app [class*="shadow"] {
+  box-shadow: none !important;
+}
+
+.admin-app [class*="rounded"] {
+  border-radius: 10px !important;
+}
+
+.admin-app table th,
+.admin-app table td {
+  line-height: 1.25;
+}

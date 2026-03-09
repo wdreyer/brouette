@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { addDoc, collection, doc, getDocs, limit, query, setDoc, Timestamp } from "firebase/firestore";
+import Link from "next/link";
+import { addDoc, collection, getDocs, limit, query, Timestamp } from "firebase/firestore";
 import { firebaseDb } from "@/lib/firebase/client";
 
 type FieldType = "text" | "number" | "boolean" | "date" | "datetime";
@@ -81,8 +82,6 @@ export default function ProducersEditor({
   const [docs, setDocs] = useState<DocEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<string>("");
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editDraft, setEditDraft] = useState<Record<string, unknown>>({});
   const [createOpen, setCreateOpen] = useState(false);
   const [createDraft, setCreateDraft] = useState<Record<string, unknown>>({});
 
@@ -103,25 +102,6 @@ export default function ProducersEditor({
   useEffect(() => {
     load().catch(() => setLoading(false));
   }, [collectionName]);
-
-  const openEdit = (entry: DocEntry) => {
-    setEditingId(entry.id);
-    setEditDraft(entry.data);
-    setMessage("");
-  };
-
-  const saveEdit = async () => {
-    if (!editingId) return;
-    try {
-      await setDoc(doc(firebaseDb, collectionName, editingId), editDraft, { merge: true });
-      setMessage("Producteur mis a jour.");
-      setEditingId(null);
-      await load();
-    } catch (error) {
-      const err = error instanceof Error ? error.message : "Erreur inconnue.";
-      setMessage(err);
-    }
-  };
 
   const handleCreate = async () => {
     try {
@@ -157,10 +137,10 @@ export default function ProducersEditor({
       ) : (
         <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
           {docs.map((entry) => (
-            <button
+            <Link
               key={entry.id}
+              href={`/admin/producers/${entry.id}`}
               className="flex h-full flex-col gap-4 rounded-3xl border border-clay/70 bg-white/90 p-6 text-left shadow-card transition hover:-translate-y-1 hover:border-ink/30"
-              onClick={() => openEdit(entry)}
             >
               <div className="flex items-start justify-between gap-3">
                 <div>
@@ -185,96 +165,13 @@ export default function ProducersEditor({
                     </span>
                   ))}
               </div>
-              <span className="mt-auto text-xs font-semibold text-ink/50">Cliquer pour editer</span>
-            </button>
+              <span className="mt-auto text-xs font-semibold text-ink/50">Voir la fiche</span>
+            </Link>
           ))}
         </div>
       )}
 
       {message ? <p className="text-sm text-ink/70">{message}</p> : null}
-
-      {editingId ? (
-        <div className="rounded-3xl border border-clay/70 bg-white/95 p-6 shadow-card">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">
-                Edition producteur
-              </p>
-              <h3 className="font-serif text-3xl">
-                {String(getByPath(editDraft, "name") ?? "Producteur")}
-              </h3>
-            </div>
-            <button
-              className="rounded-full border border-ink/20 px-4 py-2 text-sm font-semibold"
-              onClick={() => setEditingId(null)}
-            >
-              Fermer
-            </button>
-          </div>
-
-          <div className="mt-4 grid gap-4 md:grid-cols-2">
-            {fields.map((field) => {
-              const value = getByPath(editDraft, field.path);
-              const inputValue = toInputValue(value, field.type);
-              return (
-                <label key={field.path} className="flex flex-col gap-2 text-sm font-semibold text-ink/70">
-                  {field.label}
-                  {field.type === "boolean" ? (
-                    <select
-                      className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
-                      value={String(inputValue)}
-                      onChange={(event) => {
-                        const next = { ...editDraft };
-                        setByPath(next, field.path, fromInputValue(event.target.value, field.type));
-                        setEditDraft(next);
-                      }}
-                    >
-                      <option value="true">Oui</option>
-                      <option value="false">Non</option>
-                    </select>
-                  ) : field.type === "date" || field.type === "datetime" ? (
-                    <input
-                      type={field.type === "date" ? "date" : "datetime-local"}
-                      className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
-                      value={String(inputValue)}
-                      onChange={(event) => {
-                        const next = { ...editDraft };
-                        setByPath(next, field.path, fromInputValue(event.target.value, field.type));
-                        setEditDraft(next);
-                      }}
-                    />
-                  ) : (
-                    <input
-                      type={field.type === "number" ? "number" : "text"}
-                      className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
-                      value={String(inputValue)}
-                      onChange={(event) => {
-                        const next = { ...editDraft };
-                        setByPath(next, field.path, fromInputValue(event.target.value, field.type));
-                        setEditDraft(next);
-                      }}
-                    />
-                  )}
-                </label>
-              );
-            })}
-          </div>
-          <div className="mt-6 flex items-center gap-3">
-            <button
-              className="rounded-full bg-moss px-5 py-2 text-sm font-semibold text-white"
-              onClick={saveEdit}
-            >
-              Enregistrer
-            </button>
-            <button
-              className="rounded-full border border-ink/20 px-4 py-2 text-sm font-semibold"
-              onClick={() => setEditingId(null)}
-            >
-              Annuler
-            </button>
-          </div>
-        </div>
-      ) : null}
 
       {createOpen ? (
         <div className="rounded-3xl border border-clay/70 bg-white/95 p-6 shadow-card">

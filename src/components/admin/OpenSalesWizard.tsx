@@ -1,1351 +1,968 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Timestamp,
   addDoc,
   collection,
+  collectionGroup,
+  deleteDoc,
   doc,
   getDocs,
-  query,
   setDoc,
   updateDoc,
-  where,
   writeBatch,
 } from "firebase/firestore";
+import { useAuth } from "@/components/auth/AuthProvider";
 import { firebaseDb } from "@/lib/firebase/client";
-import { distributionLabel } from "@/lib/distributions";
+import { distributionLabel, isOpenStatus, pickOpenDistribution } from "@/lib/distributions";
 
-type Distribution = {
-  id: string;
-  title?: string;
-  status?: string;
-  dates?: { toDate: () => Date }[];
-  openedAt?: { toDate: () => Date };
-};
+type FireDate = { toDate?: () => Date };
 
-type Producer = {
-  id: string;
-  name?: string;
-  email?: string;
-  phone?: string;
-};
-
-type Category = {
-  id: string;
-  name?: string;
-};
-
+type Distribution = { id: string; status?: string; dates?: FireDate[]; openedAt?: FireDate };
+type Producer = { id: string; name?: string; referentId?: string | null; referentName?: string | null };
+type Member = { id: string; firstName?: string; lastName?: string };
+type Order = { distributionId?: string | null; totals?: { totalAmount?: number } };
+type Variant = { id: string; label: string; price: number; activeDates: string[] };
 type Product = {
   id: string;
   producerId: string;
   name: string;
-  description?: string;
-  imageUrl?: string;
-  isOrganic?: boolean;
-  categoryId?: string;
-  saleDates?: { toDate?: () => Date }[];
+  description: string;
+  imageUrl: string;
+  isOrganic: boolean;
+  variants: Variant[];
 };
 
-type Variant = {
-  id: string;
-  productId: string;
+type ProducerRow = {
+  producerId: string;
+  producerName: string;
+  referentId: string | null;
+  referentName: string;
+  validatedByReferent: boolean;
+  validatedAtLabel: string;
+  productCount: number;
+};
+
+type VariantDraft = {
+  id?: string;
+  tempId: string;
   label: string;
   price: number;
-  activeDates?: string[];
-};
-
-type OfferDraft = {
-  enabled: boolean;
-  limitTotal: string;
+  activeDates: string[];
 };
 
 type ProductDraft = {
+  id: string;
   name: string;
   description: string;
   imageUrl: string;
   isOrganic: boolean;
-  categoryId: string;
+  variants: VariantDraft[];
+  existingVariantIds: string[];
 };
 
-type AddProductDraft = ProductDraft & {
-  variantLabel: string;
-  variantPrice: string;
-};
+const FINISHED = new Set(["finished", "fermee", "ferme", "closed"]);
 
-function offerKey(productId: string, variantId: string, dateIndex: number) {
-  return `${productId}:${variantId}:${dateIndex}`;
-}
+const toDate = (value?: FireDate) => value?.toDate?.() ?? null;
+const dateKey = (value: Date) => value.toISOString().slice(0, 10);
+const formatDate = (value?: Date | null) =>
+  value
+    ? value.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "2-digit" })
+    : "-";
+const formatLongDate = (value?: Date | null) =>
+  value
+    ? value.toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })
+    : "-";
+const money = (value: number) => value.toFixed(2).replace(".", ",");
+const isPlanned = (status?: string) =>
+  !isOpenStatus(status) && !FINISHED.has(String(status ?? "").toLowerCase());
+const fullName = (m?: Member | null) => `${m?.firstName ?? ""} ${m?.lastName ?? ""}`.trim();
+const newId = () =>
+  typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `tmp_${Date.now()}_${Math.random().toString(16).slice(2)}`;
 
-function dateLabel(date?: Date) {
-  if (!date) return "-";
-  return date.toLocaleDateString("fr-FR", {
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-  });
-}
-
-function dateKey(date: Date) {
-  return date.toISOString().slice(0, 10);
-}
-
-function dateFromKey(key: string) {
-  return new Date(`${key}T12:00:00`);
-}
-
-function shortDate(date?: Date) {
-  if (!date) return "-";
-  return date.toLocaleDateString("fr-FR", {
-    day: "2-digit",
-    month: "2-digit",
-  });
-}
-
-function daysUntil(date?: Date) {
-  if (!date) return null;
-  const now = new Date();
-  const diff = date.getTime() - now.getTime();
-  return Math.ceil(diff / (1000 * 60 * 60 * 24));
-}
-
-type OpenSalesWizardProps = {
-  onFocusChange?: (focused: boolean) => void;
-};
-
-export default function OpenSalesWizard({ onFocusChange }: OpenSalesWizardProps) {
+export default function OpenSalesWizard() {
   const router = useRouter();
+  const { effectiveRole, effectiveMemberId } = useAuth();
+  const isAdmin = effectiveRole === "admin";
+  const isReferent = effectiveRole === "referent";
+
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState("");
+
   const [distributions, setDistributions] = useState<Distribution[]>([]);
   const [producers, setProducers] = useState<Producer[]>([]);
-  const [categories, setCategories] = useState<Category[]>([]);
-  const [products, setProducts] = useState<Product[]>([]);
-  const [variants, setVariants] = useState<Variant[]>([]);
-  const [selectedDistributionId, setSelectedDistributionId] = useState("");
-  const [selectedProducerIds, setSelectedProducerIds] = useState<string[]>([]);
-  const [offerDraft, setOfferDraft] = useState<Record<string, OfferDraft>>({});
-  const [step, setStep] = useState(0);
-  const [message, setMessage] = useState("");
-  const [status, setStatus] = useState<"idle" | "saving" | "opening" | "error">("idle");
-  const [openOrdersCount, setOpenOrdersCount] = useState<number | null>(null);
-  const [openOrdersLoading, setOpenOrdersLoading] = useState(false);
+  const [membersById, setMembersById] = useState<Record<string, Member>>({});
+  const [productsByProducer, setProductsByProducer] = useState<Record<string, Product[]>>({});
+  const [rows, setRows] = useState<ProducerRow[]>([]);
+  const [targetId, setTargetId] = useState("");
+  const [orderStats, setOrderStats] = useState<Record<string, { count: number; amount: number }>>({});
 
-  const [editProductId, setEditProductId] = useState<string | null>(null);
-  const [editProductDraft, setEditProductDraft] = useState<ProductDraft | null>(null);
-  const [addProductOpen, setAddProductOpen] = useState(false);
-  const [addProductDraft, setAddProductDraft] = useState<AddProductDraft>({
-    name: "",
+  const [flowOpen, setFlowOpen] = useState(false);
+  const [flowProducerIds, setFlowProducerIds] = useState<string[]>([]);
+  const [flowIndex, setFlowIndex] = useState(0);
+  const [draftProducts, setDraftProducts] = useState<ProductDraft[]>([]);
+
+  const openDistribution = useMemo(() => pickOpenDistribution(distributions), [distributions]);
+  const planned = useMemo(() => distributions.filter((d) => isPlanned(d.status)), [distributions]);
+  const targetDistribution = useMemo(
+    () => distributions.find((d) => d.id === targetId) ?? openDistribution ?? planned[0] ?? null,
+    [distributions, targetId, openDistribution, planned],
+  );
+  const saleDates = useMemo(
+    () =>
+      ((targetDistribution?.dates ?? []).slice(0, 3).map((d) => toDate(d)).filter(Boolean) as Date[]).map((d) => ({
+        key: dateKey(d),
+        label: formatDate(d),
+      })),
+    [targetDistribution],
+  );
+  const saleDateKeys = useMemo(() => saleDates.map((d) => d.key), [saleDates]);
+
+  const currentProducerId = flowProducerIds[flowIndex] ?? "";
+  const currentProducer = useMemo(
+    () => producers.find((producer) => producer.id === currentProducerId) ?? null,
+    [currentProducerId, producers],
+  );
+  const currentRow = useMemo(
+    () => rows.find((row) => row.producerId === currentProducerId) ?? null,
+    [currentProducerId, rows],
+  );
+
+  const syncRows = useCallback(
+    async (
+      distributionId: string,
+      producerList: Producer[],
+      memberMap: Record<string, Member>,
+      productMap: Record<string, Product[]>,
+    ) => {
+      if (!distributionId) {
+        setRows([]);
+        return;
+      }
+
+      const producerIds = Object.keys(productMap).filter((id) => (productMap[id] ?? []).length > 0);
+      const producerSet = new Set(producerIds);
+      const producerById: Record<string, Producer> = {};
+      producerList.forEach((producer) => {
+        producerById[producer.id] = producer;
+      });
+
+      const linkSnap = await getDocs(collection(firebaseDb, "distributionDates", distributionId, "producers"));
+      const existing = new Map<
+        string,
+        { validatedByReferent?: boolean; validatedAt?: FireDate; referentId?: string | null; referentName?: string | null }
+      >();
+      linkSnap.docs.forEach((linkDoc) => existing.set(linkDoc.id, linkDoc.data() as never));
+
+      const batch = writeBatch(firebaseDb);
+      let changed = false;
+
+      linkSnap.docs.forEach((linkDoc) => {
+        if (!producerSet.has(linkDoc.id)) {
+          batch.delete(linkDoc.ref);
+          changed = true;
+        }
+      });
+
+      const nextRows = producerIds.map((producerId) => {
+        const producer = producerById[producerId];
+        const dbRow = existing.get(producerId);
+        const referentId = producer?.referentId ?? dbRow?.referentId ?? null;
+        const referentName =
+          fullName(referentId ? memberMap[referentId] : null) ||
+          producer?.referentName ||
+          dbRow?.referentName ||
+          "Sans referent";
+
+        if (
+          !dbRow ||
+          referentId !== (dbRow?.referentId ?? null) ||
+          referentName !== String(dbRow?.referentName ?? "")
+        ) {
+          batch.set(
+            doc(firebaseDb, "distributionDates", distributionId, "producers", producerId),
+            {
+              producerId,
+              referentId,
+              referentName,
+              active: true,
+              validatedByReferent: false,
+              validatedAt: null,
+            },
+            { merge: true },
+          );
+          changed = true;
+        }
+
+        return {
+          producerId,
+          producerName: producer?.name ?? "Producteur",
+          referentId,
+          referentName,
+          validatedByReferent: dbRow?.validatedByReferent === true,
+          validatedAtLabel: formatLongDate(toDate(dbRow?.validatedAt)),
+          productCount: (productMap[producerId] ?? []).length,
+        } satisfies ProducerRow;
+      });
+
+      if (changed) await batch.commit();
+      setRows(nextRows.sort((a, b) => a.producerName.localeCompare(b.producerName)));
+    },
+    [],
+  );
+
+  const load = useCallback(async () => {
+    setLoading(true);
+
+    const [distSnap, producerSnap, memberSnap, orderSnap, productSnap, variantSnap] = await Promise.all([
+      getDocs(collection(firebaseDb, "distributionDates")),
+      getDocs(collection(firebaseDb, "producers")),
+      getDocs(collection(firebaseDb, "members")),
+      getDocs(collection(firebaseDb, "orders")),
+      getDocs(collection(firebaseDb, "products")),
+      getDocs(collectionGroup(firebaseDb, "variants")),
+    ]);
+
+    const distItems = distSnap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Distribution, "id">) }));
+    distItems.sort(
+      (a, b) =>
+        (toDate(a.dates?.[0]) ?? new Date(0)).getTime() -
+        (toDate(b.dates?.[0]) ?? new Date(0)).getTime(),
+    );
+    setDistributions(distItems);
+
+    const producerItems = producerSnap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Producer, "id">) }));
+    producerItems.sort((a, b) => (a.name ?? "").localeCompare(b.name ?? ""));
+    setProducers(producerItems);
+
+    const memberMap: Record<string, Member> = {};
+    memberSnap.docs.forEach((d) => {
+      memberMap[d.id] = { id: d.id, ...(d.data() as Omit<Member, "id">) };
+    });
+    setMembersById(memberMap);
+
+    const stats: Record<string, { count: number; amount: number }> = {};
+    orderSnap.docs.forEach((d) => {
+      const order = d.data() as Order;
+      const key = String(order.distributionId ?? "");
+      if (!key) return;
+      const prev = stats[key] ?? { count: 0, amount: 0 };
+      prev.count += 1;
+      prev.amount += Number(order.totals?.totalAmount ?? 0);
+      stats[key] = prev;
+    });
+    setOrderStats(stats);
+
+    const variantsByProduct: Record<string, Variant[]> = {};
+    variantSnap.docs.forEach((d) => {
+      const productId = d.ref.parent.parent?.id;
+      if (!productId) return;
+      if (!variantsByProduct[productId]) variantsByProduct[productId] = [];
+      const data = d.data() as { label?: string; price?: number; activeDates?: string[] };
+      variantsByProduct[productId].push({
+        id: d.id,
+        label: String(data.label ?? "Variante"),
+        price: Number(data.price ?? 0),
+        activeDates: Array.isArray(data.activeDates) ? data.activeDates : [],
+      });
+    });
+
+    const nextProductsByProducer: Record<string, Product[]> = {};
+    productSnap.docs.forEach((d) => {
+      const data = d.data() as {
+        producerId?: string;
+        name?: string;
+        description?: string;
+        imageUrl?: string;
+        isOrganic?: boolean;
+      };
+      const producerId = String(data.producerId ?? "");
+      if (!producerId) return;
+      if (!nextProductsByProducer[producerId]) nextProductsByProducer[producerId] = [];
+      nextProductsByProducer[producerId].push({
+        id: d.id,
+        producerId,
+        name: String(data.name ?? "Produit"),
+        description: String(data.description ?? ""),
+        imageUrl: String(data.imageUrl ?? ""),
+        isOrganic: Boolean(data.isOrganic),
+        variants: variantsByProduct[d.id] ?? [],
+      });
+    });
+    Object.values(nextProductsByProducer).forEach((list) =>
+      list.sort((a, b) => a.name.localeCompare(b.name)),
+    );
+    setProductsByProducer(nextProductsByProducer);
+
+    const open = pickOpenDistribution(distItems);
+    const plannedDist = distItems.filter((d) => isPlanned(d.status));
+    const defaultTarget = open?.id ?? plannedDist[0]?.id ?? "";
+    setTargetId((prev) => (prev && distItems.some((d) => d.id === prev) ? prev : defaultTarget));
+
+    await syncRows(defaultTarget, producerItems, memberMap, nextProductsByProducer);
+    setLoading(false);
+  }, [syncRows]);
+
+  useEffect(() => {
+    load().catch(() => setLoading(false));
+  }, [load]);
+
+  useEffect(() => {
+    if (!targetId || loading) return;
+    syncRows(targetId, producers, membersById, productsByProducer).catch(() => undefined);
+  }, [targetId, loading, producers, membersById, productsByProducer, syncRows]);
+
+  const validatedCount = rows.filter((row) => row.validatedByReferent).length;
+  const pendingCount = Math.max(rows.length - validatedCount, 0);
+  const canOpen = isAdmin && !openDistribution && rows.length > 0 && pendingCount === 0;
+  const openStats = openDistribution
+    ? orderStats[openDistribution.id] ?? { count: 0, amount: 0 }
+    : { count: 0, amount: 0 };
+
+  const groups = useMemo(() => {
+    const map: Record<
+      string,
+      { referentId: string | null; referentName: string; mine: boolean; rows: ProducerRow[] }
+    > = {};
+    rows.forEach((row) => {
+      const key = row.referentId ?? row.referentName;
+      if (!map[key]) {
+        map[key] = {
+          referentId: row.referentId,
+          referentName: row.referentName,
+          mine: Boolean(row.referentId && row.referentId === effectiveMemberId),
+          rows: [],
+        };
+      }
+      map[key].rows.push(row);
+    });
+    return Object.values(map).sort((a, b) => {
+      if (a.mine && !b.mine) return -1;
+      if (!a.mine && b.mine) return 1;
+      return a.referentName.localeCompare(b.referentName);
+    });
+  }, [rows, effectiveMemberId]);
+
+  const producersWithoutProducts = useMemo(
+    () =>
+      producers
+        .filter((producer) => (productsByProducer[producer.id] ?? []).length === 0)
+        .sort((a, b) => (a.name ?? "").localeCompare(b.name ?? "")),
+    [producers, productsByProducer],
+  );
+
+  const openFlow = (producerIds: string[], startAt = 0) => {
+    if (!producerIds.length) {
+      setMessage("Aucun producteur a gerer pour cette vue.");
+      return;
+    }
+    setMessage("");
+    const safeIndex = Math.max(0, Math.min(startAt, producerIds.length - 1));
+    const idsParam = encodeURIComponent(producerIds.join(","));
+    const distributionParam = encodeURIComponent(targetDistribution?.id ?? "");
+    router.push(`/admin/vente/gerer?distributionId=${distributionParam}&producerIds=${idsParam}&idx=${safeIndex}`);
+  };
+
+  const createDraftVariant = (): VariantDraft => ({
+    tempId: newId(),
+    label: "Nouvelle variante",
+    price: 0,
+    activeDates: [...saleDateKeys],
+  });
+
+  const createDraftProduct = (): ProductDraft => ({
+    id: newId(),
+    name: "Nouveau produit",
     description: "",
     imageUrl: "",
     isOrganic: false,
-    categoryId: "",
-    variantLabel: "",
-    variantPrice: "",
+    variants: [createDraftVariant()],
+    existingVariantIds: [],
   });
 
-  const selectedDistribution = useMemo(
-    () => distributions.find((dist) => dist.id === selectedDistributionId),
-    [distributions, selectedDistributionId],
-  );
-
-  const openDistribution = useMemo(
-    () => distributions.find((dist) => dist.status === "open") ?? null,
-    [distributions],
-  );
-
-  const nextDistribution = useMemo(() => {
-    const today = new Date();
-    const sorted = [...distributions].sort((a, b) => {
-      const aDate = a.dates?.[0]?.toDate?.() ?? new Date(0);
-      const bDate = b.dates?.[0]?.toDate?.() ?? new Date(0);
-      return aDate.getTime() - bDate.getTime();
-    });
-    const candidates = sorted.filter((dist) => dist.status !== "open");
-    return (
-      candidates.find((dist) => {
-        const firstDate = dist.dates?.[0]?.toDate?.() ?? new Date(0);
-        return firstDate >= today;
-      }) ?? candidates[0] ?? null
-    );
-  }, [distributions]);
-
-  const dates = useMemo(
-    () => (selectedDistribution?.dates ?? []).slice(0, 3).map((d) => d.toDate()),
-    [selectedDistribution],
-  );
-
-  const openDates = useMemo(
-    () => (openDistribution?.dates ?? []).slice(0, 3).map((d) => d.toDate()),
-    [openDistribution],
-  );
-
-  const nextDates = useMemo(
-    () => (nextDistribution?.dates ?? []).slice(0, 3).map((d) => d.toDate()),
-    [nextDistribution],
-  );
-
-  const selectedProducers = useMemo(
-    () => producers.filter((producer) => selectedProducerIds.includes(producer.id)),
-    [producers, selectedProducerIds],
-  );
-
-  const producerSteps = useMemo(() => selectedProducers, [selectedProducers]);
-  const currentProducerIndex = Math.max(0, step - 2);
-  const currentProducer = producerSteps[currentProducerIndex] ?? null;
-
-  const productsByProducer = useMemo(() => {
-    const map: Record<string, Product[]> = {};
-    products.forEach((product) => {
-      if (!map[product.producerId]) map[product.producerId] = [];
-      map[product.producerId].push(product);
-    });
-    return map;
-  }, [products]);
-
-  const variantsByProduct = useMemo(() => {
-    const map: Record<string, Variant[]> = {};
-    variants.forEach((variant) => {
-      if (!map[variant.productId]) map[variant.productId] = [];
-      map[variant.productId].push(variant);
-    });
-    return map;
-  }, [variants]);
-
-  const totalSteps = 2 + producerSteps.length + 1;
-  const recapRows = useMemo(() => {
-    if (!dates.length) return [];
-    const dateLabels = dates.map((date) => shortDate(date));
-    const rows: {
-      producerName: string;
-      productName: string;
-      variants: string;
-      dates: string;
-    }[] = [];
-
-    selectedProducers.forEach((producer) => {
-      const producerProducts = productsByProducer[producer.id] ?? [];
-      producerProducts.forEach((product) => {
-        const productVariants = variantsByProduct[product.id] ?? [];
-        const enabledDates = new Set<string>();
-        const enabledVariants: string[] = [];
-
-        productVariants.forEach((variant) => {
-          let hasAny = false;
-          dates.forEach((_, index) => {
-            const key = offerKey(product.id, variant.id, index);
-            if (offerDraft[key]?.enabled) {
-              enabledDates.add(dateLabels[index]);
-              hasAny = true;
-            }
-          });
-          if (hasAny) {
-            enabledVariants.push(variant.label || "Variante");
-          }
-        });
-
-        if (!enabledVariants.length) return;
-
-        rows.push({
-          producerName: producer.name ?? "Producteur",
-          productName: product.name ?? "Produit",
-          variants: enabledVariants.join(", "),
-          dates: Array.from(enabledDates).join(" · "),
-        });
-      });
-    });
-
-    return rows;
-  }, [dates, offerDraft, productsByProducer, selectedProducers, variantsByProduct]);
   useEffect(() => {
-    const load = async () => {
-      setLoading(true);
-      const [distSnap, producersSnap, categoriesSnap, productsSnap] = await Promise.all([
-        getDocs(collection(firebaseDb, "distributionDates")),
-        getDocs(collection(firebaseDb, "producers")),
-        getDocs(collection(firebaseDb, "categories")),
-        getDocs(collection(firebaseDb, "products")),
-      ]);
-
-      const distItems = distSnap.docs.map((docSnap) => ({
-        id: docSnap.id,
-        ...(docSnap.data() as Omit<Distribution, "id">),
-      }));
-      distItems.sort((a, b) => {
-        const aDate = a.dates?.[0]?.toDate?.() ?? new Date(0);
-        const bDate = b.dates?.[0]?.toDate?.() ?? new Date(0);
-        return aDate.getTime() - bDate.getTime();
-      });
-      setDistributions(distItems);
-
-      const producerItems = producersSnap.docs.map((docSnap) => ({
-        id: docSnap.id,
-        ...(docSnap.data() as Omit<Producer, "id">),
-      }));
-      setProducers(producerItems);
-
-      const categoryItems = categoriesSnap.docs.map((docSnap) => ({
-        id: docSnap.id,
-        ...(docSnap.data() as Omit<Category, "id">),
-      }));
-      setCategories(categoryItems);
-
-      const productItems = productsSnap.docs.map((docSnap) => ({
-        id: docSnap.id,
-        ...(docSnap.data() as Omit<Product, "id">),
-      }));
-      setProducts(productItems);
-
-      const variantSnaps = await Promise.all(
-        productItems.map((product) =>
-          getDocs(collection(firebaseDb, "products", product.id, "variants")),
-        ),
-      );
-      const variantItems: Variant[] = [];
-      variantSnaps.forEach((snap, index) => {
-        snap.docs.forEach((docSnap) => {
-          variantItems.push({
-            id: docSnap.id,
-            productId: productItems[index].id,
-            ...(docSnap.data() as Omit<Variant, "id" | "productId">),
-          });
-        });
-      });
-      setVariants(variantItems);
-      setOfferDraft({});
-
-      if (producerItems.length) {
-        setSelectedProducerIds((prev) => (prev.length ? prev : producerItems.map((p) => p.id)));
-      }
-
-      setLoading(false);
-    };
-
-    load().catch(() => setLoading(false));
-  }, [selectedDistributionId]);
-
-  useEffect(() => {
-    if (step === 0) {
-      setOfferDraft({});
-    }
-  }, [step]);
-
-  useEffect(() => {
-    if (!selectedDistributionId && nextDistribution) {
-      setSelectedDistributionId(nextDistribution.id);
-    }
-  }, [nextDistribution, selectedDistributionId]);
-
-  useEffect(() => {
-    onFocusChange?.(step > 0);
-  }, [step, onFocusChange]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  }, [step]);
-
-  useEffect(() => {
-    if (!openDistribution?.id) {
-      setOpenOrdersCount(null);
-      return;
-    }
-    const loadOrders = async () => {
-      setOpenOrdersLoading(true);
-      try {
-        const ordersSnap = await getDocs(
-          query(
-            collection(firebaseDb, "orders"),
-            where("distributionId", "==", openDistribution.id),
-          ),
-        );
-        setOpenOrdersCount(ordersSnap.size);
-      } catch {
-        setOpenOrdersCount(null);
-      } finally {
-        setOpenOrdersLoading(false);
-      }
-    };
-    loadOrders().catch(() => {});
-  }, [openDistribution?.id]);
-
-  useEffect(() => {
-    if (!currentProducer) return;
-    const producerProducts = productsByProducer[currentProducer.id] ?? [];
-    if (!producerProducts.length) return;
-
-    setOfferDraft((prev) => {
-      const next = { ...prev };
-      const dateKeys = dates.map((date) => dateKey(date));
-      producerProducts.forEach((product) => {
-        const productVariants = variantsByProduct[product.id] ?? [];
-        productVariants.forEach((variant) => {
-          const variantDates = Array.isArray(variant.activeDates) ? variant.activeDates : [];
-          dateKeys.forEach((dateValue, index) => {
-            const key = offerKey(product.id, variant.id, index);
-            if (!next[key]) {
-              next[key] = { enabled: true, limitTotal: "" };
-            }
-          });
-        });
-      });
-      return next;
-    });
-  }, [currentProducer, productsByProducer, variantsByProduct, dates]);
-
-  const toggleProducer = (id: string) => {
-    setSelectedProducerIds((prev) =>
-      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id],
-    );
-  };
-
-  const updateOfferDraft = (
-    productId: string,
-    variantId: string,
-    dateIndex: number,
-    patch: Partial<OfferDraft>,
-  ) => {
-    const key = offerKey(productId, variantId, dateIndex);
-    setOfferDraft((prev) => {
-      const current = prev[key] ?? { enabled: false, limitTotal: "" };
-      return { ...prev, [key]: { ...current, ...patch } };
-    });
-  };
-
-  const addVariantForProduct = (productId: string) => {
-    const tempId = `temp-${productId}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-    const dateKeys = dates.map((date) => dateKey(date));
-    setVariants((prev) => [
-      ...prev,
-      {
-        id: tempId,
-        productId,
-        label: "",
-        price: 0,
-        activeDates: dateKeys,
-      },
-    ]);
-    setOfferDraft((prev) => {
-      const next = { ...prev };
-      dateKeys.forEach((_, index) => {
-        const key = offerKey(productId, tempId, index);
-        if (!next[key]) {
-          next[key] = { enabled: true, limitTotal: "" };
-        }
-      });
-      return next;
-    });
-  };
-
-  const openEditProduct = (product: Product) => {
-    setEditProductId(product.id);
-    setEditProductDraft({
-      name: product.name ?? "",
-      description: product.description ?? "",
-      imageUrl: product.imageUrl ?? "",
-      isOrganic: Boolean(product.isOrganic),
-      categoryId: product.categoryId ?? "",
-    });
-  };
-
-  const saveProduct = async () => {
-    if (!editProductId || !editProductDraft) return;
-    try {
-      setStatus("saving");
-      await setDoc(doc(firebaseDb, "products", editProductId), editProductDraft, { merge: true });
-      setProducts((prev) =>
-        prev.map((item) => (item.id === editProductId ? { ...item, ...editProductDraft } : item)),
-      );
-      setEditProductId(null);
-      setEditProductDraft(null);
-    } catch (error) {
-      const err = error instanceof Error ? error.message : "Erreur inconnue.";
-      setMessage(err);
-    } finally {
-      setStatus("idle");
-    }
-  };
-
-  const saveVariantsForProducer = async (producerId: string) => {
-    const producerProducts = productsByProducer[producerId] ?? [];
-    const dateKeys = dates.map((date) => dateKey(date));
-    const tasks: Promise<void>[] = [];
-    const productDateMap: Record<string, Set<string>> = {};
-
-    producerProducts.forEach((product) => {
-      productDateMap[product.id] = new Set();
-      const productVariants = variantsByProduct[product.id] ?? [];
-      productVariants.forEach((variant) => {
-        const activeDates = dateKeys.filter((_, index) => {
-          const key = offerKey(product.id, variant.id, index);
-          return Boolean(offerDraft[key]?.enabled);
-        });
-        activeDates.forEach((key) => productDateMap[product.id].add(key));
-        tasks.push(
-          setDoc(
-            doc(firebaseDb, "products", product.id, "variants", variant.id),
-            {
+    if (!flowOpen) return;
+    const source = productsByProducer[currentProducerId] ?? [];
+    setDraftProducts(
+      source.length
+        ? source.map((product) => ({
+            id: product.id,
+            name: product.name,
+            description: product.description,
+            imageUrl: product.imageUrl,
+            isOrganic: product.isOrganic,
+            variants: product.variants.map((variant) => ({
+              id: variant.id,
+              tempId: variant.id,
               label: variant.label,
-              price: Number(variant.price || 0),
-              activeDates,
-            },
-            { merge: true },
-          ) as unknown as Promise<void>,
+              price: variant.price,
+              activeDates: [...saleDateKeys],
+            })),
+            existingVariantIds: product.variants.map((variant) => variant.id),
+          }))
+        : [createDraftProduct()],
+    );
+  }, [flowOpen, currentProducerId, productsByProducer, saleDateKeys]);
+
+  const updateDraftProduct = (index: number, patch: Partial<ProductDraft>) => {
+    setDraftProducts((prev) => prev.map((item, i) => (i === index ? { ...item, ...patch } : item)));
+  };
+
+  const updateDraftVariant = (productIndex: number, variantIndex: number, patch: Partial<VariantDraft>) => {
+    setDraftProducts((prev) =>
+      prev.map((item, i) => {
+        if (i !== productIndex) return item;
+        const variants = item.variants.map((variant, vi) =>
+          vi === variantIndex ? { ...variant, ...patch } : variant,
         );
-      });
-    });
-    await Promise.all(tasks);
-
-    const productTasks = Object.entries(productDateMap).map(([productId, dateSet]) => {
-      const saleDates = Array.from(dateSet).map((key) => Timestamp.fromDate(dateFromKey(key)));
-      return setDoc(doc(firebaseDb, "products", productId), { saleDates }, { merge: true }) as unknown as Promise<void>;
-    });
-    await Promise.all(productTasks);
+        return { ...item, variants };
+      }),
+    );
   };
 
-  const saveOffersForProducer = async (producerId: string) => {
-    if (!selectedDistributionId) return;
-    const distRef = doc(firebaseDb, "distributionDates", selectedDistributionId);
-    const offerSnap = await getDocs(collection(distRef, "offerItems"));
-    const batch = writeBatch(firebaseDb);
+  const applyAllDates = (selected: boolean) => {
+    setDraftProducts((prev) =>
+      prev.map((product) => ({
+        ...product,
+        variants: product.variants.map((variant) => ({
+          ...variant,
+          activeDates: selected ? [...saleDateKeys] : [],
+        })),
+      })),
+    );
+  };
 
-    offerSnap.docs.forEach((docSnap) => {
-      const data = docSnap.data();
-      if (data.producerId === producerId) {
-        batch.delete(docSnap.ref);
-      }
-    });
+  const setValidation = async (row: ProducerRow, validated: boolean) => {
+    if (!targetDistribution) return;
+    setSaving(true);
+    await setDoc(
+      doc(firebaseDb, "distributionDates", targetDistribution.id, "producers", row.producerId),
+      {
+        producerId: row.producerId,
+        referentId: row.referentId,
+        referentName: row.referentName,
+        active: validated,
+        validatedByReferent: validated,
+        validatedAt: validated ? Timestamp.now() : null,
+      },
+      { merge: true },
+    );
+    await load();
+    setSaving(false);
+  };
 
-    const producerProducts = productsByProducer[producerId] ?? [];
-    const productMap: Record<string, Product> = {};
-    producerProducts.forEach((product) => {
-      productMap[product.id] = product;
-    });
-    const variantMap: Record<string, Variant> = {};
-    variants.forEach((variant) => {
-      if (productMap[variant.productId]) {
-        variantMap[`${variant.productId}:${variant.id}`] = variant;
-      }
-    });
+  const saveDraft = async () => {
+    if (!currentProducerId) return;
+    setSaving(true);
+    setMessage("");
 
-    Object.entries(offerDraft).forEach(([key, draft]) => {
-      if (!draft.enabled) return;
-      const [productId, variantId, dateIndexRaw] = key.split(":");
-      const variant = variantMap[`${productId}:${variantId}`];
-      if (!variant) return;
-      const product = productMap[productId];
-      if (!product) return;
-      const dateIndex = Number(dateIndexRaw);
-      const limitTotal = draft.limitTotal ? Number(draft.limitTotal) : 0;
-
-      const ref = doc(collection(distRef, "offerItems"));
-      batch.set(ref, {
-        producerId: product.producerId,
-        productId: product.id,
-        variantId: variant.id,
-        dateIndex,
-        limitTotal,
-        price: variant.price,
-        title: product.name,
-        variantLabel: variant.label,
-        imageUrl: product.imageUrl ?? null,
+    for (const product of draftProducts) {
+      const payload = {
+        producerId: currentProducerId,
+        name: product.name.trim() || "Produit",
+        description: product.description.trim(),
+        imageUrl: product.imageUrl.trim(),
         isOrganic: Boolean(product.isOrganic),
-        categoryId: product.categoryId ?? null,
-      });
-    });
+        updatedAt: Timestamp.now(),
+      };
 
-    await batch.commit();
+      let productId = product.id;
+      if (product.id.startsWith("tmp_")) {
+        const created = await addDoc(collection(firebaseDb, "products"), payload);
+        productId = created.id;
+      } else {
+        await setDoc(doc(firebaseDb, "products", productId), payload, { merge: true });
+      }
+
+      const keptExistingVariantIds = new Set<string>();
+      for (const variant of product.variants) {
+        const variantPayload = {
+          label: variant.label.trim() || "Variante",
+          price: Number.isFinite(Number(variant.price)) ? Number(variant.price) : 0,
+          activeDates: Array.from(
+            new Set(
+              (Array.isArray(variant.activeDates) ? variant.activeDates : []).filter((key) =>
+                saleDateKeys.includes(key),
+              ),
+            ),
+          ),
+        };
+
+        if (variant.id && !variant.id.startsWith("tmp_")) {
+          keptExistingVariantIds.add(variant.id);
+          await setDoc(doc(firebaseDb, "products", productId, "variants", variant.id), variantPayload, {
+            merge: true,
+          });
+        } else {
+          await addDoc(collection(firebaseDb, "products", productId, "variants"), variantPayload);
+        }
+      }
+
+      for (const existingVariantId of product.existingVariantIds) {
+        if (!keptExistingVariantIds.has(existingVariantId)) {
+          await deleteDoc(doc(firebaseDb, "products", productId, "variants", existingVariantId));
+        }
+      }
+    }
+
+    await load();
+    setSaving(false);
+    setMessage("Produits enregistres.");
   };
 
-  const saveProducerStep = async () => {
-    if (!currentProducer) return;
-    try {
-      setStatus("saving");
-      setMessage("");
-      await saveVariantsForProducer(currentProducer.id);
-      await saveOffersForProducer(currentProducer.id);
-    } catch (error) {
-      const err = error instanceof Error ? error.message : "Erreur inconnue.";
-      setMessage(err);
-    } finally {
-      setStatus("idle");
-    }
-  };
-
-  const saveSelectedProducers = async () => {
-    if (!selectedDistributionId) return;
-    const distRef = doc(firebaseDb, "distributionDates", selectedDistributionId);
-    const producerSnap = await getDocs(collection(distRef, "producers"));
-    const batch = writeBatch(firebaseDb);
-    producerSnap.docs.forEach((docSnap) => batch.delete(docSnap.ref));
-    selectedProducerIds.forEach((producerId) => {
-      batch.set(doc(collection(distRef, "producers"), producerId), { producerId, active: true });
-    });
-    await batch.commit();
-
-    const dateKeys = dates.map((date) => dateKey(date));
-    if (!dateKeys.length) return;
-
-    const deselected = producers
-      .map((producer) => producer.id)
-      .filter((id) => !selectedProducerIds.includes(id));
-    if (!deselected.length) return;
-
-    const updatedVariants: { productId: string; id: string; activeDates: string[] }[] = [];
-    const updatedProducts: { id: string; saleDates: Timestamp[] }[] = [];
-
-    deselected.forEach((producerId) => {
-      const producerProducts = productsByProducer[producerId] ?? [];
-      producerProducts.forEach((product) => {
-        const productVariants = variantsByProduct[product.id] ?? [];
-        const fallbackKeys = (product.saleDates ?? [])
-          .map((date) => date.toDate?.())
-          .filter(Boolean)
-          .map((date) => dateKey(date as Date));
-        const nextDates = new Set<string>();
-        productVariants.forEach((variant) => {
-          const currentKeys =
-            Array.isArray(variant.activeDates) && variant.activeDates.length
-              ? variant.activeDates
-              : fallbackKeys;
-          const nextKeys = currentKeys.filter((key) => !dateKeys.includes(key));
-          nextKeys.forEach((key) => nextDates.add(key));
-          updatedVariants.push({ productId: product.id, id: variant.id, activeDates: nextKeys });
-        });
-        updatedProducts.push({
-          id: product.id,
-          saleDates: Array.from(nextDates).map((key) => Timestamp.fromDate(dateFromKey(key))),
-        });
-      });
-    });
-
-    await Promise.all(
-      updatedVariants.map((variant) =>
-        setDoc(
-          doc(firebaseDb, "products", variant.productId, "variants", variant.id),
-          { activeDates: variant.activeDates },
-          { merge: true },
-        ),
-      ),
-    );
-
-    await Promise.all(
-      updatedProducts.map((product) =>
-        setDoc(doc(firebaseDb, "products", product.id), { saleDates: product.saleDates }, { merge: true }),
-      ),
-    );
-
-    if (updatedVariants.length) {
-      const updateMap = new Map(
-        updatedVariants.map((variant) => [`${variant.productId}:${variant.id}`, variant.activeDates]),
-      );
-      setVariants((prev) =>
-        prev.map((variant) => {
-          const key = `${variant.productId}:${variant.id}`;
-          const activeDates = updateMap.get(key);
-          return activeDates ? { ...variant, activeDates } : variant;
-        }),
-      );
-    }
-    if (updatedProducts.length) {
-      const productMap = new Map(updatedProducts.map((product) => [product.id, product.saleDates]));
-      setProducts((prev) =>
-        prev.map((product) => {
-          const saleDates = productMap.get(product.id);
-          return saleDates ? { ...product, saleDates } : product;
-        }),
-      );
-    }
+  const saveAndValidate = async () => {
+    await saveDraft();
+    if (currentRow) await setValidation(currentRow, true);
   };
 
   const openSale = async () => {
-    if (!selectedDistributionId) return;
-    try {
-      setStatus("opening");
-      if (openDistribution && openDistribution.id !== selectedDistributionId) {
-        setMessage("Ferme d'abord la vente ouverte avant d'en ouvrir une nouvelle.");
-        setStatus("idle");
-        return;
+    if (!targetDistribution || !canOpen) return;
+    setSaving(true);
+    const batch = writeBatch(firebaseDb);
+    distributions.forEach((distribution) => {
+      if (isOpenStatus(distribution.status) && distribution.id !== targetDistribution.id) {
+        batch.update(doc(firebaseDb, "distributionDates", distribution.id), { status: "finished" });
       }
-      if (!openDistribution && nextDistribution && selectedDistributionId !== nextDistribution.id) {
-        setMessage("Tu peux ouvrir uniquement la prochaine distribution.");
-        setStatus("idle");
-        return;
-      }
-      const distRef = doc(firebaseDb, "distributionDates", selectedDistributionId);
-      const allSnap = await getDocs(collection(firebaseDb, "distributionDates"));
-      const batch = writeBatch(firebaseDb);
-      allSnap.docs.forEach((docSnap) => {
-        if (docSnap.id !== selectedDistributionId && docSnap.data().status === "open") {
-          batch.update(docSnap.ref, { status: "finished" });
-        }
-      });
-      batch.update(distRef, {
-        status: "open",
-        openedAt: Timestamp.now(),
-      });
-      await batch.commit();
-      setMessage("Vente ouverte.");
-      setTimeout(() => {
-        router.push("/admin");
-      }, 400);
-    } catch (error) {
-      const err = error instanceof Error ? error.message : "Erreur inconnue.";
-      setMessage(err);
-    } finally {
-      setStatus("idle");
-    }
+    });
+    batch.update(doc(firebaseDb, "distributionDates", targetDistribution.id), {
+      status: "open",
+      openedAt: Timestamp.now(),
+    });
+    await batch.commit();
+    await load();
+    setSaving(false);
   };
 
-  const closeOpenSale = async () => {
-    if (!openDistribution) return;
-    try {
-      setStatus("opening");
-      await updateDoc(doc(firebaseDb, "distributionDates", openDistribution.id), {
-        status: "finished",
-      });
-      setMessage("Vente fermee.");
-      setSelectedDistributionId("");
-    } catch (error) {
-      const err = error instanceof Error ? error.message : "Erreur inconnue.";
-      setMessage(err);
-    } finally {
-      setStatus("idle");
-    }
+  const closeSale = async () => {
+    if (!openDistribution || !isAdmin) return;
+    setSaving(true);
+    await updateDoc(doc(firebaseDb, "distributionDates", openDistribution.id), {
+      status: "finished",
+      closedAt: Timestamp.now(),
+    });
+    await load();
+    setSaving(false);
   };
 
-  const currentProducerProducts = currentProducer ? productsByProducer[currentProducer.id] ?? [] : [];
-
-  const stepTitle = useMemo(() => {
-    if (step === 0) return "Preparer la prochaine distribution";
-    if (step === 1) return "Selectionner les producteurs";
-    if (step >= 2 && step < 2 + producerSteps.length) {
-      return `Configurer ${currentProducer?.name ?? "producteur"}`;
+  const goToStep = (nextIndex: number) => {
+    setFlowIndex(nextIndex);
+    if (typeof window !== "undefined") {
+      window.scrollTo({ top: 0, behavior: "smooth" });
     }
-    return "Finaliser";
-  }, [step, producerSteps.length, currentProducer]);
-
-  const goNext = async () => {
-    if (step === 1) {
-      await saveSelectedProducers();
-    }
-    if (step >= 2 && step < 2 + producerSteps.length) {
-      await saveProducerStep();
-    }
-    setStep((prev) => Math.min(prev + 1, totalSteps - 1));
-  };
-
-  const goPrev = () => {
-    setStep((prev) => Math.max(prev - 1, 0));
   };
 
   if (loading) {
     return (
-      <div className="rounded-none border border-clay/70 bg-white/80 p-8 shadow-card">
-        <p className="text-sm text-ink/70">Chargement...</p>
+      <div className="rounded-md border border-clay/80 bg-stone p-6 text-sm text-ink/70">
+        Chargement des ventes...
       </div>
     );
   }
+
   return (
-    <div className="rounded-none border border-clay/70 bg-white/90 p-8 shadow-card">
-      <div className="flex flex-col gap-3">
-        {step === totalSteps - 1 ? (
-          <>
-            <h2 className="font-serif text-3xl">Recapitulatif avant ouverture</h2>
-            <p className="text-sm text-ink/70">
-              Verifie rapidement la selection, puis ouvre la vente.
+    <div className="flex flex-col gap-4">
+      <section className="rounded-md border border-ink/20 bg-white p-5">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h2 className="font-serif text-4xl">
+              {openDistribution ? "Vente ouverte" : "Aucune vente ouverte"}
+            </h2>
+            <p className="mt-2 text-sm text-ink/70">
+              {openDistribution
+                ? `${distributionLabel(openDistribution)} ouverte le ${formatLongDate(
+                    toDate(openDistribution.openedAt),
+                  )}.`
+                : targetDistribution
+                  ? `Distribution cible : ${distributionLabel(targetDistribution)}.`
+                  : "Aucune distribution planifiee."}
             </p>
-            {message ? <p className="text-sm text-ink/70">{message}</p> : null}
-          </>
-        ) : (
-          <>
-            {step > 0 ? (
-              <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-moss">
-                Etape {step} / {Math.max(1, totalSteps - 1)}
-              </p>
+          </div>
+          <div className="flex gap-2">
+            {isAdmin && openDistribution ? (
+              <button
+                className="rounded-md border border-ink/25 px-4 py-2 text-sm font-semibold"
+                onClick={closeSale}
+                disabled={saving}
+              >
+                Fermer la vente
+              </button>
             ) : null}
-            <h2 className="font-serif text-3xl">{stepTitle}</h2>
-            {message ? <p className="text-sm text-ink/70">{message}</p> : null}
-          </>
-        )}
-      </div>
-
-      {step === 0 ? (
-        <div className="mt-6">
-          {openDistribution ? (
-            <div className="border border-clay/70 bg-white/90 p-5">
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">
-                Vente ouverte
-              </p>
-              <div className="mt-2 flex flex-wrap items-center justify-between gap-4">
-                <div>
-                  <p className="text-sm text-ink/70">{distributionLabel(openDistribution)}</p>
-                  <div className="mt-2 flex flex-wrap gap-2 text-xs text-ink/60">
-                    {openDates.map((date, index) => (
-                      <span key={index} className="border border-clay/50 px-2 py-0.5">
-                        {shortDate(date)}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-                <div className="text-right text-xs text-ink/60">
-                  <p>Commandes: {openOrdersLoading ? "..." : openOrdersCount ?? "—"}</p>
-                  <p>J-{daysUntil(openDates[0]) ?? "—"} avant la premiere distribution</p>
-                </div>
-              </div>
-              <div className="mt-4 flex flex-wrap gap-2">
-                <button
-                  className="rounded-full border border-ink/20 bg-white px-4 py-2 text-xs font-semibold text-ink"
-                  onClick={() => {
-                    setSelectedDistributionId(openDistribution.id);
-                    setStep(2);
-                  }}
-                >
-                  Modifier la vente
-                </button>
-                <button
-                  className="rounded-full border border-amber-300 bg-white px-4 py-2 text-xs font-semibold text-amber-800"
-                  onClick={closeOpenSale}
-                >
-                  Fermer la vente
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div className="border border-clay/70 bg-white/90 p-5">
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">
-                Aucune vente ouverte
-              </p>
-              {nextDistribution ? (
-                <>
-                  <p className="mt-2 text-sm text-ink/70">
-                    Prochaine distribution: {distributionLabel(nextDistribution)}
-                  </p>
-                  <div className="mt-2 flex flex-wrap gap-2 text-xs text-ink/60">
-                    {nextDates.map((date, index) => (
-                      <span key={index} className="border border-clay/50 px-2 py-0.5">
-                        {shortDate(date)}
-                      </span>
-                    ))}
-                  </div>
-                  <div className="mt-4">
-                    <button
-                      className="rounded-full bg-ink px-5 py-2 text-sm font-semibold text-stone"
-                      onClick={goNext}
-                    >
-                      Ouvrir la vente
-                    </button>
-                  </div>
-                </>
-              ) : (
-                <p className="mt-2 text-sm text-ink/70">Aucune distribution planifiee.</p>
-              )}
-            </div>
-          )}
-        </div>
-      ) : null}
-
-      {step === 1 ? (
-        <div className="mt-6 rounded-none border border-clay/70 bg-white/80 p-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">Producteurs</p>
-          <div className="mt-3 overflow-x-auto">
-            <table className="min-w-full text-left text-sm">
-              <thead className="border-b border-clay/70 text-xs uppercase tracking-[0.2em] text-ink/60">
-                <tr>
-                  <th className="px-3 py-2">Selection</th>
-                  <th className="px-3 py-2">Producteur</th>
-                  <th className="px-3 py-2">Email</th>
-                  <th className="px-3 py-2">Telephone</th>
-                </tr>
-              </thead>
-              <tbody>
-                {producers.map((producer) => (
-                  <tr key={producer.id} className="border-b border-clay/50">
-                    <td className="px-3 py-2">
-                      <input
-                        type="checkbox"
-                        checked={selectedProducerIds.includes(producer.id)}
-                        onChange={() => toggleProducer(producer.id)}
-                      />
-                    </td>
-                    <td className="px-3 py-2 font-semibold text-ink">
-                      {producer.name ?? producer.id}
-                    </td>
-                    <td className="px-3 py-2 text-xs text-ink/60">{producer.email ?? "-"}</td>
-                    <td className="px-3 py-2 text-xs text-ink/60">{producer.phone ?? "-"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            {isAdmin && !openDistribution ? (
+              <button
+                className="rounded-md bg-forest px-5 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                onClick={openSale}
+                disabled={saving || !canOpen}
+              >
+                Ouvrir la vente
+              </button>
+            ) : null}
           </div>
         </div>
-      ) : null}
 
-      {step >= 2 && step < 2 + producerSteps.length && currentProducer ? (
-        <div className="mt-6 flex flex-col gap-6">
-          <div className="rounded-none border border-clay/70 bg-white/90 p-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">Producteur</p>
-                <h3 className="font-serif text-2xl">{currentProducer.name ?? currentProducer.id}</h3>
-              </div>
-              <button
-                className="rounded-full bg-ink px-4 py-2 text-xs font-semibold text-stone"
-                onClick={() => setAddProductOpen(true)}
-              >
-                Ajouter un produit
-              </button>
+        {openDistribution ? (
+          <div className="mt-4 grid gap-2 sm:grid-cols-2">
+            <div className="rounded-sm border border-forest/30 bg-forest/10 px-3 py-2 text-sm">
+              Commandes : <span className="font-semibold">{openStats.count}</span>
             </div>
-            <div className="mt-3 flex flex-wrap gap-2 text-xs text-ink/60">
-              {dates.map((date, index) => (
-                <span key={index} className="rounded-none border border-clay/70 bg-white px-3 py-1">
-                  {dateLabel(date)}
+            <div className="rounded-sm border border-forest/30 bg-forest/10 px-3 py-2 text-sm">
+              Chiffre : <span className="font-semibold">{money(openStats.amount)} EUR</span>
+            </div>
+          </div>
+        ) : null}
+      </section>
+
+      <section className="rounded-md border border-ink/20 bg-white p-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h3 className="font-serif text-3xl">Producteurs a valider</h3>
+            <p className="mt-1 text-sm text-ink/70">
+              Seuls les producteurs avec produits apparaissent dans le tableau.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {planned.length > 1 ? (
+              <select
+                className="rounded-md border border-ink/25 bg-stone px-4 py-2 text-sm"
+                value={targetDistribution?.id ?? ""}
+                onChange={(e) => setTargetId(e.target.value)}
+              >
+                {planned.map((distribution) => (
+                  <option key={distribution.id} value={distribution.id}>
+                    {distributionLabel(distribution)}
+                  </option>
+                ))}
+              </select>
+            ) : null}
+            {isReferent ? (
+              <button
+                className="rounded-md bg-forest px-4 py-2 text-sm font-semibold text-white"
+                onClick={() =>
+                  openFlow(rows.filter((row) => row.referentId === effectiveMemberId).map((row) => row.producerId))
+                }
+              >
+                Gerer mes producteurs pour la vente
+              </button>
+            ) : null}
+            {isAdmin ? (
+              <button
+                className="rounded-md border border-ink/25 px-4 py-2 text-sm font-semibold"
+                onClick={() => openFlow(rows.map((row) => row.producerId))}
+              >
+                Gerer tous les producteurs
+              </button>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="mt-3 grid gap-2 md:grid-cols-3">
+          <div className="rounded-sm border border-clay/70 bg-clay/10 px-3 py-2 text-sm">
+            Producteurs total : <span className="font-semibold">{rows.length}</span>
+          </div>
+          <div className="rounded-sm border border-clay/70 bg-clay/10 px-3 py-2 text-sm">
+            Producteurs valides : <span className="font-semibold">{validatedCount}</span>
+          </div>
+          <div className="rounded-sm border border-clay/70 bg-clay/10 px-3 py-2 text-sm">
+            Producteurs a valider : <span className="font-semibold">{pendingCount}</span>
+          </div>
+        </div>
+
+        <div className="mt-4 overflow-x-auto border border-ink/20">
+          <table className="min-w-full text-left text-sm">
+            <thead className="border-b border-ink/20 bg-ink text-xs uppercase tracking-[0.18em] text-stone">
+              <tr>
+                <th className="px-3 py-2">Referent</th>
+                <th className="px-3 py-2">Producteur</th>
+                <th className="px-3 py-2">Produits</th>
+                <th className="px-3 py-2">Validation</th>
+                <th className="px-3 py-2">Date validation</th>
+                <th className="px-3 py-2">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {groups.map((group) =>
+                group.rows.map((row, index) => {
+                  const canEdit = isAdmin || (isReferent && row.referentId === effectiveMemberId);
+                  const myProducerIds = rows
+                    .filter((item) => item.referentId === effectiveMemberId)
+                    .map((item) => item.producerId);
+                  return (
+                    <tr key={row.producerId} className={`border-b border-ink/10 ${group.mine ? "bg-forest/10" : "bg-white"}`}>
+                      <td className="px-3 py-2 text-xs text-ink/70">{index === 0 ? group.referentName : null}</td>
+                      <td className="px-3 py-2 font-semibold text-ink">{row.producerName}</td>
+                      <td className="px-3 py-2 text-xs text-ink/70">{row.productCount}</td>
+                      <td className="px-3 py-2">
+                        <span
+                          className={`rounded-sm px-2 py-1 text-xs font-semibold ${
+                            row.validatedByReferent
+                              ? "border border-forest/40 bg-forest/15 text-forest"
+                              : "border border-ink/20 bg-ink/5 text-ink/70"
+                          }`}
+                        >
+                          {row.validatedByReferent ? "Valide" : "A valider"}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 text-xs text-ink/60">{row.validatedAtLabel}</td>
+                      <td className="px-3 py-2">
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            className="rounded-md border border-ink/25 px-3 py-1 text-xs font-semibold"
+                            onClick={() => openFlow([row.producerId])}
+                          >
+                            Gerer
+                          </button>
+                          {isReferent && row.referentId === effectiveMemberId ? (
+                            <button
+                              className="rounded-md border border-ink/25 px-3 py-1 text-xs font-semibold"
+                              onClick={() =>
+                                openFlow(
+                                  myProducerIds,
+                                  myProducerIds.findIndex((id) => id === row.producerId),
+                                )
+                              }
+                            >
+                              Gerer tous mes producteurs
+                            </button>
+                          ) : null}
+                          {canEdit ? (
+                            <button
+                              className="rounded-md border border-ink/25 px-3 py-1 text-xs font-semibold"
+                              onClick={() => setValidation(row, !row.validatedByReferent).catch(() => undefined)}
+                            >
+                              {row.validatedByReferent ? "Retirer validation" : "Valider"}
+                            </button>
+                          ) : null}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                }),
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {producersWithoutProducts.length > 0 ? (
+          <div className="mt-4 border border-dashed border-ink/25 bg-ink/5 px-3 py-3">
+            <p className="text-xs font-semibold uppercase tracking-[0.12em] text-ink/55">
+              Producteurs sans produits ({producersWithoutProducts.length})
+            </p>
+            <p className="mt-1 text-xs text-ink/55">
+              Ces producteurs existent, mais ne sont pas inclus dans la validation de vente.
+            </p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {producersWithoutProducts.map((producer) => (
+                <span
+                  key={producer.id}
+                  className="rounded-sm border border-ink/20 bg-stone px-2 py-1 text-xs text-ink/65"
+                >
+                  {producer.name ?? "Producteur"}
                 </span>
               ))}
             </div>
           </div>
+        ) : null}
+      </section>
 
-          {currentProducerProducts.length === 0 ? (
-            <p className="text-sm text-ink/70">Aucun produit pour ce producteur.</p>
-          ) : (
-            currentProducerProducts.map((product) => {
-              const productVariants = variantsByProduct[product.id] ?? [];
-              return (
-                <div key={product.id} className="rounded-none border border-clay/70 bg-white/95 p-5 shadow-card">
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div>
-                      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">Produit</p>
-                      <h4 className="font-serif text-xl">{product.name}</h4>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <button
-                        className="rounded-full border border-ink/20 px-3 py-1 text-[11px] font-semibold"
-                        onClick={() => addVariantForProduct(product.id)}
-                      >
-                        Ajouter une variante
-                      </button>
-                      <button
-                        className="rounded-full border border-ink/20 px-3 py-1 text-[11px] font-semibold"
-                        onClick={() => openEditProduct(product)}
-                      >
-                        Modifier
-                      </button>
-                    </div>
-                  </div>
+      {message ? <p className="text-sm text-ink/70">{message}</p> : null}
 
-                  <div className="mt-4 overflow-x-auto rounded-none border border-clay/70 bg-white">
-                    <div
-                      className="min-w-[720px] border-b border-clay/70 bg-stone px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-ink/60"
-                      style={{
-                        display: "grid",
-                        gridTemplateColumns: `1.2fr 0.6fr repeat(${dates.length || 1}, minmax(140px, 1fr))`,
-                        gap: "12px",
-                      }}
+      {flowOpen ? (
+        <section className="rounded-md border border-ink/20 bg-white p-5">
+          <div className="flex flex-wrap items-start justify-between gap-3 border-b border-ink/20 pb-4">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">
+                Gerer mes producteurs pour la vente
+              </p>
+              <h4 className="mt-1 font-serif text-2xl">{currentProducer?.name ?? "Producteur"}</h4>
+              <p className="text-sm text-ink/70">
+                Producteur {flowIndex + 1} / {flowProducerIds.length}
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                className="rounded-md border border-ink/25 px-3 py-1.5 text-sm font-semibold"
+                onClick={() => applyAllDates(true)}
+              >
+                Tout selectionner
+              </button>
+              <button
+                className="rounded-md border border-ink/25 px-3 py-1.5 text-sm font-semibold"
+                onClick={() => applyAllDates(false)}
+              >
+                Tout deselectionner
+              </button>
+              <button
+                className="rounded-md border border-ink/25 px-3 py-1.5 text-sm font-semibold"
+                onClick={() => setDraftProducts((prev) => [...prev, createDraftProduct()])}
+              >
+                Ajouter un produit
+              </button>
+              <button
+                className="rounded-md border border-ink/25 px-3 py-1.5 text-sm font-semibold"
+                onClick={() => setFlowOpen(false)}
+              >
+                Fermer edition
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-4 flex flex-col gap-4">
+            {draftProducts.map((product, pIndex) => (
+              <div key={`${product.id}-${pIndex}`} className="border border-ink/20 bg-white p-4">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                  <label className="min-w-[280px] flex-1 text-xs font-semibold uppercase tracking-[0.12em] text-ink/65">
+                    Nom produit
+                    <input
+                      className="mt-1 w-full rounded-sm border border-ink/20 bg-stone px-3 py-2 text-sm"
+                      value={product.name}
+                      onChange={(e) => updateDraftProduct(pIndex, { name: e.target.value })}
+                    />
+                  </label>
+                  {product.id.startsWith("tmp_") ? (
+                    <span className="text-xs text-ink/60">Enregistrer pour editer les details</span>
+                  ) : (
+                    <button
+                      className="rounded-md border border-ink/25 px-3 py-2 text-xs font-semibold"
+                      onClick={() =>
+                        router.push(
+                          `/admin/vente/produit/${product.id}?distributionId=${targetDistribution?.id ?? ""}&producerId=${currentProducerId}`,
+                        )
+                      }
                     >
-                      <span>Variante</span>
-                      <span>Prix</span>
-                      {(dates.length ? dates : [null]).map((date, index) => (
-                        <span key={index}>{date ? dateLabel(date) : "Dates"}</span>
-                      ))}
-                    </div>
-                    <div className="divide-y divide-clay/70">
-                      {productVariants.map((variant) => {
-                        return (
-                          <div
-                            key={variant.id}
-                            className="min-w-[720px] px-4 py-2"
-                            style={{
-                              display: "grid",
-                              gridTemplateColumns: `1.2fr 0.6fr repeat(${dates.length || 1}, minmax(140px, 1fr))`,
-                              gap: "12px",
-                            }}
-                          >
-                            <div>
+                      Ouvrir details produit
+                    </button>
+                  )}
+                </div>
+
+                <div className="overflow-x-auto border border-ink/20">
+                  <table className="w-full min-w-[760px] text-sm">
+                    <thead className="border-b border-ink/20 bg-ink text-xs uppercase tracking-[0.12em] text-stone">
+                      <tr>
+                        <th className="px-2 py-2 text-left">Variante</th>
+                        <th className="px-2 py-2 text-left">Prix</th>
+                        {saleDates.map((date) => (
+                          <th key={date.key} className="px-2 py-2 text-center">
+                            {date.label}
+                          </th>
+                        ))}
+                        <th className="px-2 py-2 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {product.variants.map((variant, vIndex) => (
+                        <tr key={variant.tempId} className="border-b border-ink/10">
+                          <td className="px-2 py-2">
+                            <input
+                              className="w-full rounded-sm border border-ink/20 bg-stone px-2 py-1"
+                              value={variant.label}
+                              onChange={(e) => updateDraftVariant(pIndex, vIndex, { label: e.target.value })}
+                            />
+                          </td>
+                          <td className="px-2 py-2">
+                            <div className="relative">
                               <input
-                                className="w-full rounded-none border border-ink/20 bg-white px-2 py-1 text-sm"
-                                value={variant.label}
-                                onChange={(event) => {
-                                  const value = event.target.value;
-                                  setVariants((prev) =>
-                                    prev.map((item) =>
-                                      item.id === variant.id ? { ...item, label: value } : item,
-                                    ),
-                                  );
+                                className="w-full rounded-sm border border-ink/20 bg-stone px-2 py-1 pr-12"
+                                type="number"
+                                min={0}
+                                step="0.01"
+                                value={String(variant.price)}
+                                onChange={(e) =>
+                                  updateDraftVariant(pIndex, vIndex, { price: Number(e.target.value || 0) })
+                                }
+                              />
+                              <span className="pointer-events-none absolute right-2 top-1 text-xs text-ink/55">
+                                &euro;
+                              </span>
+                            </div>
+                          </td>
+                          {saleDates.map((date) => (
+                            <td key={date.key} className="px-2 py-2 text-center">
+                              <input
+                                type="checkbox"
+                                checked={variant.activeDates.includes(date.key)}
+                                onChange={() => {
+                                  const current = variant.activeDates;
+                                  const next = current.includes(date.key)
+                                    ? current.filter((key) => key !== date.key)
+                                    : [...current, date.key];
+                                  updateDraftVariant(pIndex, vIndex, { activeDates: next });
                                 }}
                               />
-                            </div>
-                            <input
-                              className="rounded-none border border-ink/20 bg-white px-2 py-1 text-sm"
-                              type="number"
-                              min={0}
-                              step="0.1"
-                              value={variant.price}
-                              onChange={(event) => {
-                                const value = Number(event.target.value || 0);
-                                setVariants((prev) =>
-                                  prev.map((item) =>
-                                    item.id === variant.id ? { ...item, price: value } : item,
-                                  ),
-                                );
-                              }}
-                            />
-                            {dates.length ? (
-                              dates.map((_, dateIndex) => {
-                                const key = offerKey(product.id, variant.id, dateIndex);
-                                const draft = offerDraft[key] ?? {
-                                  enabled: false,
-                                  limitTotal: "",
-                                };
-                                return (
-                                  <div key={key} className="flex flex-col gap-2">
-                                    <label className="flex items-center gap-2 text-xs text-ink/70">
-                                      <input
-                                        type="checkbox"
-                                        checked={draft.enabled}
-                                        onChange={(event) =>
-                                          updateOfferDraft(product.id, variant.id, dateIndex, {
-                                            enabled: event.target.checked,
-                                          })
-                                        }
-                                      />
-                                      Actif
-                                    </label>
-                                    <input
-                                      type="number"
-                                      min={0}
-                                      placeholder="Limite totale"
-                                      className="rounded-none border border-ink/20 bg-white px-2 py-1 text-[11px]"
-                                      value={draft.limitTotal}
-                                      onChange={(event) =>
-                                        updateOfferDraft(product.id, variant.id, dateIndex, {
-                                          limitTotal: event.target.value,
-                                        })
-                                      }
-                                    />
-                                  </div>
-                                );
-                              })
-                            ) : (
-                              <span className="text-xs text-ink/60">Aucune date</span>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
+                            </td>
+                          ))}
+                          <td className="px-2 py-2 text-right">
+                            <button
+                              className="rounded-md border border-ink/25 px-3 py-1 text-xs font-semibold"
+                              onClick={() =>
+                                updateDraftProduct(pIndex, {
+                                  variants: product.variants.filter((_, idx) => idx !== vIndex),
+                                })
+                              }
+                            >
+                              Retirer
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
-              );
-            })
-          )}
-        </div>
-      ) : null}
-
-      {step === totalSteps - 1 ? (
-        <div className="mt-6 bg-white/90 p-6">
-          <div className="mt-4 overflow-x-auto bg-white">
-            <table className="min-w-full text-left text-xs">
-              <thead className="border-b border-clay/50 text-[10px] uppercase tracking-[0.2em] text-ink/60">
-                <tr>
-                  <th className="px-2 py-2">Producteur</th>
-                  <th className="px-2 py-2">Produit</th>
-                  <th className="px-2 py-2">Variantes</th>
-                  <th className="px-2 py-2">Dates</th>
-                </tr>
-              </thead>
-              <tbody>
-                {recapRows.length ? (
-                  recapRows.map((row, index) => (
-                    <tr key={`${row.productName}-${index}`} className="border-b border-clay/50">
-                      <td className="px-2 py-1 font-semibold text-ink">{row.producerName}</td>
-                      <td className="px-2 py-1 text-ink">{row.productName}</td>
-                      <td className="px-2 py-1 text-ink/70">{row.variants}</td>
-                      <td className="px-2 py-1 text-ink/70">{row.dates || "-"}</td>
-                    </tr>
-                  ))
-                ) : (
-                  <tr>
-                    <td className="px-2 py-2 text-ink/70" colSpan={4}>
-                      Aucun produit selectionne.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+                <div className="mt-2">
+                  <button
+                    className="rounded-md border border-ink/25 px-3 py-1 text-xs font-semibold"
+                    onClick={() =>
+                      updateDraftProduct(pIndex, {
+                        variants: [...product.variants, createDraftVariant()],
+                      })
+                    }
+                  >
+                    Ajouter une variante
+                  </button>
+                </div>
+              </div>
+            ))}
           </div>
-          <div className="mt-4 flex flex-wrap items-center gap-3">
-            <button
-              className="rounded-full border border-ink/20 px-5 py-2 text-sm font-semibold"
-              onClick={goPrev}
-            >
-              Precedent
-            </button>
-            <button
-              className="ml-auto rounded-full bg-ink px-5 py-2 text-sm font-semibold text-stone"
-              onClick={openSale}
-              disabled={status === "opening"}
-            >
-              {status === "opening"
-                ? "Ouverture..."
-                : openDistribution?.id === selectedDistributionId
-                  ? "Mettre a jour la vente ouverte"
-                  : "Ouvrir la vente"}
-            </button>
-          </div>
-        </div>
-      ) : null}
 
-      {step > 0 && step < totalSteps - 1 ? (
-        <div className="mt-8 flex flex-wrap items-center justify-between gap-3">
-          <button
-            className="rounded-full border border-ink/20 px-5 py-2 text-sm font-semibold"
-            onClick={goPrev}
-          >
-            Precedent
-          </button>
-          <button
-            className="rounded-full bg-ink px-6 py-2 text-sm font-semibold text-stone"
-            onClick={goNext}
-            disabled={status === "saving"}
-          >
-            Suivant
-          </button>
-        </div>
-      ) : null}
-
-      {editProductId && editProductDraft ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-6">
-          <div className="w-full max-w-2xl rounded-none border border-clay/70 bg-white p-6 shadow-card">
-            <h3 className="font-serif text-2xl">Modifier le produit</h3>
-            <div className="mt-4 grid gap-4 md:grid-cols-2">
-              <label className="flex flex-col gap-2 text-sm font-semibold text-ink/70">
-                Nom
-                <input
-                  className="rounded-none border border-ink/20 px-3 py-2"
-                  value={editProductDraft.name}
-                  onChange={(event) =>
-                    setEditProductDraft((prev) => (prev ? { ...prev, name: event.target.value } : prev))
-                  }
-                />
-              </label>
-              <label className="flex flex-col gap-2 text-sm font-semibold text-ink/70">
-                Image URL
-                <input
-                  className="rounded-none border border-ink/20 px-3 py-2"
-                  value={editProductDraft.imageUrl}
-                  onChange={(event) =>
-                    setEditProductDraft((prev) => (prev ? { ...prev, imageUrl: event.target.value } : prev))
-                  }
-                />
-              </label>
-              <label className="flex flex-col gap-2 text-sm font-semibold text-ink/70 md:col-span-2">
-                Description
-                <textarea
-                  className="min-h-[120px] rounded-none border border-ink/20 px-3 py-2"
-                  value={editProductDraft.description}
-                  onChange={(event) =>
-                    setEditProductDraft((prev) => (prev ? { ...prev, description: event.target.value } : prev))
-                  }
-                />
-              </label>
-              <label className="flex items-center gap-2 text-sm font-semibold text-ink/70">
-                <input
-                  type="checkbox"
-                  checked={editProductDraft.isOrganic}
-                  onChange={(event) =>
-                    setEditProductDraft((prev) => (prev ? { ...prev, isOrganic: event.target.checked } : prev))
-                  }
-                />
-                Bio
-              </label>
-              <label className="flex flex-col gap-2 text-sm font-semibold text-ink/70">
-                Categorie
-                <select
-                  className="rounded-none border border-ink/20 px-3 py-2"
-                  value={editProductDraft.categoryId}
-                  onChange={(event) =>
-                    setEditProductDraft((prev) => (prev ? { ...prev, categoryId: event.target.value } : prev))
-                  }
-                >
-                  <option value="">Sans categorie</option>
-                  {categories.map((category) => (
-                    <option key={category.id} value={category.id}>
-                      {category.name ?? category.id}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-            <div className="mt-6 flex items-center gap-3">
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-ink/20 pt-4">
+            <div className="flex gap-2">
               <button
-                className="rounded-full bg-ink px-5 py-2 text-sm font-semibold text-stone"
-                onClick={saveProduct}
+                className="rounded-md border border-ink/25 px-4 py-2 text-sm font-semibold disabled:opacity-40"
+                disabled={flowIndex <= 0}
+                onClick={() => goToStep(Math.max(flowIndex - 1, 0))}
               >
-                Enregistrer
+                Precedent
               </button>
               <button
-                className="rounded-full border border-ink/20 px-4 py-2 text-sm font-semibold"
-                onClick={() => {
-                  setEditProductId(null);
-                  setEditProductDraft(null);
-                }}
+                className="rounded-md border border-ink/25 px-4 py-2 text-sm font-semibold disabled:opacity-40"
+                disabled={flowIndex >= flowProducerIds.length - 1}
+                onClick={() => goToStep(Math.min(flowIndex + 1, flowProducerIds.length - 1))}
               >
-                Annuler
+                Suivant
+              </button>
+            </div>
+            <div className="flex gap-2">
+              <button
+                className="rounded-md border border-ink/25 px-4 py-2 text-sm font-semibold"
+                onClick={saveDraft}
+                disabled={saving}
+              >
+                Enregistrer ce producteur
+              </button>
+              <button
+                className="rounded-md bg-forest px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                onClick={saveAndValidate}
+                disabled={saving || !currentRow}
+              >
+                Enregistrer et valider
               </button>
             </div>
           </div>
-        </div>
-      ) : null}
 
-      {addProductOpen && currentProducer ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-6">
-          <div className="w-full max-w-2xl rounded-none border border-clay/70 bg-white p-6 shadow-card">
-            <h3 className="font-serif text-2xl">Ajouter un produit</h3>
-            <div className="mt-4 grid gap-4 md:grid-cols-2">
-              <label className="flex flex-col gap-2 text-sm font-semibold text-ink/70">
-                Nom
-                <input
-                  className="rounded-none border border-ink/20 px-3 py-2"
-                  value={addProductDraft.name}
-                  onChange={(event) => setAddProductDraft((prev) => ({ ...prev, name: event.target.value }))}
-                />
-              </label>
-              <label className="flex flex-col gap-2 text-sm font-semibold text-ink/70">
-                Image URL
-                <input
-                  className="rounded-none border border-ink/20 px-3 py-2"
-                  value={addProductDraft.imageUrl}
-                  onChange={(event) => setAddProductDraft((prev) => ({ ...prev, imageUrl: event.target.value }))}
-                />
-              </label>
-              <label className="flex flex-col gap-2 text-sm font-semibold text-ink/70 md:col-span-2">
-                Description
-                <textarea
-                  className="min-h-[120px] rounded-none border border-ink/20 px-3 py-2"
-                  value={addProductDraft.description}
-                  onChange={(event) => setAddProductDraft((prev) => ({ ...prev, description: event.target.value }))}
-                />
-              </label>
-              <label className="flex items-center gap-2 text-sm font-semibold text-ink/70">
-                <input
-                  type="checkbox"
-                  checked={addProductDraft.isOrganic}
-                  onChange={(event) => setAddProductDraft((prev) => ({ ...prev, isOrganic: event.target.checked }))}
-                />
-                Bio
-              </label>
-              <label className="flex flex-col gap-2 text-sm font-semibold text-ink/70">
-                Categorie
-                <select
-                  className="rounded-none border border-ink/20 px-3 py-2"
-                  value={addProductDraft.categoryId}
-                  onChange={(event) => setAddProductDraft((prev) => ({ ...prev, categoryId: event.target.value }))}
-                >
-                  <option value="">Sans categorie</option>
-                  {categories.map((category) => (
-                    <option key={category.id} value={category.id}>
-                      {category.name ?? category.id}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="flex flex-col gap-2 text-sm font-semibold text-ink/70">
-                Variante
-                <input
-                  className="rounded-none border border-ink/20 px-3 py-2"
-                  value={addProductDraft.variantLabel}
-                  onChange={(event) => setAddProductDraft((prev) => ({ ...prev, variantLabel: event.target.value }))}
-                />
-              </label>
-              <label className="flex flex-col gap-2 text-sm font-semibold text-ink/70">
-                Prix
-                <input
-                  type="number"
-                  min={0}
-                  step="0.1"
-                  className="rounded-none border border-ink/20 px-3 py-2"
-                  value={addProductDraft.variantPrice}
-                  onChange={(event) => setAddProductDraft((prev) => ({ ...prev, variantPrice: event.target.value }))}
-                />
-              </label>
-            </div>
-            <div className="mt-6 flex items-center gap-3">
-              <button
-                className="rounded-full bg-ink px-5 py-2 text-sm font-semibold text-stone"
-                onClick={async () => {
-                  try {
-                    setStatus("saving");
-                    const dateKeys = dates.map((date) => dateKey(date));
-                    const saleDates = dateKeys.map((key) => Timestamp.fromDate(dateFromKey(key)));
-                    const productRef = await addDoc(collection(firebaseDb, "products"), {
-                      producerId: currentProducer.id,
-                      name: addProductDraft.name.trim(),
-                      description: addProductDraft.description.trim(),
-                      imageUrl: addProductDraft.imageUrl.trim(),
-                      isOrganic: addProductDraft.isOrganic,
-                      categoryId: addProductDraft.categoryId || null,
-                      saleDates,
-                    });
-                    const price = Number(addProductDraft.variantPrice || 0);
-                    const variantRef = await addDoc(
-                      collection(firebaseDb, "products", productRef.id, "variants"),
-                      {
-                        label: addProductDraft.variantLabel.trim(),
-                        price,
-                        activeDates: dateKeys,
-                      },
-                    );
-                    setProducts((prev) => [
-                      ...prev,
-                      {
-                        id: productRef.id,
-                        producerId: currentProducer.id,
-                        name: addProductDraft.name.trim(),
-                        description: addProductDraft.description.trim(),
-                        imageUrl: addProductDraft.imageUrl.trim(),
-                        isOrganic: addProductDraft.isOrganic,
-                        categoryId: addProductDraft.categoryId || undefined,
-                        saleDates,
-                      },
-                    ]);
-                    setVariants((prev) => [
-                      ...prev,
-                      {
-                        id: variantRef.id,
-                        productId: productRef.id,
-                        label: addProductDraft.variantLabel.trim(),
-                        price,
-                        activeDates: dateKeys,
-                      },
-                    ]);
-                    setAddProductDraft({
-                      name: "",
-                      description: "",
-                      imageUrl: "",
-                      isOrganic: false,
-                      categoryId: "",
-                      variantLabel: "",
-                      variantPrice: "",
-                    });
-                    setAddProductOpen(false);
-                  } catch (error) {
-                    const err = error instanceof Error ? error.message : "Erreur inconnue.";
-                    setMessage(err);
-                  } finally {
-                    setStatus("idle");
-                  }
-                }}
-              >
-                Ajouter
-              </button>
-              <button
-                className="rounded-full border border-ink/20 px-4 py-2 text-sm font-semibold"
-                onClick={() => setAddProductOpen(false)}
-              >
-                Annuler
-              </button>
-            </div>
-          </div>
-        </div>
+        </section>
       ) : null}
     </div>
   );

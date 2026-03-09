@@ -9,6 +9,7 @@ import ProductsEditor from "@/components/admin/ProductsEditor";
 import ProducersEditor from "@/components/admin/ProducersEditor";
 import InvitesEditor from "@/components/admin/InvitesEditor";
 import OrdersEditor from "@/components/admin/OrdersEditor";
+import MessagesEditor from "@/components/admin/MessagesEditor";
 
 const COLLECTIONS: Record<
   string,
@@ -16,7 +17,7 @@ const COLLECTIONS: Record<
 > = {
   members: {
     title: "Adherents",
-    description: "Profil, contact, statut d'adhesion et lien Auth.",
+    description: "Profil, contact et adhesion.",
     fields: [
       { label: "Prenom", path: "firstName", type: "text", table: true },
       { label: "Nom", path: "lastName", type: "text", table: true },
@@ -25,12 +26,7 @@ const COLLECTIONS: Record<
       { label: "Adresse", path: "address.street", type: "text" },
       { label: "Code postal", path: "address.postalCode", type: "text" },
       { label: "Ville", path: "address.city", type: "text" },
-      { label: "Statut", path: "membershipStatus", type: "text", table: true },
-      { label: "Debut adhesion", path: "membership.startDate", type: "date" },
-      { label: "Fin adhesion", path: "membership.endDate", type: "date" },
-      { label: "Mode paiement", path: "membership.paymentMode", type: "text" },
-      { label: "Note interne", path: "membership.internalNote", type: "text" },
-      { label: "Auth UID", path: "auth.uid", type: "text" },
+      { label: "Adhesion", path: "membershipStatus", type: "text", table: true },
       { label: "Role", path: "auth.role", type: "text", table: true },
     ],
   },
@@ -39,6 +35,8 @@ const COLLECTIONS: Record<
     description: "Coordonnees et statut dans la coop.",
     fields: [
       { label: "Nom", path: "name", type: "text", table: true },
+      { label: "Referent", path: "referentName", type: "text", table: true },
+      { label: "Referent tel", path: "referentPhone", type: "text" },
       { label: "Contact prenom", path: "contact.firstName", type: "text" },
       { label: "Contact nom", path: "contact.lastName", type: "text" },
       { label: "Email", path: "email", type: "text", table: true },
@@ -47,6 +45,8 @@ const COLLECTIONS: Record<
       { label: "Code postal", path: "address.postalCode", type: "text" },
       { label: "Ville", path: "address.city", type: "text" },
       { label: "Statut coop", path: "coopStatus", type: "text", table: true },
+      { label: "Type de produit", path: "productType", type: "text" },
+      { label: "Frequence", path: "frequency", type: "text" },
       { label: "Notes", path: "notes", type: "text" },
     ],
   },
@@ -214,6 +214,10 @@ export default function AdminCollectionPage() {
 
   if (key === "invites") {
     return <InvitesEditor />;
+  }
+
+  if (key === "messages") {
+    return <MessagesEditor />;
   }
 
   return (

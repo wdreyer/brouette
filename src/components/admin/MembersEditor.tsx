@@ -1,8 +1,19 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { addDoc, collection, doc, getDocs, limit, query, setDoc, Timestamp } from "firebase/firestore";
+import {
+  addDoc,
+  collection,
+  doc,
+  getDocs,
+  limit,
+  query,
+  setDoc,
+  Timestamp,
+  writeBatch,
+} from "firebase/firestore";
 import { firebaseDb } from "@/lib/firebase/client";
+import { useAuth } from "@/components/auth/AuthProvider";
 
 type FieldType = "text" | "number" | "boolean" | "date" | "datetime";
 
@@ -23,6 +34,14 @@ type EditorProps = {
 type DocEntry = {
   id: string;
   data: Record<string, unknown>;
+};
+
+type Producer = {
+  id: string;
+  name?: string;
+  referentId?: string | null;
+  referentName?: string | null;
+  referentPhone?: string | null;
 };
 
 function getByPath(obj: Record<string, unknown>, path: string) {
@@ -82,19 +101,39 @@ function displayValue(value: unknown) {
   return String(value);
 }
 
+function formatMembershipStatus(value: unknown) {
+  const normalized = String(value ?? "").toLowerCase();
+  if (normalized === "active" || normalized === "adherent") return "Actif";
+  if (normalized === "inactive" || normalized === "non-adherent" || normalized === "non") return "Non";
+  return displayValue(value);
+}
+
+function formatRole(value: unknown) {
+  if (value === "admin") return "Admin";
+  if (value === "referent") return "Referent";
+  if (value === "member") return "Membre";
+  return displayValue(value);
+}
+
 export default function MembersEditor({
   collectionName,
   title,
   description,
   fields,
 }: EditorProps) {
+  const { role } = useAuth();
+  const isAdmin = role === "admin";
   const [docs, setDocs] = useState<DocEntry[]>([]);
+  const [producers, setProducers] = useState<Producer[]>([]);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<string>("");
+  const [viewingEntry, setViewingEntry] = useState<DocEntry | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<Record<string, unknown>>({});
   const [createOpen, setCreateOpen] = useState(false);
   const [createDraft, setCreateDraft] = useState<Record<string, unknown>>({});
+  const [selectedProducerIds, setSelectedProducerIds] = useState<string[]>([]);
+  const [producerSearch, setProducerSearch] = useState("");
   const [filter, setFilter] = useState("");
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [filterRole, setFilterRole] = useState<string>("all");
@@ -105,13 +144,20 @@ export default function MembersEditor({
 
   const load = async () => {
     setLoading(true);
-    const q = query(collection(firebaseDb, collectionName), limit(50));
-    const snapshot = await getDocs(q);
-    const items = snapshot.docs.map((docSnap) => ({
+    const [membersSnap, producersSnap] = await Promise.all([
+      getDocs(query(collection(firebaseDb, collectionName), limit(50))),
+      getDocs(collection(firebaseDb, "producers")),
+    ]);
+    const items = membersSnap.docs.map((docSnap) => ({
       id: docSnap.id,
       data: docSnap.data() as Record<string, unknown>,
     }));
+    const producerItems = producersSnap.docs.map((docSnap) => ({
+      id: docSnap.id,
+      ...(docSnap.data() as Omit<Producer, "id">),
+    }));
     setDocs(items);
+    setProducers(producerItems);
     setLoading(false);
   };
 
@@ -119,18 +165,72 @@ export default function MembersEditor({
     load().catch(() => setLoading(false));
   }, [collectionName]);
 
+  const openView = (entry: DocEntry) => {
+    setViewingEntry(entry);
+    setMessage("");
+  };
+
   const openEdit = (entry: DocEntry) => {
     setEditingId(entry.id);
     setEditDraft(entry.data);
     setMessage("");
+    setProducerSearch("");
+    const assigned = producers
+      .filter((producer) => producer.referentId === entry.id)
+      .map((producer) => producer.id);
+    setSelectedProducerIds(assigned);
   };
 
   const saveEdit = async () => {
     if (!editingId) return;
     try {
       await setDoc(doc(firebaseDb, collectionName, editingId), editDraft, { merge: true });
+      const roleValue = String(getByPath(editDraft, "auth.role") ?? "member");
+      const firstName = String(getByPath(editDraft, "firstName") ?? "");
+      const lastName = String(getByPath(editDraft, "lastName") ?? "");
+      const phone = String(getByPath(editDraft, "phone") ?? "");
+      const referentName = `${firstName} ${lastName}`.trim();
+      const batch = writeBatch(firebaseDb);
+
+      if (roleValue === "referent") {
+        producers.forEach((producer) => {
+          const isSelected = selectedProducerIds.includes(producer.id);
+          const isCurrent = producer.referentId === editingId;
+          if (isSelected || isCurrent) {
+            batch.set(
+              doc(firebaseDb, "producers", producer.id),
+              isSelected
+                ? {
+                    referentId: editingId,
+                    referentName: referentName || null,
+                    referentPhone: phone || null,
+                  }
+                : {
+                    referentId: null,
+                    referentName: null,
+                    referentPhone: null,
+                  },
+              { merge: true },
+            );
+          }
+        });
+      } else {
+        producers.forEach((producer) => {
+          if (producer.referentId === editingId) {
+            batch.set(
+              doc(firebaseDb, "producers", producer.id),
+              { referentId: null, referentName: null, referentPhone: null },
+              { merge: true },
+            );
+          }
+        });
+      }
+      await batch.commit();
       setMessage("Adherent mis a jour.");
       setEditingId(null);
+      setViewingEntry(null);
+      setSelectedProducerIds([]);
+      setProducerSearch("");
       await load();
     } catch (error) {
       const err = error instanceof Error ? error.message : "Erreur inconnue.";
@@ -217,7 +317,7 @@ export default function MembersEditor({
         >
           <option value="all">Tous les statuts</option>
           <option value="active">Actif</option>
-          <option value="inactive">Inactif</option>
+          <option value="inactive">Non</option>
         </select>
         <select
           className="rounded-full border border-ink/20 bg-white px-3 py-2 text-sm"
@@ -225,7 +325,8 @@ export default function MembersEditor({
           onChange={(event) => setFilterRole(event.target.value)}
         >
           <option value="all">Tous les roles</option>
-          <option value="member">Adherent</option>
+          <option value="member">Membre</option>
+          <option value="referent">Referent</option>
           <option value="admin">Admin</option>
         </select>
         <button
@@ -264,24 +365,27 @@ export default function MembersEditor({
                       {sortKey === field.path ? (sortDir === "asc" ? " ↑" : " ↓") : ""}
                     </th>
                   ))}
-                  <th className="px-3 py-1.5 text-xs font-semibold text-ink">Actions</th>
+                  <th className="px-3 py-1.5 text-xs font-semibold text-ink">Producteurs</th>
                 </tr>
               </thead>
               <tbody>
                 {sortedDocs.map((entry) => (
-                  <tr key={entry.id} className="border-b border-clay/50">
+                  <tr
+                    key={entry.id}
+                    className="cursor-pointer border-b border-clay/50 hover:bg-stone/60"
+                    onClick={() => openView(entry)}
+                  >
                     {tableFields.map((field) => (
                       <td key={field.path} className="px-3 py-1.5 text-xs text-ink/70">
-                        {displayValue(getByPath(entry.data, field.path))}
+                        {field.path === "membershipStatus"
+                          ? formatMembershipStatus(getByPath(entry.data, field.path))
+                          : field.path === "auth.role"
+                            ? formatRole(getByPath(entry.data, field.path))
+                            : displayValue(getByPath(entry.data, field.path))}
                       </td>
                     ))}
-                    <td className="px-3 py-1.5">
-                      <button
-                        className="rounded-full border border-ink/20 px-3 py-1 text-xs font-semibold"
-                        onClick={() => openEdit(entry)}
-                      >
-                        Editer
-                      </button>
+                    <td className="px-3 py-1.5 text-xs text-ink/70">
+                      {producers.filter((producer) => producer.referentId === entry.id).length}
                     </td>
                   </tr>
                 ))}
@@ -293,21 +397,130 @@ export default function MembersEditor({
 
       {message ? <p className="text-sm text-ink/70">{message}</p> : null}
 
+      {viewingEntry ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-6">
+          <div className="w-full max-w-2xl rounded-3xl border border-clay/70 bg-white p-6 shadow-card">
+            <h3 className="font-serif text-2xl">Fiche adherent</h3>
+            <div className="mt-4 grid gap-4 md:grid-cols-2">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">Nom</p>
+                <p className="text-sm text-ink">
+                  {`${String(getByPath(viewingEntry.data, "firstName") ?? "")} ${String(
+                    getByPath(viewingEntry.data, "lastName") ?? "",
+                  )}`.trim() || "-"}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">Email</p>
+                <p className="text-sm text-ink">{String(getByPath(viewingEntry.data, "email") ?? "-")}</p>
+              </div>
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">Telephone</p>
+                <p className="text-sm text-ink">{String(getByPath(viewingEntry.data, "phone") ?? "-")}</p>
+              </div>
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">Adhesion</p>
+                <p className="text-sm text-ink">
+                  {formatMembershipStatus(getByPath(viewingEntry.data, "membershipStatus"))}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">Role</p>
+                <p className="text-sm text-ink">
+                  {formatRole(getByPath(viewingEntry.data, "auth.role") ?? "member")}
+                </p>
+              </div>
+            </div>
+
+            {String(getByPath(viewingEntry.data, "auth.role") ?? "") === "referent" ? (
+              <div className="mt-6">
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">
+                  Producteurs
+                </p>
+                <div className="mt-2 flex flex-wrap gap-2 text-xs text-ink/70">
+                  {producers
+                    .filter((producer) => producer.referentId === viewingEntry.id)
+                    .map((producer) => (
+                      <a
+                        key={producer.id}
+                        href={`/admin/producers/${producer.id}`}
+                        className="rounded-full border border-ink/15 px-3 py-1"
+                      >
+                        {producer.name ?? "Producteur"}
+                      </a>
+                    ))}
+                  {!producers.some((producer) => producer.referentId === viewingEntry.id) ? (
+                    <span className="text-xs text-ink/60">Aucun producteur attribue.</span>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
+
+            <div className="mt-6 flex items-center gap-3">
+              {isAdmin ? (
+                <button
+                  className="rounded-full bg-moss px-5 py-2 text-sm font-semibold text-white"
+                  onClick={() => {
+                    setViewingEntry(null);
+                    openEdit(viewingEntry);
+                  }}
+                >
+                  Editer
+                </button>
+              ) : null}
+              <button
+                className="rounded-full border border-ink/20 px-4 py-2 text-sm font-semibold"
+                onClick={() => setViewingEntry(null)}
+              >
+                Fermer
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {editingId ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-6">
           <div className="w-full max-w-2xl rounded-3xl border border-clay/70 bg-white p-6 shadow-card">
             <h3 className="font-serif text-2xl">Editer adherent</h3>
             <div className="mt-4 grid gap-4 md:grid-cols-2">
-              {fields.map((field) => {
-                const value = getByPath(editDraft, field.path);
-                const inputValue = toInputValue(value, field.type);
-                return (
-                  <label key={field.path} className="flex flex-col gap-2 text-sm font-semibold text-ink/70">
-                    {field.label}
-                    {field.type === "boolean" ? (
-                      <select
-                        className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
-                        value={String(inputValue)}
+                {fields.map((field) => {
+                  const value = getByPath(editDraft, field.path);
+                  const inputValue = toInputValue(value, field.type);
+                  return (
+                    <label key={field.path} className="flex flex-col gap-2 text-sm font-semibold text-ink/70">
+                      {field.label}
+                      {field.path === "auth.role" ? (
+                        <select
+                          className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
+                          value={String(inputValue || "member")}
+                          onChange={(event) => {
+                            const next = { ...editDraft };
+                            setByPath(next, field.path, event.target.value);
+                            setEditDraft(next);
+                          }}
+                        >
+                          <option value="member">Membre</option>
+                          <option value="referent">Referent</option>
+                          <option value="admin">Admin</option>
+                        </select>
+                      ) : field.path === "membershipStatus" ? (
+                        <select
+                          className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
+                          value={String(inputValue || "active")}
+                          onChange={(event) => {
+                            const next = { ...editDraft };
+                            setByPath(next, field.path, event.target.value);
+                            setEditDraft(next);
+                          }}
+                        >
+                          <option value="active">Actif</option>
+                          <option value="inactive">Non</option>
+                        </select>
+                      ) : field.type === "boolean" ? (
+                        <select
+                          className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
+                          value={String(inputValue)}
                         onChange={(event) => {
                           const next = { ...editDraft };
                           setByPath(next, field.path, fromInputValue(event.target.value, field.type));
@@ -344,6 +557,71 @@ export default function MembersEditor({
                 );
               })}
             </div>
+            {String(getByPath(editDraft, "auth.role") ?? "") === "referent" ? (
+              <div className="mt-6">
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">
+                  Producteurs geres
+                </p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {selectedProducerIds.length ? (
+                    producers
+                      .filter((producer) => selectedProducerIds.includes(producer.id))
+                      .map((producer) => (
+                        <button
+                          key={producer.id}
+                          className="rounded-full border border-ink/15 px-3 py-1 text-xs text-ink/70"
+                          onClick={() =>
+                            setSelectedProducerIds((prev) =>
+                              prev.filter((id) => id !== producer.id),
+                            )
+                          }
+                        >
+                          {producer.name ?? "Producteur"} · retirer
+                        </button>
+                      ))
+                  ) : (
+                    <span className="text-xs text-ink/60">Aucun producteur attribue.</span>
+                  )}
+                </div>
+                <div className="mt-4">
+                  <label className="flex flex-col gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">
+                    Ajouter un producteur
+                    <input
+                      className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm normal-case"
+                      placeholder="Rechercher..."
+                      value={producerSearch}
+                      onChange={(event) => setProducerSearch(event.target.value)}
+                    />
+                  </label>
+                  <div className="mt-2 max-h-40 overflow-y-auto rounded-xl border border-ink/10 bg-white">
+                    {producers
+                      .filter((producer) => !selectedProducerIds.includes(producer.id))
+                      .filter((producer) =>
+                        producerSearch
+                          ? String(producer.name ?? "")
+                              .toLowerCase()
+                              .includes(producerSearch.toLowerCase())
+                          : true,
+                      )
+                      .map((producer) => (
+                        <button
+                          key={producer.id}
+                          className="flex w-full items-center justify-between border-b border-ink/5 px-3 py-2 text-left text-xs text-ink/70 hover:bg-stone/60"
+                          onClick={() =>
+                            setSelectedProducerIds((prev) => [...prev, producer.id])
+                          }
+                        >
+                          <span>{producer.name ?? "Producteur"}</span>
+                          <span className="text-[11px] font-semibold text-ink/50">Ajouter</span>
+                        </button>
+                      ))}
+                    {!producers.filter((producer) => !selectedProducerIds.includes(producer.id)).length ? (
+                      <p className="px-3 py-2 text-xs text-ink/50">Tout est deja attribue.</p>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+            ) : null}
             <div className="mt-6 flex items-center gap-3">
               <button
                 className="rounded-full bg-moss px-5 py-2 text-sm font-semibold text-white"
@@ -370,7 +648,34 @@ export default function MembersEditor({
               {fields.map((field) => (
                 <label key={field.path} className="flex flex-col gap-2 text-sm font-semibold text-ink/70">
                   {field.label}
-                  {field.type === "boolean" ? (
+                  {field.path === "auth.role" ? (
+                    <select
+                      className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
+                      value={String(toInputValue(getByPath(createDraft, field.path), field.type) || "member")}
+                      onChange={(event) => {
+                        const next = { ...createDraft };
+                        setByPath(next, field.path, event.target.value);
+                        setCreateDraft(next);
+                      }}
+                    >
+                      <option value="member">Membre</option>
+                      <option value="referent">Referent</option>
+                      <option value="admin">Admin</option>
+                    </select>
+                  ) : field.path === "membershipStatus" ? (
+                    <select
+                      className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
+                      value={String(toInputValue(getByPath(createDraft, field.path), field.type) || "active")}
+                      onChange={(event) => {
+                        const next = { ...createDraft };
+                        setByPath(next, field.path, event.target.value);
+                        setCreateDraft(next);
+                      }}
+                    >
+                      <option value="active">Actif</option>
+                      <option value="inactive">Non</option>
+                    </select>
+                  ) : field.type === "boolean" ? (
                     <select
                       className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
                       value={String(toInputValue(getByPath(createDraft, field.path), field.type))}

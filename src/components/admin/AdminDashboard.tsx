@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { collection, getDocs } from "firebase/firestore";
 import { firebaseDb } from "@/lib/firebase/client";
@@ -12,128 +13,132 @@ type Distribution = {
   openedAt?: { toDate?: () => Date };
 };
 
-type Order = {
-  distributionId?: string | null;
-  totals?: { totalAmount?: number };
-  validatedAt?: { toDate?: () => Date };
-};
-
-function formatMoney(amount: number) {
-  return amount.toFixed(2).replace(".", ",");
-}
-
-function dateKey(date: Date) {
-  return date.toISOString().slice(0, 10);
-}
-
 type AdminDashboardProps = {
   children?: ReactNode;
   focusMode?: boolean;
 };
 
+type SaleSummary = {
+  activeProducerCount: number;
+  validatedProducerCount: number;
+  pendingProducerCount: number;
+  totalProducerRows: number;
+};
+
+function daysUntil(date?: Date | null) {
+  if (!date) return null;
+  const now = new Date();
+  return Math.ceil((date.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+}
+
+function isPlannedStatus(status?: string) {
+  const normalized = String(status ?? "").toLowerCase();
+  return normalized !== "open" && normalized !== "finished" && normalized !== "fermee";
+}
+
+function statusLabel(status?: string) {
+  const normalized = String(status ?? "").toLowerCase();
+  if (normalized === "open") return "Ouverte";
+  if (normalized === "finished" || normalized === "fermee") return "Fermee";
+  return "Planifiee";
+}
+
 export default function AdminDashboard({ children, focusMode = false }: AdminDashboardProps) {
-  if (focusMode) {
-    return <div>{children}</div>;
-  }
+  if (focusMode) return <div>{children}</div>;
+
   const [loading, setLoading] = useState(true);
-  const [stats, setStats] = useState({
+  const [entityStats, setEntityStats] = useState({
     members: 0,
+    producers: 0,
     products: 0,
     orders: 0,
-    producers: 0,
-    revenueTotal: 0,
-    revenueRecent: 0,
-    recentDistributions: [] as { id: string; label: string; total: number }[],
   });
   const [openDistribution, setOpenDistribution] = useState<Distribution | null>(null);
   const [nextDistribution, setNextDistribution] = useState<Distribution | null>(null);
-  const [nextDistributions, setNextDistributions] = useState<string[]>([]);
+  const [saleSummary, setSaleSummary] = useState<SaleSummary>({
+    activeProducerCount: 0,
+    validatedProducerCount: 0,
+    pendingProducerCount: 0,
+    totalProducerRows: 0,
+  });
 
   useEffect(() => {
     const load = async () => {
-      const [membersSnap, productsSnap, ordersSnap, producersSnap, distSnap] = await Promise.all([
+      const [membersSnap, producersSnap, productsSnap, ordersSnap, distSnap] = await Promise.all([
         getDocs(collection(firebaseDb, "members")),
+        getDocs(collection(firebaseDb, "producers")),
         getDocs(collection(firebaseDb, "products")),
         getDocs(collection(firebaseDb, "orders")),
-        getDocs(collection(firebaseDb, "producers")),
         getDocs(collection(firebaseDb, "distributionDates")),
       ]);
 
-      const distItems = distSnap.docs.map(
-        (docSnap) =>
-          ({ id: docSnap.id, ...(docSnap.data() as Omit<Distribution, "id">) }) as Distribution,
-      );
-      distItems.sort((a, b) => {
+      setEntityStats({
+        members: membersSnap.size,
+        producers: producersSnap.size,
+        products: productsSnap.size,
+        orders: ordersSnap.size,
+      });
+
+      const distributions = distSnap.docs.map((docSnap) => ({
+        id: docSnap.id,
+        ...(docSnap.data() as Omit<Distribution, "id">),
+      })) as Distribution[];
+      distributions.sort((a, b) => {
         const aDate = a.dates?.[0]?.toDate?.() ?? new Date(0);
         const bDate = b.dates?.[0]?.toDate?.() ?? new Date(0);
         return aDate.getTime() - bDate.getTime();
       });
 
-      const openDist = pickOpenDistribution(distItems);
-      setOpenDistribution(openDist);
+      const open = pickOpenDistribution(distributions);
+      setOpenDistribution(open);
 
-      const today = new Date();
-      const nextDist =
-        distItems.find((dist) => {
+      const planned =
+        distributions.find((dist) => {
           const firstDate = dist.dates?.[0]?.toDate?.() ?? new Date(0);
-          return dist.status !== "open" && firstDate >= today;
+          return isPlannedStatus(dist.status) && firstDate >= new Date();
         }) ?? null;
-      setNextDistribution(nextDist);
+      const firstFutureAnyStatus =
+        distributions.find((dist) => {
+          const firstDate = dist.dates?.[0]?.toDate?.() ?? new Date(0);
+          return firstDate >= new Date();
+        }) ?? null;
+      const latestByDate = distributions[distributions.length - 1] ?? null;
+      const fallbackDistribution = planned ?? firstFutureAnyStatus ?? latestByDate;
+      setNextDistribution(fallbackDistribution);
 
-      const upcoming = distItems
-        .filter((dist) => dist.dates?.[0]?.toDate?.() && dist.dates![0]!.toDate!() > today)
-        .slice(0, 3)
-        .map((dist) =>
-          (dist.dates ?? [])
-            .slice(0, 3)
-            .map((date) => date.toDate?.()?.toLocaleDateString("fr-FR"))
-            .join(" · "),
-        );
-      setNextDistributions(upcoming);
+      const targetDistribution = open ?? fallbackDistribution;
+      if (!targetDistribution) {
+        setSaleSummary({
+          activeProducerCount: 0,
+          validatedProducerCount: 0,
+          pendingProducerCount: 0,
+          totalProducerRows: 0,
+        });
+        setLoading(false);
+        return;
+      }
 
-      const orders = ordersSnap.docs.map((docSnap) => docSnap.data() as Order);
-      const revenueTotal = orders.reduce((sum, order) => sum + Number(order.totals?.totalAmount ?? 0), 0);
-
-      const totalsByDistribution = new Map<string, number>();
-      orders.forEach((order) => {
-        if (!order.distributionId) return;
-        const current = totalsByDistribution.get(order.distributionId) ?? 0;
-        totalsByDistribution.set(order.distributionId, current + Number(order.totals?.totalAmount ?? 0));
+      const producerRowsSnap = await getDocs(
+        collection(firebaseDb, "distributionDates", targetDistribution.id, "producers"),
+      );
+      const rows = producerRowsSnap.docs.map((docSnap) => {
+        const data = docSnap.data() as { active?: boolean; validatedByReferent?: boolean };
+        return {
+          active: data.active !== false,
+          validatedByReferent: data.validatedByReferent === true,
+        };
       });
 
-      const recentDist = distItems
-        .filter((dist) => dist.status === "finished" || dist.status === "closed")
-        .sort((a, b) => {
-          const aDate = a.dates?.[0]?.toDate?.() ?? new Date(0);
-          const bDate = b.dates?.[0]?.toDate?.() ?? new Date(0);
-          return bDate.getTime() - aDate.getTime();
-        })
-        .slice(0, 3)
-        .map((dist) => {
-          const label =
-            dist.dates && dist.dates.length
-              ? dist.dates
-                  .slice(0, 3)
-                  .map((d) => d.toDate?.()?.toLocaleDateString("fr-FR", { day: "numeric", month: "short" }))
-                  .join(" · ")
-              : dist.id;
-          return {
-            id: dist.id,
-            label,
-            total: totalsByDistribution.get(dist.id) ?? 0,
-          };
-        });
+      const activeProducerCount = rows.filter((row) => row.active).length;
+      const validatedProducerCount = rows.filter(
+        (row) => row.active && row.validatedByReferent,
+      ).length;
 
-      const revenueRecent = recentDist.reduce((sum, item) => sum + item.total, 0);
-
-      setStats({
-        members: membersSnap.size,
-        products: productsSnap.size,
-        orders: ordersSnap.size,
-        producers: producersSnap.size,
-        revenueTotal,
-        revenueRecent,
-        recentDistributions: recentDist,
+      setSaleSummary({
+        activeProducerCount,
+        validatedProducerCount,
+        pendingProducerCount: Math.max(activeProducerCount - validatedProducerCount, 0),
+        totalProducerRows: rows.length,
       });
       setLoading(false);
     };
@@ -141,156 +146,86 @@ export default function AdminDashboard({ children, focusMode = false }: AdminDas
     load().catch(() => setLoading(false));
   }, []);
 
-  const openDates = useMemo(() => {
-    if (!openDistribution?.dates) return [];
-    return openDistribution.dates.slice(0, 3).map((date) => date.toDate?.()).filter(Boolean) as Date[];
-  }, [openDistribution]);
+  const activeDistribution = openDistribution ?? nextDistribution;
+  const saleDates = useMemo(
+    () => (activeDistribution?.dates ?? []).slice(0, 3).map((d) => d.toDate?.()).filter(Boolean) as Date[],
+    [activeDistribution],
+  );
+  const nextDate = saleDates[0] ?? null;
+  const daysBefore = daysUntil(nextDate);
 
-  const nextDates = useMemo(() => {
-    if (!nextDistribution?.dates) return [];
-    return nextDistribution.dates.slice(0, 3).map((date) => date.toDate?.()).filter(Boolean) as Date[];
-  }, [nextDistribution]);
+  const miniCards = [
+    { label: "Adherents", value: entityStats.members },
+    { label: "Producteurs", value: entityStats.producers },
+    { label: "Produits", value: entityStats.products },
+    { label: "Commandes", value: entityStats.orders },
+  ];
+
+  const summaryCards = [
+    { label: "Producteurs a valider", value: saleSummary.pendingProducerCount },
+    { label: "Producteurs valides", value: saleSummary.validatedProducerCount },
+    { label: "Producteurs actifs", value: saleSummary.activeProducerCount },
+    { label: "Total producteurs (vente)", value: saleSummary.totalProducerRows },
+    { label: "Jours avant prochaine date", value: daysBefore ?? "-" },
+  ];
 
   return (
-    <div className="flex flex-col gap-6">
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        {[
-          { label: "Adherents", value: stats.members },
-          { label: "Producteurs", value: stats.producers },
-          { label: "Produits", value: stats.products },
-          { label: "Commandes", value: stats.orders },
-        ].map((card) => (
-          <div
-            key={card.label}
-            className="rounded-2xl border border-clay/70 bg-white/90 p-5 shadow-card"
-          >
-            <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-ink/60">
-              {card.label}
-            </p>
-            <p className="mt-2 font-serif text-3xl">{card.value}</p>
-          </div>
+    <div className="flex flex-col gap-4">
+      <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        {miniCards.map((card) => (
+          <article key={card.label} className="rounded-[10px] border border-clay/90 bg-stone p-4">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-ink/60">{card.label}</p>
+            <p className="mt-2 font-serif text-4xl leading-none text-ink">{card.value}</p>
+          </article>
         ))}
-      </div>
+      </section>
 
-      <div className="rounded-2xl border border-clay/70 bg-white/90 p-6 shadow-card">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-ink/60">Vente</p>
-        {openDistribution ? (
-          <>
-            <p className="mt-2 text-sm text-ink/70">{distributionLabel(openDistribution)}</p>
-            <div className="mt-3 flex flex-wrap gap-2">
-              {openDates.map((date) => (
-                <span
-                  key={dateKey(date)}
-                  className="rounded-full border border-clay/70 bg-white px-3 py-1 text-xs font-semibold text-ink/70"
-                >
-                  {date.toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}
-                </span>
-              ))}
+      <section className="rounded-[10px] border border-clay/90 bg-clay/25 p-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-ink/60">
+              Resume vente
+            </p>
+            <h2 className="mt-1 font-serif text-3xl">
+              {openDistribution ? "Vente ouverte" : "Aucune vente ouverte"}
+            </h2>
+            <p className="mt-2 text-sm text-ink/75">
+              {activeDistribution
+                ? `${distributionLabel(activeDistribution)} - ${statusLabel(activeDistribution.status)}`
+                : "Aucune distribution planifiee."}
+            </p>
+          </div>
+          <Link
+            href="/admin/vente"
+            className="rounded bg-forest px-4 py-2 text-sm font-semibold text-white"
+          >
+            Gerer la vente
+          </Link>
+        </div>
+        <div className="mt-3 grid gap-2 sm:grid-cols-3">
+          {(saleDates.length ? saleDates : [null, null, null]).map((date, index) => (
+            <div key={date ? date.toISOString() : `date-${index}`} className="rounded-md border border-clay/70 bg-stone px-3 py-2 text-sm text-ink/80">
+              {date
+                ? date.toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })
+                : `Date ${index + 1} non definie`}
             </div>
-            <p className="mt-3 text-xs text-ink/60">Vente en cours.</p>
-          </>
-        ) : nextDistribution ? (
-          <>
-            <p className="mt-2 text-sm text-ink/70">{distributionLabel(nextDistribution)}</p>
-            <div className="mt-3 flex flex-wrap gap-2">
-              {nextDates.map((date) => (
-                <span
-                  key={dateKey(date)}
-                  className="rounded-full border border-clay/70 bg-white px-3 py-1 text-xs font-semibold text-ink/70"
-                >
-                  {date.toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}
-                </span>
-              ))}
-            </div>
-            <p className="mt-3 text-xs text-ink/60">Prochaine vente a preparer.</p>
-          </>
-        ) : (
-          <p className="mt-2 text-sm text-ink/70">Aucune distribution planifiee.</p>
-        )}
-        <a
-          className="mt-4 inline-flex rounded-full bg-ink px-5 py-2 text-sm font-semibold text-stone"
-          href="/admin/vente"
-        >
-          {openDistribution ? "Voir la vente" : "Ouvrir la vente"}
-        </a>
-      </div>
-
-      {children ? <div>{children}</div> : null}
-
-      <div className="grid gap-4 lg:grid-cols-[1.3fr_1fr]">
-        <div className="rounded-2xl border border-clay/70 bg-white/90 p-6 shadow-card">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-ink/60">
-            Vente ouverte
-          </p>
-          {openDistribution ? (
-            <div className="mt-3">
-              <p className="text-sm text-ink/70">{distributionLabel(openDistribution)}</p>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {openDates.map((date) => (
-                  <span
-                    key={dateKey(date)}
-                    className="rounded-full border border-clay/70 bg-white px-3 py-1 text-xs font-semibold text-ink/70"
-                  >
-                    {date.toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}
-                  </span>
-                ))}
-              </div>
-            </div>
-          ) : (
-            <p className="mt-3 text-sm text-ink/70">Aucune vente ouverte.</p>
-          )}
+          ))}
         </div>
 
-        <div className="rounded-2xl border border-clay/70 bg-white/90 p-6 shadow-card">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-ink/60">
-            Prochaines ventes
-          </p>
-          {nextDistributions.length ? (
-            <ul className="mt-3 space-y-2 text-sm text-ink/70">
-              {nextDistributions.map((label, index) => (
-                <li key={`${label}-${index}`}>{label}</li>
-              ))}
-            </ul>
-          ) : (
-            <p className="mt-3 text-sm text-ink/70">Aucune distribution planifiee.</p>
-          )}
-        </div>
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-2">
-        <div className="rounded-2xl border border-clay/70 bg-white/90 p-6 shadow-card">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-ink/60">
-            Chiffre d&apos;affaires
-          </p>
-          <p className="mt-2 font-serif text-3xl">{formatMoney(stats.revenueTotal)} EUR</p>
-          <p className="mt-2 text-xs text-ink/60">Total cumule</p>
-          <p className="mt-4 text-sm text-ink/70">
-            Dernieres ventes: {formatMoney(stats.revenueRecent)} EUR
-          </p>
-          <div className="mt-3 space-y-2 text-xs text-ink/60">
-            {stats.recentDistributions.map((item) => (
-              <div key={item.id} className="flex items-center justify-between">
-                <span>{item.label}</span>
-                <span className="font-semibold text-ink">{formatMoney(item.total)} EUR</span>
-              </div>
+        <div className="mt-4 border-t border-clay/70 pt-4">
+          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+            {summaryCards.map((card) => (
+              <article key={card.label} className="rounded-[10px] border border-clay/90 bg-stone p-3">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-ink/60">{card.label}</p>
+                <p className="mt-1 text-xl font-semibold text-ink">{card.value}</p>
+              </article>
             ))}
           </div>
         </div>
+      </section>
 
-        <div className="rounded-2xl border border-clay/70 bg-white/90 p-6 shadow-card">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-ink/60">Apercu</p>
-          <p className="mt-2 text-sm text-ink/70">
-            Garde un oeil sur la prochaine vente, les produits disponibles et la charge des commandes.
-          </p>
-          <div className="mt-4 grid gap-2 text-xs text-ink/60">
-            <span>Produits actifs: {stats.products}</span>
-            <span>Adherents actifs: {stats.members}</span>
-            <span>Commandes recentes: {stats.orders}</span>
-          </div>
-        </div>
-      </div>
-
-      {loading ? <p className="text-sm text-ink/70">Chargement des stats...</p> : null}
+      {children ? <div>{children}</div> : null}
+      {loading ? <p className="text-sm text-ink/70">Chargement du resume...</p> : null}
     </div>
   );
 }

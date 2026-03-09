@@ -106,7 +106,8 @@ export default function InvitesEditor() {
               value={role}
               onChange={(event) => setRole(event.target.value)}
             >
-              <option value="member">Adherent</option>
+              <option value="member">Membre</option>
+              <option value="referent">Referent</option>
               <option value="admin">Admin</option>
             </select>
           </label>

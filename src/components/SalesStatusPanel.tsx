@@ -42,17 +42,17 @@ export default function SalesStatusPanel() {
   const openedAt = openDistribution?.openedAt?.toDate?.();
 
   return (
-    <div className="rounded-2xl border border-clay/70 bg-white/90 px-5 py-4 shadow-card">
+    <div className="rounded-[26px] border border-clay/70 bg-white/95 px-6 py-5 shadow-card">
       {loading ? (
         <p className="text-sm text-ink/70">Chargement...</p>
       ) : openDistribution ? (
-        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
           <div className="flex flex-wrap items-center gap-3">
-            <span className="rounded-full bg-moss/15 px-3 py-1 text-xs font-semibold text-moss">
+            <span className="rounded-full bg-moss px-4 py-1.5 text-xs font-semibold text-white shadow-sm">
               Vente ouverte
             </span>
             {openedAt ? (
-              <span className="text-xs text-ink/70">
+              <span className="text-sm text-ink/72">
                 Ouverte le{" "}
                 {openedAt.toLocaleDateString("fr-FR", {
                   day: "numeric",
@@ -62,27 +62,25 @@ export default function SalesStatusPanel() {
               </span>
             ) : null}
           </div>
-          <div className="flex flex-wrap items-center gap-2 text-xs text-ink/70">
+          <div className="flex flex-wrap items-center gap-2 text-xs text-ink/80">
             {dates.map((date, index) => (
-              <span
+              <button
                 key={index}
-                className="rounded-full border border-clay/80 bg-stone px-3 py-1 font-semibold"
+                className="rounded-full border border-clay/70 bg-stone px-3 py-1.5 font-semibold transition hover:border-ink/40 hover:bg-ink hover:text-stone"
+                type="button"
               >
-                {date.toLocaleDateString("fr-FR", {
-                  day: "numeric",
-                  month: "short",
-                })}
+                {date.toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}
                 {` · J-${daysUntil(date)}`}
-              </span>
+              </button>
             ))}
           </div>
         </div>
       ) : (
-        <div className="flex flex-wrap items-center gap-3 text-sm text-ink/70">
-          <span className="rounded-full border border-clay/80 bg-stone px-3 py-1 text-xs font-semibold text-ink/70">
-            Aucune vente ouverte
+        <div className="flex flex-wrap items-center gap-3 text-sm text-ink/72">
+          <span className="rounded-full border border-ember/30 bg-ember/10 px-3 py-1 text-xs font-semibold text-ember">
+            Vente fermee
           </span>
-          <span>Les prochaines dates seront annoncees bientot.</span>
+          <span>Aucune vente ouverte pour le moment.</span>
         </div>
       )}
     </div>

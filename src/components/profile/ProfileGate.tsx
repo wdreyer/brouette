@@ -5,6 +5,7 @@ import { doc, getDoc } from "firebase/firestore";
 import { firebaseDb } from "@/lib/firebase/client";
 import { useAuth } from "@/components/auth/AuthProvider";
 import ProfileForm from "@/components/profile/ProfileForm";
+import { findMemberByUser } from "@/lib/members";
 
 function isComplete(data: Record<string, unknown>) {
   return Boolean(
@@ -17,18 +18,25 @@ function isComplete(data: Record<string, unknown>) {
 }
 
 export default function ProfileGate({ children }: { children: React.ReactNode }) {
-  const { user } = useAuth();
+  const { user, memberId } = useAuth();
   const [needsProfile, setNeedsProfile] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [resolvedMemberId, setResolvedMemberId] = useState<string | null>(null);
 
   useEffect(() => {
     const load = async () => {
       if (!user) {
         setNeedsProfile(false);
+        setResolvedMemberId(null);
         setLoading(false);
         return;
       }
-      const snap = await getDoc(doc(firebaseDb, "members", user.uid));
+      const resolved = memberId
+        ? { id: memberId }
+        : await findMemberByUser(firebaseDb, user);
+      const resolvedId = resolved?.id ?? user.uid;
+      setResolvedMemberId(resolvedId);
+      const snap = await getDoc(doc(firebaseDb, "members", resolvedId));
       if (!snap.exists()) {
         setNeedsProfile(true);
         setLoading(false);
@@ -39,7 +47,7 @@ export default function ProfileGate({ children }: { children: React.ReactNode })
     };
 
     load().catch(() => setLoading(false));
-  }, [user]);
+  }, [user, memberId]);
 
   if (loading || !user) return <>{children}</>;
 
@@ -57,7 +65,7 @@ export default function ProfileGate({ children }: { children: React.ReactNode })
               Renseigne ces informations pour acceder au site.
             </p>
             <div className="mt-4">
-              <ProfileForm userId={user.uid} onSaved={() => setNeedsProfile(false)} />
+              <ProfileForm userId={resolvedMemberId ?? user.uid} onSaved={() => setNeedsProfile(false)} />
             </div>
           </div>
         </div>

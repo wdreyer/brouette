@@ -1,18 +1,38 @@
 "use client";
 
 import { useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth/AuthProvider";
 
 export default function AdminGate({ children }: { children: React.ReactNode }) {
-  const { user, loading, role } = useAuth();
+  const { user, loading, role, effectiveRole } = useAuth();
   const router = useRouter();
+  const pathname = usePathname();
+  const allowReferent = pathname === "/admin/vente" || pathname === "/admin";
+  const isAllowed =
+    Boolean(user) && (role === "admin" || (effectiveRole === "referent" && allowReferent));
 
   useEffect(() => {
-    if (!loading && (!user || role !== "admin")) {
+    if (loading) return;
+    if (!user) {
       router.replace("/");
+      return;
     }
-  }, [loading, user, role, router]);
+    if (role === "admin") {
+      return;
+    }
+    if (effectiveRole === "referent") {
+      if (pathname === "/admin") {
+        router.replace("/admin/vente");
+        return;
+      }
+      if (!allowReferent) {
+        router.replace("/admin/vente");
+      }
+      return;
+    }
+    router.replace("/");
+  }, [loading, user, role, effectiveRole, pathname, allowReferent, router]);
 
   if (loading) {
     return (
@@ -21,6 +41,6 @@ export default function AdminGate({ children }: { children: React.ReactNode }) {
       </div>
     );
   }
-  if (!user || role !== "admin") return null;
+  if (!isAllowed) return null;
   return <>{children}</>;
 }

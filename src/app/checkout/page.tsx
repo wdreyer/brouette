@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { collection, addDoc, doc, getDocs, serverTimestamp } from "firebase/firestore";
+import { addDoc, collection, getDocs, limit, query, serverTimestamp, where } from "firebase/firestore";
 import { useRouter } from "next/navigation";
 import { CartItem, clearCart, getCart, removeFromCart, updateCartItem } from "@/lib/cart";
 import { firebaseDb } from "@/lib/firebase/client";
 import { pickOpenDistribution } from "@/lib/distributions";
 import { useAuth } from "@/components/auth/AuthProvider";
+import { findMemberByUser } from "@/lib/members";
 
 function formatMoney(amount: number) {
   return amount.toFixed(2).replace(".", ",");
@@ -27,7 +28,7 @@ export default function CheckoutPage() {
   const [items, setItems] = useState<CartItem[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState("");
-  const { user } = useAuth();
+  const { user, memberId } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
@@ -52,26 +53,48 @@ export default function CheckoutPage() {
     if (items.length === 0) return;
     setSubmitting(true);
     setMessage("");
-    try {
-      const distSnap = await getDocs(collection(firebaseDb, "distributionDates"));
-      const distItems = distSnap.docs.map((docSnap) => ({
-        id: docSnap.id,
-        ...(docSnap.data() as Record<string, unknown>),
-      }));
-      const openDist = pickOpenDistribution(
-        distItems as {
-          id: string;
-          status?: string;
-          dates?: { toDate?: () => Date }[];
-          openedAt?: { toDate?: () => Date };
-        }[],
+      try {
+      const memberMatch = memberId
+        ? { id: memberId }
+        : await findMemberByUser(firebaseDb, user);
+      const orderMemberId = memberMatch?.id ?? user.uid;
+
+      const openSnap = await getDocs(
+        query(collection(firebaseDb, "distributionDates"), where("status", "==", "open"), limit(1)),
       );
-      const distributionId = openDist?.id ?? null;
+      const openDist = openSnap.empty
+        ? null
+        : ({
+            id: openSnap.docs[0].id,
+            ...(openSnap.docs[0].data() as Record<string, unknown>),
+          } as {
+            id: string;
+            status?: string;
+            dates?: { toDate?: () => Date }[];
+            openedAt?: { toDate?: () => Date };
+          });
+      let resolvedOpenDist = openDist;
+      if (!resolvedOpenDist) {
+        const distSnap = await getDocs(collection(firebaseDb, "distributionDates"));
+        const distItems = distSnap.docs.map((docSnap) => ({
+          id: docSnap.id,
+          ...(docSnap.data() as Record<string, unknown>),
+        }));
+        resolvedOpenDist = pickOpenDistribution(
+          distItems as {
+            id: string;
+            status?: string;
+            dates?: { toDate?: () => Date }[];
+            openedAt?: { toDate?: () => Date };
+          }[],
+        );
+      }
+      const distributionId = resolvedOpenDist?.id ?? null;
       const itemCount = items.reduce((sum, item) => sum + item.quantity, 0);
 
       const orderRef = await addDoc(collection(firebaseDb, "orders"), {
         distributionId,
-        memberId: user.uid,
+        memberId: orderMemberId,
         status: "validated",
         totals: { totalAmount: total, itemCount },
         createdAt: serverTimestamp(),

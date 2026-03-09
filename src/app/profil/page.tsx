@@ -5,6 +5,7 @@ import { collection, getDocs, orderBy, query, where } from "firebase/firestore";
 import { useAuth } from "@/components/auth/AuthProvider";
 import ProfileForm from "@/components/profile/ProfileForm";
 import { firebaseDb } from "@/lib/firebase/client";
+import { findMemberByUser } from "@/lib/members";
 
 type Order = {
   id: string;
@@ -28,10 +29,11 @@ function formatMoney(amount: number) {
 }
 
 export default function ProfilePage() {
-  const { user } = useAuth();
+  const { user, memberId } = useAuth();
   const [orders, setOrders] = useState<Order[]>([]);
   const [orderItems, setOrderItems] = useState<Record<string, OrderItem[]>>({});
   const [loadingOrders, setLoadingOrders] = useState(true);
+  const [resolvedMemberId, setResolvedMemberId] = useState<string | null>(null);
 
   if (!user) {
     return (
@@ -44,8 +46,13 @@ export default function ProfilePage() {
   useEffect(() => {
     const load = async () => {
       setLoadingOrders(true);
+      const resolved = memberId
+        ? { id: memberId }
+        : await findMemberByUser(firebaseDb, user);
+      const nextMemberId = resolved?.id ?? user.uid;
+      setResolvedMemberId(nextMemberId);
       const ordersSnap = await getDocs(
-        query(collection(firebaseDb, "orders"), where("memberId", "==", user.uid)),
+        query(collection(firebaseDb, "orders"), where("memberId", "==", nextMemberId)),
       );
       const entries = ordersSnap.docs.map((docSnap) => ({
         id: docSnap.id,
@@ -73,7 +80,7 @@ export default function ProfilePage() {
     };
 
     load().catch(() => setLoadingOrders(false));
-  }, [user.uid]);
+  }, [user, memberId]);
 
   const groupedItems = useMemo(() => {
     const map: Record<string, Record<string, OrderItem[]>> = {};
@@ -101,7 +108,7 @@ export default function ProfilePage() {
       </section>
 
       <section className="rounded-xl border border-clay/70 bg-white/95 p-6 shadow-card">
-        <ProfileForm userId={user.uid} />
+        <ProfileForm userId={resolvedMemberId ?? user.uid} />
       </section>
 
       <section className="rounded-xl border border-clay/70 bg-white/95 p-6 shadow-card">

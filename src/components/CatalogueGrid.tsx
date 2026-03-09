@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { collection, getDocs } from "firebase/firestore";
+import { collection, collectionGroup, getDocs } from "firebase/firestore";
 import { firebaseDb } from "@/lib/firebase/client";
 import { pickOpenDistribution } from "@/lib/distributions";
 
@@ -51,7 +51,19 @@ function dateKey(date: Date) {
   return date.toISOString().slice(0, 10);
 }
 
-export default function CatalogueGrid() {
+function descriptionExcerpt(value?: string, maxLength = 150) {
+  if (!value) return "";
+  const plain = value
+    .replace(/!\[[^\]]*\]\([^)]+\)/g, " ")
+    .replace(/\[[^\]]+\]\([^)]+\)/g, " ")
+    .replace(/[*_`>#-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (plain.length <= maxLength) return plain;
+  return `${plain.slice(0, maxLength).trimEnd()}...`;
+}
+
+export default function CatalogueGrid({ hideWhenClosed = false }: { hideWhenClosed?: boolean }) {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -67,6 +79,8 @@ export default function CatalogueGrid() {
     Record<string, { dateKeys: string[]; hasLimit?: boolean; minLimit?: number }>
   >({});
   const [activeProducerIds, setActiveProducerIds] = useState<string[]>([]);
+  const [hasProducerLinks, setHasProducerLinks] = useState(false);
+  const [visibleCount, setVisibleCount] = useState(12);
 
   useEffect(() => {
     const load = async () => {
@@ -112,10 +126,16 @@ export default function CatalogueGrid() {
         setCategoryMap(catMap);
 
         const activeProducerDocs = activeProducersSnap?.docs ?? [];
+        setHasProducerLinks(activeProducerDocs.length > 0);
         const activeIds = activeProducerDocs
           .map((docSnap) => {
-            const data = docSnap.data() as { producerId?: string; active?: boolean };
+            const data = docSnap.data() as {
+              producerId?: string;
+              active?: boolean;
+              validatedByReferent?: boolean;
+            };
             if (data.active === false) return "";
+            if (data.validatedByReferent !== true) return "";
             return String(data.producerId ?? docSnap.id);
           })
           .filter(Boolean);
@@ -126,16 +146,21 @@ export default function CatalogueGrid() {
         const prices: Record<string, { min: number; max: number }> = {};
         const availability: Record<string, { dateKeys: string[]; hasLimit?: boolean; minLimit?: number }> = {};
 
-        const variantSnaps = await Promise.all(
-          items.map((product) => getDocs(collection(firebaseDb, "products", product.id, "variants"))),
-        );
-        variantSnaps.forEach((snap, index) => {
-          const product = items[index];
+        const variantsSnap = await getDocs(collectionGroup(firebaseDb, "variants"));
+        const variantsByProduct = new Map<string, Variant[]>();
+        variantsSnap.docs.forEach((docSnap) => {
+          const productId = docSnap.ref.parent.parent?.id;
+          if (!productId) return;
+          const list = variantsByProduct.get(productId) ?? [];
+          list.push(docSnap.data() as Variant);
+          variantsByProduct.set(productId, list);
+        });
+
+        items.forEach((product) => {
           const saleKeys = (product.saleDates ?? []).map((date) => dateKey(date.toDate()));
           const dateSet = new Set<string>();
-
-          snap.docs.forEach((docSnap) => {
-            const variant = docSnap.data() as Variant;
+          const productVariants = variantsByProduct.get(product.id) ?? [];
+          productVariants.forEach((variant) => {
             const variantKeys = Array.isArray(variant.activeDates)
               ? variant.activeDates.filter((key) => typeof key === "string")
               : [];
@@ -214,11 +239,12 @@ export default function CatalogueGrid() {
     return products.filter((product) => {
       const keys = availabilityMap[product.id]?.dateKeys ?? [];
       const matchesDate = keys.some((key) => openDateKeys.includes(key));
-      const matchesProducer =
-        activeProducerIds.length === 0 || activeProducerIds.includes(product.producerId);
+      const matchesProducer = hasProducerLinks
+        ? activeProducerIds.includes(product.producerId)
+        : true;
       return matchesDate && matchesProducer;
     });
-  }, [openDateKeys, products, availabilityMap, activeProducerIds]);
+  }, [openDateKeys, products, availabilityMap, activeProducerIds, hasProducerLinks]);
 
   const visibleProducts = useMemo(() => {
     if (!openDateKeys.length) return [];
@@ -241,6 +267,8 @@ export default function CatalogueGrid() {
       return matchesCategory && matchesProducer && matchesOrganic && matchesDate;
     });
   }, [openDateKeys, inStockProducts, categoryFilter, producerFilter, organicFilter, dateFilter]);
+  const pagedProducts = useMemo(() => visibleProducts.slice(0, visibleCount), [visibleProducts, visibleCount]);
+  const hasMore = visibleProducts.length > visibleCount;
 
   const categoryOptions = useMemo(
     () =>
@@ -268,6 +296,10 @@ export default function CatalogueGrid() {
     [producerMap, inStockProducts],
   );
 
+  useEffect(() => {
+    setVisibleCount(12);
+  }, [categoryFilter, producerFilter, organicFilter, dateFilter, openDateKeys.join(","), visibleProducts.length]);
+
   if (loading) {
     return <p className="text-sm text-ink/70">Chargement...</p>;
   }
@@ -282,6 +314,9 @@ export default function CatalogueGrid() {
   }
 
   if (!openDistribution) {
+    if (hideWhenClosed) {
+      return null;
+    }
     return (
       <div className="rounded-2xl border border-clay/70 bg-white/85 p-6 shadow-card">
         <p className="text-sm text-ink/70">Aucune vente ouverte pour le moment.</p>
@@ -341,22 +376,26 @@ export default function CatalogueGrid() {
           {dateOptions.length ? (
             <div className="flex flex-col gap-2">
               <span className="text-xs font-semibold text-ink/60">Date</span>
-              <div className="flex flex-col gap-2">
+              <div className="flex flex-wrap gap-2">
                 {dateOptions.map((option) => (
-                  <label key={option.key} className="flex items-center gap-2 text-xs text-ink/70">
-                    <input
-                      type="checkbox"
-                      checked={dateFilter.includes(option.key)}
-                      onChange={() =>
-                        setDateFilter((prev) =>
-                          prev.includes(option.key)
-                            ? prev.filter((key) => key !== option.key)
-                            : [...prev, option.key],
-                        )
-                      }
-                    />
+                  <button
+                    key={option.key}
+                    type="button"
+                    className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
+                      dateFilter.includes(option.key)
+                        ? "border-ink/30 bg-ink text-stone"
+                        : "border-ink/20 bg-white text-ink hover:border-ink/45 hover:bg-stone"
+                    }`}
+                    onClick={() =>
+                      setDateFilter((prev) =>
+                        prev.includes(option.key)
+                          ? prev.filter((key) => key !== option.key)
+                          : [...prev, option.key],
+                      )
+                    }
+                  >
                     {option.label}
-                  </label>
+                  </button>
                 ))}
               </div>
             </div>
@@ -397,10 +436,11 @@ export default function CatalogueGrid() {
         </div>
       </aside>
       <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
-        {visibleProducts.map((product) => (
-          <div
+        {pagedProducts.map((product) => (
+          <Link
             className="group flex h-full flex-col gap-4 rounded-xl border border-clay/70 bg-white/95 p-5 shadow-card transition hover:-translate-y-1 hover:border-ink/30"
             key={product.id}
+            href={`/products/${product.id}`}
           >
             <div className="flex h-40 items-center justify-center overflow-hidden rounded-lg border border-clay/70 bg-stone">
               {product.imageUrl ? (
@@ -436,7 +476,9 @@ export default function CatalogueGrid() {
                 ) : null}
               </div>
             </div>
-            <p className="text-sm text-ink/70">{product.description}</p>
+            <p className="text-sm text-ink/70">
+              {descriptionExcerpt(product.description) || "Description disponible sur la fiche produit."}
+            </p>
             {product.tags?.length ? (
               <div className="flex flex-wrap gap-2">
                 {product.tags.map((tag) => (
@@ -453,16 +495,23 @@ export default function CatalogueGrid() {
                   : `${priceMap[product.id].min.toFixed(2)} EUR - ${priceMap[product.id].max.toFixed(2)} EUR`}
               </p>
             ) : null}
-            <Link
-              className="mt-auto inline-flex w-fit items-center gap-2 rounded-full border border-ink/20 bg-white px-4 py-2 text-sm font-semibold text-ink transition group-hover:border-ink/50"
-              href={`/products/${product.id}`}
-            >
+            <span className="mt-auto inline-flex w-fit items-center gap-2 rounded-full border border-ink/20 bg-white px-4 py-2 text-sm font-semibold text-ink transition group-hover:border-ink/50">
               Voir le produit
               <span aria-hidden>-&gt;</span>
-            </Link>
-          </div>
+            </span>
+          </Link>
         ))}
       </div>
+      {hasMore ? (
+        <div className="mt-2 flex justify-center md:col-span-2 xl:col-span-3">
+          <button
+            className="rounded-full border border-ink/20 bg-white px-5 py-2 text-sm font-semibold text-ink transition hover:border-ink/45 hover:bg-stone"
+            onClick={() => setVisibleCount((prev) => prev + 12)}
+          >
+            Charger plus de produits
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }

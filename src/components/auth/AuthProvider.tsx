@@ -2,15 +2,17 @@
 
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { onAuthStateChanged, type User } from "firebase/auth";
-import { collection, getDocs, query, where } from "firebase/firestore";
 import { firebaseAuth, firebaseDb } from "@/lib/firebase/client";
 import { setCartUser } from "@/lib/cart";
+import { findMemberByUser } from "@/lib/members";
 
 type AuthContextValue = {
   user: User | null;
   loading: boolean;
-  role: "admin" | "member" | null;
+  role: "admin" | "member" | "referent" | null;
   memberId: string | null;
+  effectiveRole: "admin" | "member" | "referent" | null;
+  effectiveMemberId: string | null;
 };
 
 const AuthContext = createContext<AuthContextValue>({
@@ -18,29 +20,13 @@ const AuthContext = createContext<AuthContextValue>({
   loading: true,
   role: null,
   memberId: null,
+  effectiveRole: null,
+  effectiveMemberId: null,
 });
-
-async function findMemberByUser(user: User) {
-  const uidQuery = query(collection(firebaseDb, "members"), where("auth.uid", "==", user.uid));
-  const uidSnap = await getDocs(uidQuery);
-  if (!uidSnap.empty) {
-    const docSnap = uidSnap.docs[0];
-    return { id: docSnap.id, data: docSnap.data() };
-  }
-  if (user.email) {
-    const emailQuery = query(collection(firebaseDb, "members"), where("email", "==", user.email));
-    const emailSnap = await getDocs(emailQuery);
-    if (!emailSnap.empty) {
-      const docSnap = emailSnap.docs[0];
-      return { id: docSnap.id, data: docSnap.data() };
-    }
-  }
-  return null;
-}
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
-  const [role, setRole] = useState<"admin" | "member" | null>(null);
+  const [role, setRole] = useState<"admin" | "member" | "referent" | null>(null);
   const [memberId, setMemberId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -55,11 +41,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return;
       }
       try {
-        const member = await findMemberByUser(nextUser);
+        const member = await findMemberByUser(firebaseDb, nextUser);
         if (member) {
           setMemberId(member.id);
           const auth = member.data?.auth as { role?: string } | undefined;
-          setRole(auth?.role === "admin" ? "admin" : "member");
+          if (auth?.role === "admin") {
+            setRole("admin");
+          } else if (auth?.role === "referent") {
+            setRole("referent");
+          } else {
+            setRole("member");
+          }
         } else {
           setRole("member");
         }
@@ -70,7 +62,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => unsubscribe();
   }, []);
 
-  const value = useMemo(() => ({ user, loading, role, memberId }), [user, loading, role, memberId]);
+  const effectiveRole = role;
+  const effectiveMemberId = memberId;
+
+  const value = useMemo(
+    () => ({
+      user,
+      loading,
+      role,
+      memberId,
+      effectiveRole,
+      effectiveMemberId,
+    }),
+    [user, loading, role, memberId, effectiveRole, effectiveMemberId],
+  );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

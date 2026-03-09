@@ -8,6 +8,7 @@ module.exports = {
         stone: "#faf6ef",
         clay: "#e6dccb",
         moss: "#5a6c4c",
+        forest: "#2f5d4b",
         ember: "#b86a3d",
         honey: "#d6b27a",
         leaf: "#8a9a6d",

@@ -6,6 +6,7 @@ import { createUserWithEmailAndPassword, signInWithEmailAndPassword } from "fire
 import { collection, doc, getDocs, query, setDoc, serverTimestamp, updateDoc, where } from "firebase/firestore";
 import { firebaseAuth, firebaseDb } from "@/lib/firebase/client";
 import { useAuth } from "@/components/auth/AuthProvider";
+import { findMemberByUser } from "@/lib/members";
 
 export default function AuthClient() {
   const { user } = useAuth();
@@ -19,16 +20,34 @@ export default function AuthClient() {
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
 
+  const redirectByRole = async (nextUser: typeof user) => {
+    if (!nextUser) return;
+    const memberMatch = await findMemberByUser(firebaseDb, nextUser);
+    const member = memberMatch ? (memberMatch.data as { auth?: { role?: string } }) : null;
+    const role = member?.auth?.role;
+    if (role === "referent") {
+      router.replace("/referent");
+      return;
+    }
+    if (role === "admin") {
+      router.replace("/admin");
+      return;
+    }
+    router.replace("/");
+  };
+
   useEffect(() => {
-    if (user) router.replace("/");
+    if (user) {
+      redirectByRole(user).catch(() => router.replace("/"));
+    }
   }, [user, router]);
 
   const handleLogin = async () => {
     setLoading(true);
     setMessage("");
     try {
-      await signInWithEmailAndPassword(firebaseAuth, email, password);
-      router.replace("/");
+      const cred = await signInWithEmailAndPassword(firebaseAuth, email, password);
+      await redirectByRole(cred.user);
     } catch (error) {
       const err = error instanceof Error ? error.message : "Erreur inconnue.";
       setMessage(err);
@@ -62,17 +81,33 @@ export default function AuthClient() {
         return;
       }
       const cred = await createUserWithEmailAndPassword(firebaseAuth, email, password);
-      await setDoc(doc(firebaseDb, "members", cred.user.uid), {
-        email,
-        auth: { uid: cred.user.uid, role: invite.role === "admin" ? "admin" : "member" },
-        createdAt: serverTimestamp(),
-      });
+      const role = invite.role === "admin" ? "admin" : invite.role === "referent" ? "referent" : "member";
+      const memberSnap = await getDocs(
+        query(collection(firebaseDb, "members"), where("email", "==", email)),
+      );
+      if (!memberSnap.empty) {
+        await setDoc(
+          doc(firebaseDb, "members", memberSnap.docs[0].id),
+          {
+            email,
+            auth: { uid: cred.user.uid, role },
+            createdAt: serverTimestamp(),
+          },
+          { merge: true },
+        );
+      } else {
+        await setDoc(doc(firebaseDb, "members", cred.user.uid), {
+          email,
+          auth: { uid: cred.user.uid, role },
+          createdAt: serverTimestamp(),
+        });
+      }
       await updateDoc(doc(firebaseDb, "invites", inviteDoc.id), {
         used: true,
         usedAt: serverTimestamp(),
         usedBy: cred.user.uid,
       });
-      router.replace("/");
+      await redirectByRole(cred.user);
     } catch (error) {
       const err = error instanceof Error ? error.message : "Erreur inconnue.";
       setMessage(err);
