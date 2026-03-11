@@ -21,7 +21,13 @@ import { distributionLabel, isOpenStatus, pickOpenDistribution } from "@/lib/dis
 type FireDate = { toDate?: () => Date };
 
 type Distribution = { id: string; status?: string; dates?: FireDate[]; openedAt?: FireDate };
-type Producer = { id: string; name?: string; referentId?: string | null; referentName?: string | null };
+type Producer = {
+  id: string;
+  name?: string;
+  referentId?: string | null;
+  referentName?: string | null;
+  coopStatus?: string | null;
+};
 type Member = { id: string; firstName?: string; lastName?: string };
 type Order = { distributionId?: string | null; totals?: { totalAmount?: number } };
 type Variant = { id: string; label: string; price: number; activeDates: string[] };
@@ -78,6 +84,8 @@ const formatLongDate = (value?: Date | null) =>
 const money = (value: number) => value.toFixed(2).replace(".", ",");
 const isPlanned = (status?: string) =>
   !isOpenStatus(status) && !FINISHED.has(String(status ?? "").toLowerCase());
+const isProducerActive = (status?: string | null) =>
+  !["inactive", "inactif", "inactif ", "off"].includes(String(status ?? "").toLowerCase().trim());
 const fullName = (m?: Member | null) => `${m?.firstName ?? ""} ${m?.lastName ?? ""}`.trim();
 const newId = () =>
   typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -146,12 +154,14 @@ export default function OpenSalesWizard() {
         return;
       }
 
-      const producerIds = Object.keys(productMap).filter((id) => (productMap[id] ?? []).length > 0);
-      const producerSet = new Set(producerIds);
       const producerById: Record<string, Producer> = {};
       producerList.forEach((producer) => {
         producerById[producer.id] = producer;
       });
+      const producerIds = Object.keys(productMap).filter(
+        (id) => (productMap[id] ?? []).length > 0 && Boolean(producerById[id]),
+      );
+      const producerSet = new Set(producerIds);
 
       const linkSnap = await getDocs(collection(firebaseDb, "distributionDates", distributionId, "producers"));
       const existing = new Map<
@@ -239,7 +249,8 @@ export default function OpenSalesWizard() {
 
     const producerItems = producerSnap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Producer, "id">) }));
     producerItems.sort((a, b) => (a.name ?? "").localeCompare(b.name ?? ""));
-    setProducers(producerItems);
+    const activeProducerItems = producerItems.filter((producer) => isProducerActive(producer.coopStatus));
+    setProducers(activeProducerItems);
 
     const memberMap: Record<string, Member> = {};
     memberSnap.docs.forEach((d) => {
@@ -305,7 +316,7 @@ export default function OpenSalesWizard() {
     const defaultTarget = open?.id ?? plannedDist[0]?.id ?? "";
     setTargetId((prev) => (prev && distItems.some((d) => d.id === prev) ? prev : defaultTarget));
 
-    await syncRows(defaultTarget, producerItems, memberMap, nextProductsByProducer);
+    await syncRows(defaultTarget, activeProducerItems, memberMap, nextProductsByProducer);
     setLoading(false);
   }, [syncRows]);
 
@@ -320,7 +331,7 @@ export default function OpenSalesWizard() {
 
   const validatedCount = rows.filter((row) => row.validatedByReferent).length;
   const pendingCount = Math.max(rows.length - validatedCount, 0);
-  const canOpen = canManageAdmin && !openDistribution && rows.length > 0 && pendingCount === 0;
+  const canOpen = canManageAdmin && !openDistribution && validatedCount > 0;
   const openStats = openDistribution
     ? orderStats[openDistribution.id] ?? { count: 0, amount: 0 }
     : { count: 0, amount: 0 };

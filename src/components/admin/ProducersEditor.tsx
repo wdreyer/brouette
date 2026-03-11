@@ -136,7 +136,10 @@ export default function ProducersEditor({
 
   const handleCreate = async () => {
     try {
-      await addDoc(collection(firebaseDb, collectionName), createDraft);
+      await addDoc(collection(firebaseDb, collectionName), {
+        ...createDraft,
+        coopStatus: String(createDraft.coopStatus ?? "active"),
+      });
       setCreateDraft({});
       setCreateOpen(false);
       setMessage("Producteur cree.");
@@ -177,6 +180,31 @@ export default function ProducersEditor({
         ),
       );
       setMessage("Referent mis a jour.");
+    } catch (error) {
+      const err = error instanceof Error ? error.message : "Erreur inconnue.";
+      setMessage(err);
+    } finally {
+      setSavingId(null);
+    }
+  };
+
+  const updateStatus = async (entry: DocEntry, nextStatus: string) => {
+    try {
+      setSavingId(entry.id);
+      await setDoc(
+        doc(firebaseDb, collectionName, entry.id),
+        {
+          coopStatus: nextStatus,
+          updatedAt: Timestamp.now(),
+        },
+        { merge: true },
+      );
+      setDocs((prev) =>
+        prev.map((item) =>
+          item.id === entry.id ? { ...item, data: { ...item.data, coopStatus: nextStatus } } : item,
+        ),
+      );
+      setMessage("Statut producteur mis a jour.");
     } catch (error) {
       const err = error instanceof Error ? error.message : "Erreur inconnue.";
       setMessage(err);
@@ -327,7 +355,17 @@ export default function ProducersEditor({
                         </div>
                       </td>
                       <td className="px-3 py-2 text-xs text-ink/70">{String(getByPath(entry.data, "email") ?? "-")}</td>
-                      <td className="px-3 py-2 text-xs text-ink/70">{String(getByPath(entry.data, "coopStatus") ?? "-")}</td>
+                      <td className="px-3 py-2">
+                        <select
+                          className="rounded-md border border-ink/20 bg-white px-2 py-1.5 text-xs"
+                          value={String(getByPath(entry.data, "coopStatus") ?? "active")}
+                          onChange={(event) => updateStatus(entry, event.target.value)}
+                          disabled={savingId === entry.id}
+                        >
+                          <option value="active">Actif</option>
+                          <option value="inactive">Inactif</option>
+                        </select>
+                      </td>
                       <td className="px-3 py-2 text-right">
                         <Link href={`/admin/producers/${entry.id}`} className="rounded-md border border-ink/20 px-3 py-1 text-xs font-semibold text-ink hover:bg-stone">
                           Ouvrir

@@ -44,10 +44,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const member = await findMemberByUser(firebaseDb, nextUser);
         if (member) {
           setMemberId(member.id);
-          const auth = member.data?.auth as { role?: string } | undefined;
-          if (auth?.role === "admin") {
+          if (member.role === "admin") {
             setRole("admin");
-          } else if (auth?.role === "referent") {
+          } else if (member.role === "referent") {
             setRole("referent");
           } else {
             setRole("member");

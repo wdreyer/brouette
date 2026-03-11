@@ -2,29 +2,65 @@
 
 import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { createUserWithEmailAndPassword, signInWithEmailAndPassword } from "firebase/auth";
+import {
+  createUserWithEmailAndPassword,
+  sendPasswordResetEmail,
+  signInWithEmailAndPassword,
+} from "firebase/auth";
 import { collection, doc, getDocs, query, setDoc, serverTimestamp, updateDoc, where } from "firebase/firestore";
 import { firebaseAuth, firebaseDb } from "@/lib/firebase/client";
 import { useAuth } from "@/components/auth/AuthProvider";
-import { findMemberByUser } from "@/lib/members";
+import { findMemberByUser, upsertMemberAccess } from "@/lib/members";
+
+const ADHESION_EMAIL = "contact@labrouetteetlepanier.fr";
+
+function authErrorMessage(error: unknown) {
+  if (!error || typeof error !== "object") return "Erreur inconnue.";
+  const code = "code" in error ? String((error as { code?: string }).code ?? "") : "";
+  switch (code) {
+    case "auth/invalid-email":
+      return "Adresse email invalide.";
+    case "auth/invalid-credential":
+      return "Email ou mot de passe incorrect.";
+    case "auth/user-disabled":
+      return "Ce compte est desactive.";
+    case "auth/too-many-requests":
+      return "Trop de tentatives. Reessaie plus tard.";
+    case "auth/email-already-in-use":
+      return "Cet email est deja utilise.";
+    case "auth/weak-password":
+      return "Mot de passe trop faible (minimum 6 caracteres).";
+    case "auth/operation-not-allowed":
+      return "L'inscription par email/mot de passe n'est pas activee sur Firebase.";
+    case "permission-denied":
+      return "Droits insuffisants sur la base. Verifie les regles Firestore.";
+    case "unavailable":
+      return "Service temporairement indisponible. Reessaie dans un instant.";
+    default:
+      return String((error as { message?: string }).message ?? "Une erreur est survenue. Reessaie.");
+  }
+}
 
 export default function AuthClient() {
   const { user } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
   const inviteToken = searchParams.get("invite") ?? "";
-  const [mode, setMode] = useState<"login" | "signup">(inviteToken ? "signup" : "login");
+  const [mode, setMode] = useState<"login" | "signup" | "forgot">(
+    inviteToken ? "signup" : "login",
+  );
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [resetEmail, setResetEmail] = useState("");
   const [token, setToken] = useState(inviteToken);
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
+  const [resetSent, setResetSent] = useState(false);
 
   const redirectByRole = async (nextUser: typeof user) => {
     if (!nextUser) return;
     const memberMatch = await findMemberByUser(firebaseDb, nextUser);
-    const member = memberMatch ? (memberMatch.data as { auth?: { role?: string } }) : null;
-    const role = member?.auth?.role;
+    const role = memberMatch?.role ?? "member";
     if (role === "referent") {
       router.replace("/referent");
       return;
@@ -45,12 +81,12 @@ export default function AuthClient() {
   const handleLogin = async () => {
     setLoading(true);
     setMessage("");
+    setResetSent(false);
     try {
       const cred = await signInWithEmailAndPassword(firebaseAuth, email, password);
       await redirectByRole(cred.user);
     } catch (error) {
-      const err = error instanceof Error ? error.message : "Erreur inconnue.";
-      setMessage(err);
+      setMessage(authErrorMessage(error));
     } finally {
       setLoading(false);
     }
@@ -59,6 +95,7 @@ export default function AuthClient() {
   const handleSignup = async () => {
     setLoading(true);
     setMessage("");
+    setResetSent(false);
     try {
       if (!token) {
         setMessage("Invite requise.");
@@ -74,7 +111,7 @@ export default function AuthClient() {
         return;
       }
       const inviteDoc = inviteSnap.docs[0];
-      const invite = inviteDoc.data() as { email?: string; role?: string };
+      const invite = inviteDoc.data() as { email?: string; role?: string; memberId?: string };
       if (invite.email && invite.email.toLowerCase() !== email.toLowerCase()) {
         setMessage("Cette invitation est liee a un autre email.");
         setLoading(false);
@@ -82,26 +119,46 @@ export default function AuthClient() {
       }
       const cred = await createUserWithEmailAndPassword(firebaseAuth, email, password);
       const role = invite.role === "admin" ? "admin" : invite.role === "referent" ? "referent" : "member";
-      const memberSnap = await getDocs(
-        query(collection(firebaseDb, "members"), where("email", "==", email)),
-      );
-      if (!memberSnap.empty) {
-        await setDoc(
-          doc(firebaseDb, "members", memberSnap.docs[0].id),
-          {
-            email,
-            auth: { uid: cred.user.uid, role },
-            createdAt: serverTimestamp(),
-          },
-          { merge: true },
+      let targetMemberId = String(invite.memberId ?? "").trim();
+      if (!targetMemberId) {
+        const memberSnap = await getDocs(
+          query(collection(firebaseDb, "members"), where("email", "==", email)),
         );
-      } else {
-        await setDoc(doc(firebaseDb, "members", cred.user.uid), {
+        if (!memberSnap.empty) {
+          targetMemberId = memberSnap.docs[0].id;
+        }
+      }
+      if (!targetMemberId) {
+        const memberByAccessSnap = await getDocs(
+          query(
+            collection(firebaseDb, "members"),
+            where("accessEmails", "array-contains", email.trim().toLowerCase()),
+          ),
+        );
+        if (!memberByAccessSnap.empty) {
+          targetMemberId = memberByAccessSnap.docs[0].id;
+        }
+      }
+      if (!targetMemberId) {
+        targetMemberId = cred.user.uid;
+      }
+
+      await setDoc(
+        doc(firebaseDb, "members", targetMemberId),
+        {
           email,
           auth: { uid: cred.user.uid, role },
           createdAt: serverTimestamp(),
-        });
-      }
+        },
+        { merge: true },
+      );
+
+      await upsertMemberAccess(firebaseDb, {
+        uid: cred.user.uid,
+        memberId: targetMemberId,
+        role,
+        email,
+      });
       await updateDoc(doc(firebaseDb, "invites", inviteDoc.id), {
         used: true,
         usedAt: serverTimestamp(),
@@ -109,8 +166,31 @@ export default function AuthClient() {
       });
       await redirectByRole(cred.user);
     } catch (error) {
-      const err = error instanceof Error ? error.message : "Erreur inconnue.";
-      setMessage(err);
+      setMessage(authErrorMessage(error));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleForgotPassword = async () => {
+    setMessage("");
+    setResetSent(false);
+    if (!resetEmail.trim()) {
+      setMessage("Renseigne ton email.");
+      return;
+    }
+    setLoading(true);
+    try {
+      await sendPasswordResetEmail(firebaseAuth, resetEmail.trim(), {
+        url: `${window.location.origin}/auth`,
+        handleCodeInApp: false,
+      });
+      setResetSent(true);
+      setMessage(
+        "Si ce compte existe, un lien de reinitialisation vient d'etre envoye. Verifie aussi tes spams.",
+      );
+    } catch (error) {
+      setMessage(authErrorMessage(error));
     } finally {
       setLoading(false);
     }
@@ -121,12 +201,18 @@ export default function AuthClient() {
       <section className="rounded-xl border border-clay/70 bg-white/95 p-6 shadow-card">
         <p className="text-[11px] font-semibold uppercase tracking-[0.32em] text-ink/60">Connexion</p>
         <h1 className="mt-2 font-serif text-3xl">
-          {mode === "login" ? "Se connecter" : "Activer mon compte"}
+          {mode === "login"
+            ? "Se connecter"
+            : mode === "signup"
+              ? "Activer mon compte"
+              : "Reinitialiser le mot de passe"}
         </h1>
         <p className="mt-2 text-sm text-ink/70">
           {mode === "login"
             ? "Connecte-toi pour acceder au catalogue."
-            : "Un compte est possible uniquement sur invitation."}
+            : mode === "signup"
+              ? "Un compte est possible uniquement sur invitation."
+              : "Saisis ton email et recois un lien de reinitialisation."}
         </p>
       </section>
 
@@ -141,26 +227,74 @@ export default function AuthClient() {
             />
           </label>
         ) : null}
-        <label className="mt-4 flex flex-col gap-2 text-sm font-semibold text-ink/70">
-          Email
-          <input
-            className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
-            type="email"
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-          />
-        </label>
-        <label className="mt-4 flex flex-col gap-2 text-sm font-semibold text-ink/70">
-          Mot de passe
-          <input
-            className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
-            type="password"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-          />
-        </label>
+        {mode === "forgot" ? (
+          <form
+            className="mt-2 flex flex-col gap-4"
+            onSubmit={(event) => {
+              event.preventDefault();
+              handleForgotPassword().catch(() => undefined);
+            }}
+          >
+            <label className="flex flex-col gap-2 text-sm font-semibold text-ink/70">
+              Email
+              <input
+                className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
+                type="email"
+                value={resetEmail}
+                onChange={(event) => setResetEmail(event.target.value)}
+                placeholder="ton@email.com"
+                autoComplete="email"
+              />
+            </label>
+            <button
+              type="submit"
+              className="w-fit rounded-full bg-ink px-5 py-2 text-sm font-semibold text-stone"
+              disabled={loading}
+            >
+              {loading ? "Envoi..." : "Envoyer le lien"}
+            </button>
+          </form>
+        ) : (
+          <>
+            <label className="mt-4 flex flex-col gap-2 text-sm font-semibold text-ink/70">
+              Email
+              <input
+                className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
+                type="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+              />
+            </label>
+            <label className="mt-4 flex flex-col gap-2 text-sm font-semibold text-ink/70">
+              Mot de passe
+              <input
+                className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
+                type="password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+              />
+            </label>
+            {mode === "login" ? (
+              <button
+                type="button"
+                className="mt-2 w-fit text-left text-xs font-semibold text-forest underline-offset-2 hover:underline"
+                onClick={() => {
+                  setResetEmail(email);
+                  setMode("forgot");
+                  setMessage("");
+                  setResetSent(false);
+                }}
+                disabled={loading}
+              >
+                Mot de passe oublie ?
+              </button>
+            ) : null}
+          </>
+        )}
 
-        {message ? <p className="mt-3 text-sm text-ember">{message}</p> : null}
+        {message ? (
+          <p className={`mt-3 text-sm ${resetSent ? "text-forest" : "text-ember"}`}>{message}</p>
+        ) : null}
 
         <div className="mt-5 flex flex-wrap items-center gap-3">
           {mode === "login" ? (
@@ -171,7 +305,7 @@ export default function AuthClient() {
             >
               {loading ? "Connexion..." : "Se connecter"}
             </button>
-          ) : (
+          ) : mode === "signup" ? (
             <button
               className="rounded-full bg-ink px-5 py-2 text-sm font-semibold text-stone"
               onClick={handleSignup}
@@ -179,13 +313,55 @@ export default function AuthClient() {
             >
               {loading ? "Activation..." : "Creer le compte"}
             </button>
+          ) : (
+            <button
+              className="rounded-full border border-ink/20 px-4 py-2 text-sm font-semibold text-ink"
+              onClick={() => {
+                setMode("login");
+                setMessage("");
+                setResetSent(false);
+              }}
+            >
+              Retour connexion
+            </button>
           )}
-          <button
-            className="rounded-full border border-ink/20 px-4 py-2 text-sm font-semibold text-ink"
-            onClick={() => setMode(mode === "login" ? "signup" : "login")}
+          {mode !== "forgot" ? (
+            <button
+              className="rounded-full border border-ink/20 px-4 py-2 text-sm font-semibold text-ink"
+              onClick={() => {
+                setMode(mode === "login" ? "signup" : "login");
+                setMessage("");
+                setResetSent(false);
+              }}
+            >
+              {mode === "login" ? "J'ai une invitation" : "J'ai deja un compte"}
+            </button>
+          ) : null}
+        </div>
+      </section>
+
+      <section className="rounded-xl border border-clay/70 bg-white/95 p-6 shadow-card">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.32em] text-ink/60">
+          Pas encore adherent ?
+        </p>
+        <h2 className="mt-2 font-serif text-2xl">Decouvrir la coop</h2>
+        <p className="mt-2 text-sm text-ink/70">
+          L'inscription est reservee aux adherents invites. Pour rejoindre la coop ou obtenir une
+          invitation, contacte l'equipe ou viens nous rencontrer lors d'une distribution.
+        </p>
+        <div className="mt-4 flex flex-wrap gap-3">
+          <a
+            className="rounded-full border border-ink/20 bg-white px-4 py-2 text-sm font-semibold text-ink"
+            href={`mailto:${ADHESION_EMAIL}?subject=${encodeURIComponent("Demande d'adhesion")}`}
           >
-            {mode === "login" ? "J'ai une invitation" : "J'ai deja un compte"}
-          </button>
+            Nous contacter
+          </a>
+          <a
+            className="rounded-full border border-ink/20 bg-white px-4 py-2 text-sm font-semibold text-ink"
+            href="/"
+          >
+            Voir la boutique
+          </a>
         </div>
       </section>
     </div>

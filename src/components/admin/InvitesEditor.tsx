@@ -10,6 +10,12 @@ type Invite = {
   role?: string;
   token?: string;
   used?: boolean;
+  memberId?: string | null;
+};
+
+type MemberOption = {
+  id: string;
+  label: string;
 };
 
 export default function InvitesEditor() {
@@ -17,16 +23,33 @@ export default function InvitesEditor() {
   const [email, setEmail] = useState("");
   const [role, setRole] = useState("member");
   const [token, setToken] = useState("");
+  const [memberId, setMemberId] = useState("");
+  const [members, setMembers] = useState<MemberOption[]>([]);
   const [message, setMessage] = useState("");
   const [testInvite, setTestInvite] = useState<{ token: string; url: string } | null>(null);
 
   const load = async () => {
-    const snap = await getDocs(query(collection(firebaseDb, "invites"), orderBy("createdAt", "desc")));
+    const [snap, membersSnap] = await Promise.all([
+      getDocs(query(collection(firebaseDb, "invites"), orderBy("createdAt", "desc"))),
+      getDocs(collection(firebaseDb, "members")),
+    ]);
     setInvites(
       snap.docs.map((docSnap) => ({
         id: docSnap.id,
         ...(docSnap.data() as Omit<Invite, "id">),
       })),
+    );
+    setMembers(
+      membersSnap.docs.map((docSnap) => {
+        const data = docSnap.data() as {
+          firstName?: string;
+          lastName?: string;
+          accountLabel?: string;
+        };
+        const fullName = `${data.firstName ?? ""} ${data.lastName ?? ""}`.trim();
+        const label = data.accountLabel?.trim() || fullName || docSnap.id;
+        return { id: docSnap.id, label };
+      }),
     );
   };
 
@@ -41,12 +64,14 @@ export default function InvitesEditor() {
         email: email || null,
         role,
         token: newToken,
+        memberId: memberId || null,
         used: false,
         createdAt: serverTimestamp(),
       });
       setMessage("Invitation creee.");
       setToken("");
       setEmail("");
+      setMemberId("");
       await load();
     } catch (error) {
       const err = error instanceof Error ? error.message : "Erreur inconnue.";
@@ -119,6 +144,21 @@ export default function InvitesEditor() {
               onChange={(event) => setToken(event.target.value)}
             />
           </label>
+          <label className="flex flex-col gap-2 text-sm font-semibold text-ink/70 md:col-span-2">
+            Compte partage (optionnel)
+            <select
+              className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
+              value={memberId}
+              onChange={(event) => setMemberId(event.target.value)}
+            >
+              <option value="">Nouveau compte membre</option>
+              {members.map((member) => (
+                <option key={member.id} value={member.id}>
+                  {member.label}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
         <button
           className="mt-4 rounded-full bg-ink px-5 py-2 text-sm font-semibold text-stone"
@@ -160,6 +200,7 @@ export default function InvitesEditor() {
                 <th className="px-4 py-3 font-semibold text-ink">Email</th>
                 <th className="px-4 py-3 font-semibold text-ink">Role</th>
                 <th className="px-4 py-3 font-semibold text-ink">Token</th>
+                <th className="px-4 py-3 font-semibold text-ink">Compte</th>
                 <th className="px-4 py-3 font-semibold text-ink">Statut</th>
                 <th className="px-4 py-3 font-semibold text-ink">Actions</th>
               </tr>
@@ -170,6 +211,7 @@ export default function InvitesEditor() {
                   <td className="px-4 py-3">{invite.email ?? "-"}</td>
                   <td className="px-4 py-3">{invite.role ?? "member"}</td>
                   <td className="px-4 py-3">{invite.token ?? "-"}</td>
+                  <td className="px-4 py-3">{invite.memberId ?? "-"}</td>
                   <td className="px-4 py-3">{invite.used ? "Utilisee" : "En attente"}</td>
                   <td className="px-4 py-3">
                     {!invite.used ? (

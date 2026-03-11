@@ -42,6 +42,26 @@ type DistributionProducerRow = {
   validatedByReferent?: boolean;
 };
 
+type TrendPoint = {
+  key: string;
+  label: string;
+  orders: number;
+  orderingMembers: number;
+  revenue: number;
+};
+
+type OrderDoc = {
+  id: string;
+  memberId?: string;
+};
+
+type OrderItemDoc = {
+  saleDateKey?: string | null;
+  lineTotal?: number;
+  unitPrice?: number;
+  quantity?: number;
+};
+
 function daysUntil(date?: Date | null) {
   if (!date) return null;
   const now = new Date();
@@ -60,6 +80,75 @@ function statusLabel(status?: string) {
   return "Planifiee";
 }
 
+function toDate(value: unknown): Date | null {
+  if (value instanceof Date) return value;
+  if (value && typeof value === "object" && "toDate" in value) {
+    const fn = (value as { toDate?: () => Date }).toDate;
+    return typeof fn === "function" ? fn() : null;
+  }
+  return null;
+}
+
+function dateKey(value: Date) {
+  return value.toISOString().slice(0, 10);
+}
+
+function MetricBars({
+  title,
+  series,
+  valueKey,
+  totalValue,
+}: {
+  title: string;
+  series: TrendPoint[];
+  valueKey: "orders" | "orderingMembers" | "revenue";
+  totalValue?: number;
+}) {
+  const values = series.map((point) => point[valueKey]);
+  const maxValue = Math.max(...values, 1);
+  const currentValue =
+    typeof totalValue === "number" ? totalValue : values.reduce((sum, value) => sum + Number(value), 0);
+  const displayValue =
+    valueKey === "revenue"
+      ? `${Number(currentValue).toFixed(2).replace(".", ",")} EUR`
+      : String(currentValue);
+
+  return (
+    <article className="rounded-[10px] border border-clay/90 bg-stone p-4">
+      <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-ink/60">{title}</p>
+      <p className="mt-1 text-2xl font-semibold text-ink">{displayValue}</p>
+      <div className="mt-3 flex h-24 items-end gap-2">
+        {series.map((point) => {
+          const value = point[valueKey];
+          const heightPx = value > 0 ? Math.max(10, Math.round((Number(value) / maxValue) * 84)) : 4;
+          const pointValue =
+            valueKey === "revenue"
+              ? `${Number(value).toFixed(0)} €`
+              : String(value);
+          return (
+            <div
+              key={`${valueKey}-${point.key}`}
+              className="flex h-full flex-1 flex-col items-center justify-end gap-1"
+            >
+              <span className="text-[10px] font-semibold text-ink/70">{pointValue}</span>
+              <div
+                className={`w-full rounded-sm ${value > 0 ? "bg-forest/65" : "bg-forest/20"}`}
+                style={{ height: `${heightPx}px` }}
+                title={`${point.label}: ${
+                  valueKey === "revenue"
+                    ? `${Number(value).toFixed(2).replace(".", ",")} EUR`
+                    : value
+                }`}
+              />
+              <span className="text-[10px] text-ink/55">{point.label}</span>
+            </div>
+          );
+        })}
+      </div>
+    </article>
+  );
+}
+
 export default function AdminDashboard({ children, focusMode = false }: AdminDashboardProps) {
   if (focusMode) return <div>{children}</div>;
   const { effectiveMemberId, effectiveRole } = useAuth();
@@ -68,6 +157,7 @@ export default function AdminDashboard({ children, focusMode = false }: AdminDas
   const [viewer, setViewer] = useState<MemberProfile | null>(null);
   const [producerMap, setProducerMap] = useState<Record<string, ProducerProfile>>({});
   const [distributionProducerRows, setDistributionProducerRows] = useState<DistributionProducerRow[]>([]);
+  const [trends, setTrends] = useState<TrendPoint[]>([]);
   const [entityStats, setEntityStats] = useState({
     members: 0,
     producers: 0,
@@ -81,6 +171,11 @@ export default function AdminDashboard({ children, focusMode = false }: AdminDas
     validatedProducerCount: 0,
     pendingProducerCount: 0,
     totalProducerRows: 0,
+  });
+  const [trendTotals, setTrendTotals] = useState({
+    orders: 0,
+    orderingMembers: 0,
+    revenue: 0,
   });
 
   useEffect(() => {
@@ -151,6 +246,7 @@ export default function AdminDashboard({ children, focusMode = false }: AdminDas
           pendingProducerCount: 0,
           totalProducerRows: 0,
         });
+        setTrendTotals({ orders: 0, orderingMembers: 0, revenue: 0 });
         setLoading(false);
         return;
       }
@@ -180,6 +276,87 @@ export default function AdminDashboard({ children, focusMode = false }: AdminDas
         pendingProducerCount: Math.max(activeProducerCount - validatedProducerCount, 0),
         totalProducerRows: rows.length,
       });
+
+      const recentDistributions = [...distributions]
+        .sort((a, b) => {
+          const aDate = a.dates?.[0]?.toDate?.() ?? new Date(0);
+          const bDate = b.dates?.[0]?.toDate?.() ?? new Date(0);
+          return aDate.getTime() - bDate.getTime();
+        })
+        .slice(-9);
+
+      const orders = ordersSnap.docs.map((docSnap) => ({
+        id: docSnap.id,
+        ...(docSnap.data() as Omit<OrderDoc, "id">),
+      })) as OrderDoc[];
+
+      const orderItemsByOrder = new Map<string, OrderItemDoc[]>();
+      await Promise.all(
+        orders.map(async (order) => {
+          const itemsSnap = await getDocs(collection(firebaseDb, "orders", order.id, "items"));
+          orderItemsByOrder.set(
+            order.id,
+            itemsSnap.docs.map((docSnap) => docSnap.data() as OrderItemDoc),
+          );
+        }),
+      );
+
+      const totalsBySaleDate = new Map<string, { revenue: number }>();
+      const membersBySaleDate = new Map<string, Set<string>>();
+      orders.forEach((order) => {
+        const items = orderItemsByOrder.get(order.id) ?? [];
+        const revenueByDate = new Map<string, number>();
+        items.forEach((item) => {
+          const key = String(item.saleDateKey ?? "");
+          if (!key) return;
+          const lineTotal =
+            Number(item.lineTotal ?? 0) ||
+            Number(item.unitPrice ?? 0) * Number(item.quantity ?? 0);
+          revenueByDate.set(key, (revenueByDate.get(key) ?? 0) + lineTotal);
+        });
+        const memberKey = order.memberId ? String(order.memberId) : `order:${order.id}`;
+        revenueByDate.forEach((_, key) => {
+          const membersSet = membersBySaleDate.get(key) ?? new Set<string>();
+          membersSet.add(memberKey);
+          membersBySaleDate.set(key, membersSet);
+        });
+        revenueByDate.forEach((revenue, key) => {
+          const current = totalsBySaleDate.get(key) ?? { revenue: 0 };
+          current.revenue += revenue;
+          totalsBySaleDate.set(key, current);
+        });
+      });
+
+      const trendPoints: TrendPoint[] = [];
+      recentDistributions.forEach((distribution) => {
+        const dates = (distribution.dates ?? []).slice(0, 3).map((entry) => entry.toDate?.()).filter(Boolean) as Date[];
+        dates.forEach((date, index) => {
+          const key = dateKey(date);
+          const totals = totalsBySaleDate.get(key);
+          trendPoints.push({
+            key: `${distribution.id}-${key}-${index}`,
+            label: date.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" }),
+            orders: membersBySaleDate.get(key)?.size ?? 0,
+            orderingMembers: membersBySaleDate.get(key)?.size ?? 0,
+            revenue: totals?.revenue ?? 0,
+          });
+        });
+      });
+
+      const totalRevenue = trendPoints.reduce((sum, point) => sum + point.revenue, 0);
+      const globalOrderingMembers = new Set<string>();
+      trendPoints.forEach((point) => {
+        const parts = point.key.split("-");
+        const dKey = `${parts[1]}-${parts[2]}-${parts[3]}`;
+        const members = membersBySaleDate.get(dKey);
+        members?.forEach((member) => globalOrderingMembers.add(member));
+      });
+      setTrendTotals({
+        orders: trendPoints.reduce((sum, point) => sum + point.orders, 0),
+        orderingMembers: globalOrderingMembers.size,
+        revenue: totalRevenue,
+      });
+      setTrends(trendPoints);
       setLoading(false);
     };
 
@@ -226,6 +403,17 @@ export default function AdminDashboard({ children, focusMode = false }: AdminDas
       referentProducerIds.join(","),
     )}&idx=0`;
   }, [activeDistribution?.id, referentProducerIds]);
+  const trendSeries = useMemo(() => {
+    if (trends.length) return trends;
+    const fallbackDates = (activeDistribution?.dates ?? []).slice(0, 3).map((entry) => entry.toDate?.()).filter(Boolean) as Date[];
+    return fallbackDates.map((date, index) => ({
+      key: `${index}-${dateKey(date)}`,
+      label: date.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" }),
+      orders: 0,
+      orderingMembers: 0,
+      revenue: 0,
+    }));
+  }, [trends, activeDistribution]);
 
   return (
     <div className="flex flex-col gap-4">
@@ -331,6 +519,34 @@ export default function AdminDashboard({ children, focusMode = false }: AdminDas
               </article>
             ))}
           </div>
+        </div>
+      </section>
+
+      <section className="rounded-[10px] border border-clay/90 bg-clay/25 p-5">
+        <div className="flex items-start justify-between gap-3">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-ink/60">
+            Evolutions
+          </p>
+        </div>
+        <div className="mt-4 grid gap-3 xl:grid-cols-3">
+          <MetricBars
+            title="Commandes"
+            series={trendSeries}
+            valueKey="orders"
+            totalValue={trendTotals.orders}
+          />
+          <MetricBars
+            title="Adherents ayant commande"
+            series={trendSeries}
+            valueKey="orderingMembers"
+            totalValue={trendTotals.orderingMembers}
+          />
+          <MetricBars
+            title="Chiffre d'affaires"
+            series={trendSeries}
+            valueKey="revenue"
+            totalValue={trendTotals.revenue}
+          />
         </div>
       </section>
 

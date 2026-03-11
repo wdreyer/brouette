@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { collection, doc, getDoc, getDocs, query, setDoc, where } from "firebase/firestore";
+import { collection, deleteDoc, doc, getDoc, getDocs, query, setDoc, where } from "firebase/firestore";
 import { firebaseDb } from "@/lib/firebase/client";
 
 type Producer = {
@@ -14,6 +14,7 @@ type Producer = {
   productType?: string;
   frequency?: string;
   notes?: string;
+  coopStatus?: string | null;
   referentId?: string | null;
   referentName?: string | null;
   referentPhone?: string | null;
@@ -48,6 +49,7 @@ type OrderItem = {
 
 type ProducerDraft = {
   name: string;
+  coopStatus: string;
   email: string;
   phone: string;
   productType: string;
@@ -63,6 +65,7 @@ type ProducerDraft = {
 
 const EMPTY_DRAFT: ProducerDraft = {
   name: "",
+  coopStatus: "active",
   email: "",
   phone: "",
   productType: "",
@@ -75,6 +78,30 @@ const EMPTY_DRAFT: ProducerDraft = {
   postalCode: "",
   city: "",
 };
+
+type RevenuePoint = { key: string; label: string; value: number };
+
+function RevenueBars({ title, points }: { title: string; points: RevenuePoint[] }) {
+  const values = points.map((point) => point.value);
+  const maxValue = Math.max(...values, 1);
+  return (
+    <div className="border border-clay/70 bg-white/90 p-5">
+      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">{title}</p>
+      <div className="mt-3 flex h-28 items-end gap-2">
+        {points.map((point) => {
+          const height = point.value > 0 ? Math.max(10, Math.round((point.value / maxValue) * 96)) : 4;
+          return (
+            <div key={point.key} className="flex h-full flex-1 flex-col items-center justify-end gap-1">
+              <span className="text-[10px] font-semibold text-ink/70">{point.value.toFixed(0)} €</span>
+              <div className={`w-full rounded-sm ${point.value > 0 ? "bg-forest/70" : "bg-forest/20"}`} style={{ height }} />
+              <span className="text-[10px] text-ink/60">{point.label}</span>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 export default function ProducerPage() {
   const params = useParams();
@@ -90,6 +117,8 @@ export default function ProducerPage() {
   const [salesHistory, setSalesHistory] = useState<{ label: string; total: number }[]>([]);
   const [topProducts, setTopProducts] = useState<{ label: string; quantity: number; total: number }[]>([]);
   const [totalRevenue, setTotalRevenue] = useState(0);
+  const [monthlyRevenue, setMonthlyRevenue] = useState<RevenuePoint[]>([]);
+  const [yearlyRevenue, setYearlyRevenue] = useState<RevenuePoint[]>([]);
 
   useEffect(() => {
     if (!producerId) return;
@@ -110,6 +139,7 @@ export default function ProducerPage() {
       setProducer({ id: producerSnap.id, ...data });
       setDraft({
         name: data.name ?? "",
+        coopStatus: data.coopStatus ?? "active",
         email: data.email ?? "",
         phone: data.phone ?? "",
         productType: data.productType ?? "",
@@ -137,6 +167,8 @@ export default function ProducerPage() {
       const productMap = new Map(productItems.map((item) => [item.id, item.name ?? "Produit"]));
       const historyMap = new Map<string, number>();
       const topMap = new Map<string, { quantity: number; total: number }>();
+      const monthMap = new Map<string, number>();
+      const yearMap = new Map<string, number>();
       let nextRevenue = 0;
 
       await Promise.all(
@@ -155,6 +187,15 @@ export default function ProducerPage() {
               quantity: current.quantity + quantity,
               total: current.total + lineTotal,
             });
+            if (item.saleDateKey) {
+              const date = new Date(`${item.saleDateKey}T00:00:00.000Z`);
+              if (!Number.isNaN(date.getTime())) {
+                const monthKey = `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
+                const yearKey = String(date.getUTCFullYear());
+                monthMap.set(monthKey, (monthMap.get(monthKey) ?? 0) + lineTotal);
+                yearMap.set(yearKey, (yearMap.get(yearKey) ?? 0) + lineTotal);
+              }
+            }
             nextRevenue += lineTotal;
           });
         }),
@@ -170,6 +211,25 @@ export default function ProducerPage() {
           .slice(0, 3),
       );
       setTotalRevenue(nextRevenue);
+      setMonthlyRevenue(
+        Array.from(monthMap.entries())
+          .sort((a, b) => a[0].localeCompare(b[0]))
+          .slice(-12)
+          .map(([key, value]) => {
+            const [year, month] = key.split("-");
+            return {
+              key,
+              label: `${month}/${year.slice(-2)}`,
+              value,
+            } satisfies RevenuePoint;
+          }),
+      );
+      setYearlyRevenue(
+        Array.from(yearMap.entries())
+          .sort((a, b) => a[0].localeCompare(b[0]))
+          .slice(-5)
+          .map(([key, value]) => ({ key, label: key, value })),
+      );
       setLoading(false);
     };
 
@@ -189,6 +249,7 @@ export default function ProducerPage() {
       : "";
     const payload = {
       name: draft.name.trim(),
+      coopStatus: draft.coopStatus === "inactive" ? "inactive" : "active",
       email: draft.email.trim(),
       phone: draft.phone.trim(),
       productType: draft.productType.trim(),
@@ -211,6 +272,14 @@ export default function ProducerPage() {
     setProducer((prev) => (prev ? { ...prev, ...payload } : prev));
     setEditing(false);
     setMessage("Producteur mis a jour.");
+  };
+
+  const removeProducer = async () => {
+    if (!producerId) return;
+    const ok = window.confirm("Supprimer ce producteur ?");
+    if (!ok) return;
+    await deleteDoc(doc(firebaseDb, "producers", producerId));
+    router.push("/admin/producers");
   };
 
   if (loading) {
@@ -241,6 +310,12 @@ export default function ProducerPage() {
               Retour
             </Link>
             <button
+              className="rounded-full border border-ember/25 px-4 py-2 text-xs font-semibold text-ember"
+              onClick={removeProducer}
+            >
+              Supprimer
+            </button>
+            <button
               className="rounded-full bg-ink px-4 py-2 text-xs font-semibold text-stone"
               onClick={() => setEditing((prev) => !prev)}
             >
@@ -263,6 +338,7 @@ export default function ProducerPage() {
                   <div className="mt-4 grid gap-3 text-sm text-ink/80">
                     <p><span className="text-ink/60">Telephone:</span> {producer.phone || "-"}</p>
                     <p><span className="text-ink/60">Email:</span> {producer.email || "-"}</p>
+                    <p><span className="text-ink/60">Statut:</span> {producer.coopStatus === "inactive" ? "Inactif" : "Actif"}</p>
                     <p><span className="text-ink/60">Type de produit:</span> {producer.productType || "-"}</p>
                     <p><span className="text-ink/60">Frequence:</span> {producer.frequency || "-"}</p>
                   </div>
@@ -348,6 +424,9 @@ export default function ProducerPage() {
               </div>
             </div>
 
+            <RevenueBars title="Evolution CA / mois" points={monthlyRevenue} />
+            <RevenueBars title="Evolution CA / annee" points={yearlyRevenue} />
+
             <div className="border border-clay/70 bg-white/90 p-6">
               <h3 className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">Top 3 ventes</h3>
               <div className="mt-4 grid gap-3">
@@ -378,6 +457,17 @@ export default function ProducerPage() {
                 value={draft.name}
                 onChange={(event) => setDraft((prev) => ({ ...prev, name: event.target.value }))}
               />
+            </label>
+            <label className="flex flex-col gap-2 text-sm font-semibold text-ink/70">
+              Statut
+              <select
+                className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
+                value={draft.coopStatus}
+                onChange={(event) => setDraft((prev) => ({ ...prev, coopStatus: event.target.value }))}
+              >
+                <option value="active">Actif</option>
+                <option value="inactive">Inactif</option>
+              </select>
             </label>
             <label className="flex flex-col gap-2 text-sm font-semibold text-ink/70">
               Telephone

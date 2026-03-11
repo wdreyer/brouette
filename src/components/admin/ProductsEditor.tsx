@@ -13,7 +13,8 @@ import {
   Timestamp,
   where,
 } from "firebase/firestore";
-import { firebaseDb } from "@/lib/firebase/client";
+import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
+import { firebaseDb, firebaseStorage } from "@/lib/firebase/client";
 
 type FieldType = "text" | "number" | "boolean" | "date" | "datetime";
 
@@ -129,6 +130,10 @@ function shortText(value: unknown, max = 90) {
   return `${text.slice(0, max).trimEnd()}...`;
 }
 
+function safeFileName(name: string) {
+  return name.replace(/[^a-zA-Z0-9._-]/g, "_");
+}
+
 export default function ProductsEditor({
   collectionName,
   title,
@@ -155,6 +160,8 @@ export default function ProductsEditor({
   const [filter, setFilter] = useState("");
   const [producerFilter, setProducerFilter] = useState("all");
   const [categoryFilter, setCategoryFilter] = useState("all");
+  const [uploadingEditImage, setUploadingEditImage] = useState(false);
+  const [uploadingCreateImage, setUploadingCreateImage] = useState(false);
 
   const cardFields = useMemo(() => fields.filter((field) => field.table), [fields]);
 
@@ -413,6 +420,42 @@ export default function ProductsEditor({
     }
   };
 
+  const uploadImage = async (
+    file: File,
+    mode: "edit" | "create",
+    productId?: string,
+  ) => {
+    if (!file) return;
+    try {
+      setMessage("");
+      if (mode === "edit") setUploadingEditImage(true);
+      if (mode === "create") setUploadingCreateImage(true);
+
+      const ownerId = productId || `draft_${Date.now()}`;
+      const path = `products/${ownerId}/${Date.now()}_${safeFileName(file.name)}`;
+      const storageRef = ref(firebaseStorage, path);
+      await uploadBytes(storageRef, file);
+      const url = await getDownloadURL(storageRef);
+
+      if (mode === "edit") {
+        const next = { ...editDraft };
+        setByPath(next, "imageUrl", url);
+        setEditDraft(next);
+      } else {
+        const next = { ...createDraft };
+        setByPath(next, "imageUrl", url);
+        setCreateDraft(next);
+      }
+      setMessage("Image uploadee.");
+    } catch (error) {
+      const err = error instanceof Error ? error.message : "Erreur inconnue.";
+      setMessage(`Upload image impossible: ${err}`);
+    } finally {
+      if (mode === "edit") setUploadingEditImage(false);
+      if (mode === "create") setUploadingCreateImage(false);
+    }
+  };
+
   const handleCreate = async () => {
     try {
       const payload = { ...createDraft };
@@ -491,7 +534,12 @@ export default function ProductsEditor({
       ) : (
         <>
           {editingId ? (
-            <div className="flex flex-col gap-6 rounded-3xl border border-clay/70 bg-white/90 p-6 shadow-card">
+            <div className="fixed inset-0 z-50 bg-ink/40" onClick={() => setEditingId(null)}>
+              <aside
+                className="absolute inset-y-0 right-0 w-full max-w-[1040px] overflow-x-hidden overflow-y-auto border-l border-clay/70 bg-white p-6 shadow-2xl"
+                onClick={(event) => event.stopPropagation()}
+              >
+              <div className="flex flex-col gap-6">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">
@@ -524,6 +572,19 @@ export default function ProductsEditor({
                     <div className="flex items-center justify-between">
                       <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">Apercu</p>
                     </div>
+                  <div className="overflow-hidden rounded-xl border border-clay/70 bg-white">
+                    {String(getByPath(editDraft, "imageUrl") ?? "") ? (
+                      <img
+                        src={String(getByPath(editDraft, "imageUrl") ?? "")}
+                        alt={String(getByPath(editDraft, "name") ?? "Produit")}
+                        className="h-44 w-full object-cover"
+                      />
+                    ) : (
+                      <div className="flex h-44 items-center justify-center text-xs text-ink/50">
+                        Aucune image
+                      </div>
+                    )}
+                  </div>
                   <p className="text-sm text-ink/70">
                     {String(getByPath(editDraft, "description") ?? "")}
                   </p>
@@ -617,6 +678,36 @@ export default function ProductsEditor({
                           }}
                         />
                       )}
+                      {field.path === "imageUrl" ? (
+                        <div className="flex flex-wrap items-center gap-2">
+                          <label className="inline-flex cursor-pointer items-center rounded-xl border border-ink/20 bg-white px-3 py-2 text-xs font-semibold text-ink">
+                            {uploadingEditImage ? "Upload..." : "Uploader un fichier"}
+                            <input
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              disabled={uploadingEditImage}
+                              onChange={(event) => {
+                                const file = event.target.files?.[0];
+                                if (file) {
+                                  uploadImage(file, "edit", editingId ?? undefined);
+                                }
+                                event.currentTarget.value = "";
+                              }}
+                            />
+                          </label>
+                          {String(getByPath(editDraft, "imageUrl") ?? "") ? (
+                            <a
+                              href={String(getByPath(editDraft, "imageUrl") ?? "")}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="text-xs font-semibold text-ink/70 underline"
+                            >
+                              Ouvrir l'image
+                            </a>
+                          ) : null}
+                        </div>
+                      ) : null}
                     </label>
                   ))}
                   <label className="flex flex-col gap-2 text-sm font-semibold text-ink/70">
@@ -727,6 +818,8 @@ export default function ProductsEditor({
                   Fermer
                 </button>
               </div>
+              </div>
+              </aside>
             </div>
           ) : null}
 
@@ -758,9 +851,24 @@ export default function ProductsEditor({
                       onClick={() => openEdit(entry)}
                     >
                       <td className="px-4 py-3">
-                        <p className="font-semibold text-ink">
-                          {String(getByPath(entry.data, "name") ?? "-")}
-                        </p>
+                        <div className="flex items-center gap-3">
+                          <div className="h-10 w-10 shrink-0 overflow-hidden rounded-md border border-clay/60 bg-stone">
+                            {String(getByPath(entry.data, "imageUrl") ?? "") ? (
+                              <img
+                                src={String(getByPath(entry.data, "imageUrl") ?? "")}
+                                alt={String(getByPath(entry.data, "name") ?? "Produit")}
+                                className="h-full w-full object-cover"
+                              />
+                            ) : (
+                              <div className="flex h-full w-full items-center justify-center text-[10px] text-ink/45">
+                                No img
+                              </div>
+                            )}
+                          </div>
+                          <p className="font-semibold text-ink">
+                            {String(getByPath(entry.data, "name") ?? "-")}
+                          </p>
+                        </div>
                       </td>
                       <td className="px-4 py-3 text-xs text-ink/70">{producerLabel}</td>
                       <td className="px-4 py-3 text-xs text-ink/70">{categoryLabel || "-"}</td>
@@ -873,6 +981,36 @@ export default function ProductsEditor({
                       }}
                     />
                   )}
+                  {field.path === "imageUrl" ? (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <label className="inline-flex cursor-pointer items-center rounded-xl border border-ink/20 bg-white px-3 py-2 text-xs font-semibold text-ink">
+                        {uploadingCreateImage ? "Upload..." : "Uploader un fichier"}
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          disabled={uploadingCreateImage}
+                          onChange={(event) => {
+                            const file = event.target.files?.[0];
+                            if (file) {
+                              uploadImage(file, "create");
+                            }
+                            event.currentTarget.value = "";
+                          }}
+                        />
+                      </label>
+                      {String(getByPath(createDraft, "imageUrl") ?? "") ? (
+                        <a
+                          href={String(getByPath(createDraft, "imageUrl") ?? "")}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-xs font-semibold text-ink/70 underline"
+                        >
+                          Ouvrir l'image
+                        </a>
+                      ) : null}
+                    </div>
+                  ) : null}
                 </label>
               ))}
               <label className="flex flex-col gap-2 text-sm font-semibold text-ink/70">
