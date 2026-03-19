@@ -69,7 +69,7 @@ export default function ProducerPage() {
     return (
       <div className="mx-auto w-full max-w-6xl px-6 py-12">
         <h1 className="font-serif text-3xl">Producteur introuvable</h1>
-        <p className="mt-2 text-sm text-ink/70">Verifie l'identifiant du producteur.</p>
+        <p className="mt-2 text-sm text-ink/70">Vérifie l'identifiant du producteur.</p>
       </div>
     );
   }

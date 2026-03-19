@@ -3,6 +3,7 @@ export type DistributionLike = {
   status?: string;
   dates?: { toDate?: () => Date }[];
   openedAt?: { toDate?: () => Date };
+  closeAt?: { toDate?: () => Date };
 };
 
 const OPEN_STATUSES = new Set(["open", "ouverte", "ouvertes"]);
@@ -11,8 +12,22 @@ export function isOpenStatus(status?: string) {
   return OPEN_STATUSES.has(String(status ?? ""));
 }
 
+export function isDistributionExpired(item?: DistributionLike | null, now = new Date()) {
+  const closeAt = item?.closeAt?.toDate?.();
+  if (!closeAt) return false;
+  return closeAt.getTime() <= now.getTime();
+}
+
+export function isDistributionOpenNow(item?: DistributionLike | null, now = new Date()) {
+  if (!item) return false;
+  if (!isOpenStatus(item.status)) return false;
+  if (isDistributionExpired(item, now)) return false;
+  return true;
+}
+
 export function pickOpenDistribution<T extends DistributionLike>(items: T[]) {
-  const openItems = items.filter((item) => isOpenStatus(item.status));
+  const now = new Date();
+  const openItems = items.filter((item) => isDistributionOpenNow(item, now));
   if (openItems.length === 0) return null;
   return openItems.sort((a, b) => {
     const aOpened = a.openedAt?.toDate?.() ?? a.dates?.[0]?.toDate?.() ?? new Date(0);

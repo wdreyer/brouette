@@ -1,10 +1,10 @@
 "use client";
 
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
-import { onAuthStateChanged, type User } from "firebase/auth";
+import { onAuthStateChanged, signOut, type User } from "firebase/auth";
 import { firebaseAuth, firebaseDb } from "@/lib/firebase/client";
 import { setCartUser } from "@/lib/cart";
-import { findMemberByUser } from "@/lib/members";
+import { classifyMemberEmail, findMemberByUser } from "@/lib/members";
 
 type AuthContextValue = {
   user: User | null;
@@ -35,15 +35,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUser(nextUser);
       setRole(null);
       setMemberId(null);
-      setCartUser(nextUser?.uid ?? null);
       if (!nextUser) {
+        setCartUser(null);
         setLoading(false);
         return;
       }
       try {
         const member = await findMemberByUser(firebaseDb, nextUser);
         if (member) {
+          const emailMatch = classifyMemberEmail(member.data, String(nextUser.email ?? ""));
+          if (emailMatch === "secondary") {
+            setCartUser(null);
+            await signOut(firebaseAuth);
+            setRole(null);
+            setMemberId(null);
+            setLoading(false);
+            return;
+          }
           setMemberId(member.id);
+          setCartUser(member.id);
           if (member.role === "admin") {
             setRole("admin");
           } else if (member.role === "referent") {
@@ -52,6 +62,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             setRole("member");
           }
         } else {
+          setCartUser(nextUser.uid);
           setRole("member");
         }
       } finally {

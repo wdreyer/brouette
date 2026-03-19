@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { collection, deleteDoc, doc, getDoc, getDocs, query, setDoc, where } from "firebase/firestore";
 import { firebaseDb } from "@/lib/firebase/client";
+import { distributionLabel } from "@/lib/distributions";
 
 type Producer = {
   id: string;
@@ -35,6 +36,8 @@ type Product = {
   name?: string;
   categoryId?: string | null;
 };
+
+type FireDate = { toDate?: () => Date };
 
 type OrderItem = {
   producerId?: string;
@@ -80,6 +83,11 @@ const EMPTY_DRAFT: ProducerDraft = {
 };
 
 type RevenuePoint = { key: string; label: string; value: number };
+type ActivityRow = { key: string; label: string; dates: string[] };
+
+function dateKey(value: Date) {
+  return value.toISOString().slice(0, 10);
+}
 
 function RevenueBars({ title, points }: { title: string; points: RevenuePoint[] }) {
   const values = points.map((point) => point.value);
@@ -119,16 +127,18 @@ export default function ProducerPage() {
   const [totalRevenue, setTotalRevenue] = useState(0);
   const [monthlyRevenue, setMonthlyRevenue] = useState<RevenuePoint[]>([]);
   const [yearlyRevenue, setYearlyRevenue] = useState<RevenuePoint[]>([]);
+  const [activityRows, setActivityRows] = useState<ActivityRow[]>([]);
 
   useEffect(() => {
     if (!producerId) return;
     const load = async () => {
       setLoading(true);
-      const [producerSnap, referentSnap, productsSnap, ordersSnap] = await Promise.all([
+      const [producerSnap, referentSnap, productsSnap, ordersSnap, distributionsSnap] = await Promise.all([
         getDoc(doc(firebaseDb, "producers", producerId)),
         getDocs(query(collection(firebaseDb, "members"), where("auth.role", "==", "referent"))),
         getDocs(query(collection(firebaseDb, "products"), where("producerId", "==", producerId))),
         getDocs(collection(firebaseDb, "orders")),
+        getDocs(collection(firebaseDb, "distributionDates")),
       ]);
       if (!producerSnap.exists()) {
         setProducer(null);
@@ -230,6 +240,46 @@ export default function ProducerPage() {
           .slice(-5)
           .map(([key, value]) => ({ key, label: key, value })),
       );
+
+      const nextActivityRows: ActivityRow[] = [];
+      await Promise.all(
+        distributionsSnap.docs.map(async (distributionDoc) => {
+          const distributionData = distributionDoc.data() as { dates?: FireDate[] };
+          const dates = (distributionData.dates ?? [])
+            .slice(0, 3)
+            .map((entry) => entry.toDate?.())
+            .filter(Boolean) as Date[];
+          const keys = dates.map((value) => dateKey(value));
+          if (!keys.length) return;
+
+          const calendarDoc = await getDoc(
+            doc(firebaseDb, "distributionDates", distributionDoc.id, "calendarProducers", producerId),
+          );
+          if (!calendarDoc.exists()) return;
+          const calendarData = calendarDoc.data() as { activeDateKeys?: string[] };
+          const activeKeys = Array.isArray(calendarData.activeDateKeys)
+            ? calendarData.activeDateKeys.filter((key) => keys.includes(key))
+            : [];
+          if (!activeKeys.length) return;
+
+          nextActivityRows.push({
+            key: distributionDoc.id,
+            label: distributionLabel({ id: distributionDoc.id, dates: distributionData.dates }),
+            dates: activeKeys.map((key) =>
+              new Date(`${key}T00:00:00`).toLocaleDateString("fr-FR", {
+                day: "2-digit",
+                month: "2-digit",
+                year: "2-digit",
+              }),
+            ),
+          });
+        }),
+      );
+      setActivityRows(
+        nextActivityRows.sort((left, right) =>
+          (left.dates[0] ?? "").localeCompare(right.dates[0] ?? "", "fr"),
+        ),
+      );
       setLoading(false);
     };
 
@@ -271,7 +321,7 @@ export default function ProducerPage() {
     await setDoc(doc(firebaseDb, "producers", producerId), payload, { merge: true });
     setProducer((prev) => (prev ? { ...prev, ...payload } : prev));
     setEditing(false);
-    setMessage("Producteur mis a jour.");
+    setMessage("Producteur mis à jour.");
   };
 
   const removeProducer = async () => {
@@ -319,7 +369,7 @@ export default function ProducerPage() {
               className="rounded-full bg-ink px-4 py-2 text-xs font-semibold text-stone"
               onClick={() => setEditing((prev) => !prev)}
             >
-              {editing ? "Fermer" : "Editer"}
+              {editing ? "Fermer" : "Éditer"}
             </button>
           </div>
         </div>
@@ -336,8 +386,15 @@ export default function ProducerPage() {
                     Informations
                   </h3>
                   <div className="mt-4 grid gap-3 text-sm text-ink/80">
-                    <p><span className="text-ink/60">Telephone:</span> {producer.phone || "-"}</p>
+                    <p><span className="text-ink/60">Téléphone :</span> {producer.phone || "-"}</p>
                     <p><span className="text-ink/60">Email:</span> {producer.email || "-"}</p>
+                    <p>
+                      <span className="text-ink/60">Adresse:</span>{" "}
+                      {[producer.address?.street, producer.address?.postalCode, producer.address?.city]
+                        .map((value) => String(value ?? "").trim())
+                        .filter(Boolean)
+                        .join(" ") || "-"}
+                    </p>
                     <p><span className="text-ink/60">Statut:</span> {producer.coopStatus === "inactive" ? "Inactif" : "Actif"}</p>
                     <p><span className="text-ink/60">Type de produit:</span> {producer.productType || "-"}</p>
                     <p><span className="text-ink/60">Frequence:</span> {producer.frequency || "-"}</p>
@@ -353,13 +410,13 @@ export default function ProducerPage() {
                 ) : null}
               </div>
               <div className="mt-4 text-sm leading-7 text-ink/70">
-                {producer.notes || "Aucune precision."}
+                {producer.notes || "Aucune précision."}
               </div>
             </div>
 
             <div className="grid gap-4 md:grid-cols-3">
               <div className="border border-clay/70 bg-white/90 p-5">
-                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">Produits associes</p>
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">Produits associés</p>
                 <p className="mt-2 font-serif text-3xl">{products.length}</p>
               </div>
               <div className="border border-clay/70 bg-white/90 p-5">
@@ -373,7 +430,7 @@ export default function ProducerPage() {
             </div>
 
             <div className="border border-clay/70 bg-white/90 p-6">
-              <h3 className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">Produits associes</h3>
+              <h3 className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">Produits associés</h3>
               <div className="mt-4 flex flex-wrap gap-2">
                 {products.length ? (
                   products.map((item) => (
@@ -386,7 +443,7 @@ export default function ProducerPage() {
                     </Link>
                   ))
                 ) : (
-                  <p className="text-sm text-ink/60">Aucun produit associe.</p>
+                  <p className="text-sm text-ink/60">Aucun produit associé.</p>
                 )}
               </div>
             </div>
@@ -394,18 +451,36 @@ export default function ProducerPage() {
 
           <div className="grid gap-6">
             <div className="border border-clay/70 bg-white/90 p-6">
-              <h3 className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">Referent</h3>
+              <h3 className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">Référent</h3>
               {producer.referentId ? (
                 <Link
                   href={`/admin/members/${producer.referentId}`}
                   className="mt-3 inline-block text-sm font-semibold text-ink underline underline-offset-4"
                 >
-                  {producer.referentName || "Referent"}
+                  {producer.referentName || "Référent"}
                 </Link>
               ) : (
-                <p className="mt-3 text-sm text-ink/80">{producer.referentName || "Non attribue"}</p>
+                <p className="mt-3 text-sm text-ink/80">{producer.referentName || "Non attribué"}</p>
               )}
               <p className="text-sm text-ink/70">{producer.referentPhone || "-"}</p>
+            </div>
+
+            <div className="border border-clay/70 bg-white/90 p-6">
+              <h3 className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">
+                Dates d'activite
+              </h3>
+              <div className="mt-4 grid gap-3">
+                {activityRows.length ? (
+                  activityRows.map((row) => (
+                    <div key={row.key} className="border-b border-clay/40 pb-3 text-sm">
+                      <p className="font-semibold text-ink">{row.label}</p>
+                      <p className="text-ink/65">{row.dates.join(" - ")}</p>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-sm text-ink/60">Aucune date active dans le calendrier annuel.</p>
+                )}
+              </div>
             </div>
 
             <div className="border border-clay/70 bg-white/90 p-6">
@@ -441,7 +516,7 @@ export default function ProducerPage() {
                     </div>
                   ))
                 ) : (
-                  <p className="text-sm text-ink/60">Aucune vente enregistree pour ce producteur.</p>
+                  <p className="text-sm text-ink/60">Aucune vente enregistrée pour ce producteur.</p>
                 )}
               </div>
             </div>
@@ -470,7 +545,7 @@ export default function ProducerPage() {
               </select>
             </label>
             <label className="flex flex-col gap-2 text-sm font-semibold text-ink/70">
-              Telephone
+              Téléphone
               <input
                 className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
                 value={draft.phone}
@@ -502,7 +577,7 @@ export default function ProducerPage() {
               />
             </label>
             <label className="flex flex-col gap-2 text-sm font-semibold text-ink/70">
-              Referent
+              Référent
               <select
                 className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
                 value={draft.referentId}
@@ -511,13 +586,37 @@ export default function ProducerPage() {
                 <option value="">Aucun</option>
                 {referents.map((ref) => (
                   <option key={ref.id} value={ref.id}>
-                    {`${ref.firstName ?? ""} ${ref.lastName ?? ""}`.trim() || "Referent"}
+                    {`${ref.firstName ?? ""} ${ref.lastName ?? ""}`.trim() || "Référent"}
                   </option>
                 ))}
               </select>
             </label>
             <label className="flex flex-col gap-2 text-sm font-semibold text-ink/70 md:col-span-2">
-              Notes / precisions
+              Adresse (rue)
+              <input
+                className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
+                value={draft.street}
+                onChange={(event) => setDraft((prev) => ({ ...prev, street: event.target.value }))}
+              />
+            </label>
+            <label className="flex flex-col gap-2 text-sm font-semibold text-ink/70">
+              Code postal
+              <input
+                className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
+                value={draft.postalCode}
+                onChange={(event) => setDraft((prev) => ({ ...prev, postalCode: event.target.value }))}
+              />
+            </label>
+            <label className="flex flex-col gap-2 text-sm font-semibold text-ink/70">
+              Ville
+              <input
+                className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
+                value={draft.city}
+                onChange={(event) => setDraft((prev) => ({ ...prev, city: event.target.value }))}
+              />
+            </label>
+            <label className="flex flex-col gap-2 text-sm font-semibold text-ink/70 md:col-span-2">
+              Notes / précisions
               <textarea
                 className="min-h-[120px] rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
                 value={draft.notes}

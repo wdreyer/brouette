@@ -1179,7 +1179,7 @@ export async function resetDistributions() {
 
   const docRef = doc(collection(firebaseDb, "distributionDates"));
   createBatch.set(docRef, {
-    title: "Periode 1",
+    title: "Période 1",
     dates: dates.map((date) => Timestamp.fromDate(date)),
     status: "planned",
   });

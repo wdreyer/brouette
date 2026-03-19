@@ -460,7 +460,7 @@ export default function OpenSalesPanel() {
         <p className="text-sm font-semibold uppercase tracking-[0.3em] text-moss">Ventes</p>
         <h2 className="font-serif text-3xl">Configurer et ouvrir la vente</h2>
         <p className="text-sm text-ink/70">
-          Selectionne une distribution planifiee, coche les producteurs et complete les offres en un seul ecran.
+          Sélectionne une distribution planifiée, coche les producteurs et complète les offres en un seul écran.
         </p>
       </div>
 
@@ -515,10 +515,10 @@ export default function OpenSalesPanel() {
               value={selectedId}
               onChange={(event) => setSelectedId(event.target.value)}
             >
-              <option value="">Choisir une distribution planifiee</option>
+              <option value="">Choisir une distribution planifiée</option>
               {plannedDistributions.map((dist, index) => (
                 <option key={dist.id} value={dist.id}>
-                  {`Periode ${index + 1}  planifiee`}
+                  {`Période ${index + 1} · planifiée`}
                 </option>
               ))}
               {openDistribution ? (

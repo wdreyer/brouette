@@ -161,7 +161,7 @@ export default function MessagesEditor() {
               >
                 <option value="all-members">Tous les adherents</option>
                 <option value="buyers">Seulement les commandeurs</option>
-                <option value="referents">Referents</option>
+                <option value="referents">Référents</option>
               </select>
             </label>
             <label className="flex flex-col gap-2 text-sm font-semibold text-ink/70">

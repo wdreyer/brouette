@@ -15,7 +15,13 @@ export type CartItem = {
 
 const CART_KEY = "brouette_cart";
 const CART_EVENT = "cart:updated";
-let currentCartKey = `${CART_KEY}:guest`;
+const GUEST_CART_KEY = `${CART_KEY}:guest`;
+let currentCartKey = GUEST_CART_KEY;
+
+function scopeCartKey(scopeId: string | null) {
+  if (!scopeId) return GUEST_CART_KEY;
+  return `${CART_KEY}:member:${encodeURIComponent(scopeId)}`;
+}
 
 function readCartFromKey(key: string): CartItem[] {
   if (typeof window === "undefined") return [];
@@ -43,39 +49,22 @@ function writeCart(items: CartItem[]) {
   writeCartToKey(currentCartKey, items);
 }
 
-function mergeItems(base: CartItem[], incoming: CartItem[]) {
-  const items = [...base];
-  incoming.forEach((item) => {
-    const existingIndex = items.findIndex(
-      (entry) =>
-        entry.productId === item.productId &&
-        entry.variantId === item.variantId &&
-        entry.saleDateKey === item.saleDateKey,
-    );
-    if (existingIndex >= 0) {
-      const existing = items[existingIndex];
-      items[existingIndex] = { ...existing, quantity: existing.quantity + item.quantity };
-    } else {
-      items.push(item);
-    }
-  });
-  return items;
-}
-
-export function setCartUser(uid: string | null) {
+export function setCartUser(scopeId: string | null) {
   if (typeof window === "undefined") return;
-  const nextKey = uid ? `${CART_KEY}:${uid}` : `${CART_KEY}:guest`;
-  if (nextKey === currentCartKey) return;
-
-  const currentItems = readCartFromKey(currentCartKey);
-  const nextItems = readCartFromKey(nextKey);
-
-  if (currentItems.length) {
-    const merged = mergeItems(nextItems, currentItems);
-    writeCartToKey(nextKey, merged);
+  const nextKey = scopeCartKey(scopeId);
+  if (nextKey === currentCartKey) {
+    if (!scopeId) {
+      writeCartToKey(GUEST_CART_KEY, []);
+    }
+    return;
   }
 
   currentCartKey = nextKey;
+  if (!scopeId) {
+    // No logged-in member: always reset anonymous cart for a clean session.
+    writeCartToKey(GUEST_CART_KEY, []);
+    return;
+  }
   window.dispatchEvent(new CustomEvent(CART_EVENT));
 }
 

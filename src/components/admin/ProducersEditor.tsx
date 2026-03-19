@@ -89,9 +89,9 @@ function fromInputValue(value: string, type: FieldType) {
 }
 
 function referentLabel(referent?: Referent | null) {
-  if (!referent) return "Sans referent";
+  if (!referent) return "Sans référent";
   const value = `${referent.firstName ?? ""} ${referent.lastName ?? ""}`.trim();
-  return value || "Referent";
+  return value || "Référent";
 }
 
 export default function ProducersEditor({
@@ -105,18 +105,20 @@ export default function ProducersEditor({
   const [loading, setLoading] = useState(true);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [message, setMessage] = useState<string>("");
+  const [productCountByProducerId, setProductCountByProducerId] = useState<Record<string, number>>({});
   const [createOpen, setCreateOpen] = useState(false);
   const [createDraft, setCreateDraft] = useState<Record<string, unknown>>({});
   const [filter, setFilter] = useState("");
   const [filterReferent, setFilterReferent] = useState<string>("all");
-  const [sortKey, setSortKey] = useState<"name" | "referent" | "email" | "status">("name");
+  const [sortKey, setSortKey] = useState<"name" | "products" | "referent" | "email" | "address">("name");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
 
   const load = async () => {
     setLoading(true);
-    const [snapshot, referentSnap] = await Promise.all([
+    const [snapshot, referentSnap, productsSnap] = await Promise.all([
       getDocs(query(collection(firebaseDb, collectionName), limit(200))),
       getDocs(query(collection(firebaseDb, "members"), where("auth.role", "==", "referent"))),
+      getDocs(collection(firebaseDb, "products")),
     ]);
     const items = snapshot.docs.map((docSnap) => ({
       id: docSnap.id,
@@ -125,8 +127,27 @@ export default function ProducersEditor({
     const referentItems = referentSnap.docs
       .map((docSnap) => ({ id: docSnap.id, ...(docSnap.data() as Omit<Referent, "id">) }))
       .sort((a, b) => referentLabel(a).localeCompare(referentLabel(b)));
+    const countsById = new Map<string, number>();
+    const countsByName = new Map<string, number>();
+    productsSnap.docs.forEach((docSnap) => {
+      const data = docSnap.data() as Record<string, unknown>;
+      const producerId = String(data.producerId ?? "").trim();
+      if (producerId) {
+        countsById.set(producerId, (countsById.get(producerId) ?? 0) + 1);
+      }
+      const producerName = String(data.producerName ?? data.producer ?? "").trim().toLowerCase();
+      if (producerName) {
+        countsByName.set(producerName, (countsByName.get(producerName) ?? 0) + 1);
+      }
+    });
+    const nextCounts: Record<string, number> = {};
+    items.forEach((item) => {
+      const producerName = String(getByPath(item.data, "name") ?? "").trim().toLowerCase();
+      nextCounts[item.id] = countsById.get(item.id) ?? countsByName.get(producerName) ?? 0;
+    });
     setDocs(items);
     setReferents(referentItems);
+    setProductCountByProducerId(nextCounts);
     setLoading(false);
   };
 
@@ -138,7 +159,6 @@ export default function ProducersEditor({
     try {
       await addDoc(collection(firebaseDb, collectionName), {
         ...createDraft,
-        coopStatus: String(createDraft.coopStatus ?? "active"),
       });
       setCreateDraft({});
       setCreateOpen(false);
@@ -179,32 +199,7 @@ export default function ProducersEditor({
             : item,
         ),
       );
-      setMessage("Referent mis a jour.");
-    } catch (error) {
-      const err = error instanceof Error ? error.message : "Erreur inconnue.";
-      setMessage(err);
-    } finally {
-      setSavingId(null);
-    }
-  };
-
-  const updateStatus = async (entry: DocEntry, nextStatus: string) => {
-    try {
-      setSavingId(entry.id);
-      await setDoc(
-        doc(firebaseDb, collectionName, entry.id),
-        {
-          coopStatus: nextStatus,
-          updatedAt: Timestamp.now(),
-        },
-        { merge: true },
-      );
-      setDocs((prev) =>
-        prev.map((item) =>
-          item.id === entry.id ? { ...item, data: { ...item.data, coopStatus: nextStatus } } : item,
-        ),
-      );
-      setMessage("Statut producteur mis a jour.");
+      setMessage("Référent mis à jour.");
     } catch (error) {
       const err = error instanceof Error ? error.message : "Erreur inconnue.";
       setMessage(err);
@@ -225,7 +220,9 @@ export default function ProducersEditor({
         getByPath(entry.data, "name"),
         getByPath(entry.data, "email"),
         getByPath(entry.data, "referentName"),
-        getByPath(entry.data, "coopStatus"),
+        getByPath(entry.data, "address.street"),
+        getByPath(entry.data, "address.postalCode"),
+        getByPath(entry.data, "address.city"),
       ]
         .map((value) => String(value ?? "").toLowerCase())
         .join(" ");
@@ -234,11 +231,24 @@ export default function ProducersEditor({
 
     const next = [...filtered];
     next.sort((a, b) => {
+      if (sortKey === "products") {
+        const aValue = productCountByProducerId[a.id] ?? 0;
+        const bValue = productCountByProducerId[b.id] ?? 0;
+        if (aValue < bValue) return sortDir === "asc" ? -1 : 1;
+        if (aValue > bValue) return sortDir === "asc" ? 1 : -1;
+        return 0;
+      }
       const getValue = (entry: DocEntry) => {
         if (sortKey === "name") return String(getByPath(entry.data, "name") ?? "").toLowerCase();
-        if (sortKey === "referent") return String(getByPath(entry.data, "referentName") ?? "Sans referent").toLowerCase();
+        if (sortKey === "referent") return String(getByPath(entry.data, "referentName") ?? "Sans référent").toLowerCase();
         if (sortKey === "email") return String(getByPath(entry.data, "email") ?? "").toLowerCase();
-        return String(getByPath(entry.data, "coopStatus") ?? "").toLowerCase();
+        return [
+          String(getByPath(entry.data, "address.street") ?? ""),
+          String(getByPath(entry.data, "address.postalCode") ?? ""),
+          String(getByPath(entry.data, "address.city") ?? ""),
+        ]
+          .join(" ")
+          .toLowerCase();
       };
       const aValue = getValue(a);
       const bValue = getValue(b);
@@ -247,9 +257,9 @@ export default function ProducersEditor({
       return 0;
     });
     return next;
-  }, [docs, filter, filterReferent, sortDir, sortKey]);
+  }, [docs, filter, filterReferent, productCountByProducerId, sortDir, sortKey]);
 
-  const toggleSort = (key: "name" | "referent" | "email" | "status") => {
+  const toggleSort = (key: "name" | "products" | "referent" | "email" | "address") => {
     if (sortKey === key) {
       setSortDir((prev) => (prev === "asc" ? "desc" : "asc"));
     } else {
@@ -277,8 +287,8 @@ export default function ProducersEditor({
           value={filterReferent}
           onChange={(event) => setFilterReferent(event.target.value)}
         >
-          <option value="all">Tous les referents</option>
-          <option value="none">Sans referent</option>
+          <option value="all">Tous les référents</option>
+          <option value="none">Sans référent</option>
           {referents.map((ref) => (
             <option key={ref.id} value={ref.id}>
               {referentLabel(ref)}
@@ -311,9 +321,10 @@ export default function ProducersEditor({
               <thead className="border-b border-clay/70 bg-stone/80">
                 <tr>
                   <th className="cursor-pointer px-3 py-2 text-xs font-semibold text-ink" onClick={() => toggleSort("name")}>Producteur{sortKey === "name" ? (sortDir === "asc" ? " ^" : " v") : ""}</th>
-                  <th className="cursor-pointer px-3 py-2 text-xs font-semibold text-ink" onClick={() => toggleSort("referent")}>Referent{sortKey === "referent" ? (sortDir === "asc" ? " ^" : " v") : ""}</th>
+                  <th className="cursor-pointer px-3 py-2 text-xs font-semibold text-ink" onClick={() => toggleSort("products")}>Produits{sortKey === "products" ? (sortDir === "asc" ? " ^" : " v") : ""}</th>
+                  <th className="cursor-pointer px-3 py-2 text-xs font-semibold text-ink" onClick={() => toggleSort("referent")}>Référent{sortKey === "referent" ? (sortDir === "asc" ? " ^" : " v") : ""}</th>
                   <th className="cursor-pointer px-3 py-2 text-xs font-semibold text-ink" onClick={() => toggleSort("email")}>Email{sortKey === "email" ? (sortDir === "asc" ? " ^" : " v") : ""}</th>
-                  <th className="cursor-pointer px-3 py-2 text-xs font-semibold text-ink" onClick={() => toggleSort("status")}>Statut{sortKey === "status" ? (sortDir === "asc" ? " ^" : " v") : ""}</th>
+                  <th className="cursor-pointer px-3 py-2 text-xs font-semibold text-ink" onClick={() => toggleSort("address")}>Adresse{sortKey === "address" ? (sortDir === "asc" ? " ^" : " v") : ""}</th>
                   <th className="px-3 py-2 text-right text-xs font-semibold text-ink">Actions</th>
                 </tr>
               </thead>
@@ -328,6 +339,9 @@ export default function ProducersEditor({
                           {String(getByPath(entry.data, "name") ?? "-")}
                         </Link>
                       </td>
+                      <td className="px-3 py-2 text-xs font-semibold text-ink/80">
+                        {productCountByProducerId[entry.id] ?? 0}
+                      </td>
                       <td className="px-3 py-2">
                         <div className="flex items-center gap-2">
                           <select
@@ -336,35 +350,30 @@ export default function ProducersEditor({
                             onChange={(event) => updateReferent(entry, event.target.value)}
                             disabled={savingId === entry.id}
                           >
-                            <option value="">Sans referent</option>
+                            <option value="">Sans référent</option>
                             {referents.map((ref) => (
                               <option key={ref.id} value={ref.id}>
                                 {referentLabel(ref)}
                               </option>
                             ))}
                           </select>
-                          {referentId ? (
-                            <Link href={`/admin/members/${referentId}`} className="text-[11px] font-semibold text-ink/60 underline-offset-2 hover:underline">
-                              Voir
-                            </Link>
-                          ) : (
+                          {!referentId ? (
                             <span className="rounded-full border border-ember/25 bg-ember/10 px-2 py-0.5 text-[10px] font-semibold text-ember">
-                              Sans referent
+                              Sans référent
                             </span>
-                          )}
+                          ) : null}
                         </div>
                       </td>
                       <td className="px-3 py-2 text-xs text-ink/70">{String(getByPath(entry.data, "email") ?? "-")}</td>
-                      <td className="px-3 py-2">
-                        <select
-                          className="rounded-md border border-ink/20 bg-white px-2 py-1.5 text-xs"
-                          value={String(getByPath(entry.data, "coopStatus") ?? "active")}
-                          onChange={(event) => updateStatus(entry, event.target.value)}
-                          disabled={savingId === entry.id}
-                        >
-                          <option value="active">Actif</option>
-                          <option value="inactive">Inactif</option>
-                        </select>
+                      <td className="px-3 py-2 text-xs text-ink/70">
+                        {[
+                          String(getByPath(entry.data, "address.street") ?? "").trim(),
+                          [String(getByPath(entry.data, "address.postalCode") ?? "").trim(), String(getByPath(entry.data, "address.city") ?? "").trim()]
+                            .filter(Boolean)
+                            .join(" "),
+                        ]
+                          .filter(Boolean)
+                          .join(", ") || "-"}
                       </td>
                       <td className="px-3 py-2 text-right">
                         <Link href={`/admin/producers/${entry.id}`} className="rounded-md border border-ink/20 px-3 py-1 text-xs font-semibold text-ink hover:bg-stone">

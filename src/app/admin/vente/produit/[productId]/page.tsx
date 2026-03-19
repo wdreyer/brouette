@@ -1,11 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { addDoc, collection, deleteDoc, doc, getDoc, getDocs, setDoc } from "firebase/firestore";
 import { firebaseDb } from "@/lib/firebase/client";
-
-type FireDate = { toDate?: () => Date };
+import { isDistributionOpenNow } from "@/lib/distributions";
 
 type ProductDoc = {
   producerId?: string;
@@ -15,15 +14,14 @@ type ProductDoc = {
   isOrganic?: boolean;
 };
 
+type FireDate = { toDate?: () => Date };
+
 type VariantDraft = {
   id?: string;
   tempId: string;
   label: string;
   price: number;
-  activeDates: string[];
 };
-
-const dateKey = (value: Date) => value.toISOString().slice(0, 10);
 
 const newId = () =>
   typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -44,6 +42,7 @@ export default function AdminSaleProductDetailPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
+  const [distributionLocked, setDistributionLocked] = useState(false);
   const [product, setProduct] = useState({
     name: "",
     description: "",
@@ -53,7 +52,6 @@ export default function AdminSaleProductDetailPage() {
   });
   const [variants, setVariants] = useState<VariantDraft[]>([]);
   const [existingVariantIds, setExistingVariantIds] = useState<string[]>([]);
-  const [saleDates, setSaleDates] = useState<{ key: string; label: string }[]>([]);
   const backToManager = producerIds
     ? `/admin/vente/gerer?distributionId=${encodeURIComponent(distributionId)}&producerIds=${encodeURIComponent(producerIds)}&idx=${encodeURIComponent(idx)}`
     : "/admin/vente";
@@ -62,6 +60,23 @@ export default function AdminSaleProductDetailPage() {
     if (!productId) return;
     const load = async () => {
       setLoading(true);
+      if (distributionId) {
+        const distributionSnap = await getDoc(doc(firebaseDb, "distributionDates", distributionId));
+        if (distributionSnap.exists()) {
+          const distributionData = distributionSnap.data() as { status?: string; closeAt?: FireDate };
+          setDistributionLocked(
+            isDistributionOpenNow({
+              id: distributionId,
+              status: distributionData.status,
+              closeAt: distributionData.closeAt,
+            }),
+          );
+        } else {
+          setDistributionLocked(false);
+        }
+      } else {
+        setDistributionLocked(false);
+      }
       const productRef = doc(firebaseDb, "products", productId);
       const productSnap = await getDoc(productRef);
       if (!productSnap.exists()) {
@@ -86,28 +101,10 @@ export default function AdminSaleProductDetailPage() {
           tempId: variantDoc.id,
           label: String(variantData.label ?? ""),
           price: Number(variantData.price ?? 0),
-          activeDates: Array.isArray(variantData.activeDates) ? variantData.activeDates : [],
         } satisfies VariantDraft;
       });
       setVariants(draftItems);
       setExistingVariantIds(draftItems.map((item) => item.id!).filter(Boolean));
-
-      if (distributionId) {
-        const distSnap = await getDoc(doc(firebaseDb, "distributionDates", distributionId));
-        if (distSnap.exists()) {
-          const distData = distSnap.data() as { dates?: FireDate[] };
-          const dates = (distData.dates ?? [])
-            .slice(0, 3)
-            .map((d) => d.toDate?.())
-            .filter(Boolean) as Date[];
-          setSaleDates(
-            dates.map((d) => ({
-              key: dateKey(d),
-              label: d.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "2-digit" }),
-            })),
-          );
-        }
-      }
 
       setLoading(false);
     };
@@ -115,14 +112,12 @@ export default function AdminSaleProductDetailPage() {
     load().catch(() => setLoading(false));
   }, [distributionId, producerId, productId]);
 
-  const finalDates = useMemo(() => {
-    if (saleDates.length) return saleDates;
-    const keys = Array.from(new Set(variants.flatMap((variant) => variant.activeDates))).sort();
-    return keys.map((key) => ({ key, label: key }));
-  }, [saleDates, variants]);
-
   const save = async () => {
     if (!productId) return;
+    if (distributionLocked) {
+      setMessage("Cette distribution est ouverte : modifications verrouillees.");
+      return;
+    }
     setSaving(true);
     setMessage("");
 
@@ -143,7 +138,6 @@ export default function AdminSaleProductDetailPage() {
       const payload = {
         label: variant.label.trim() || "Variante",
         price: Number(variant.price || 0),
-        activeDates: Array.from(new Set(variant.activeDates)),
       };
       if (variant.id) {
         keptIds.add(variant.id);
@@ -184,6 +178,9 @@ export default function AdminSaleProductDetailPage() {
       </section>
 
       <section className="border border-ink/20 bg-white p-5">
+        {distributionLocked ? (
+          <p className="mb-3 text-sm font-semibold text-ember">Cette distribution est ouverte : edition verrouillee.</p>
+        ) : null}
         <div className="grid gap-3 md:grid-cols-2">
           <label className="text-xs font-semibold uppercase tracking-[0.12em] text-ink/65">
             Nom produit
@@ -212,7 +209,6 @@ export default function AdminSaleProductDetailPage() {
               <tr>
                 <th className="px-2 py-2 text-left">Variante</th>
                 <th className="px-2 py-2 text-left">Prix</th>
-                {finalDates.map((date) => <th key={date.key} className="px-2 py-2 text-center">{date.label}</th>)}
                 <th className="px-2 py-2 text-right">Actions</th>
               </tr>
             </thead>
@@ -221,19 +217,18 @@ export default function AdminSaleProductDetailPage() {
                 <tr key={variant.tempId} className="border-b border-ink/10">
                   <td className="px-2 py-2"><input className="w-full border border-ink/25 px-2 py-1" value={variant.label} onChange={(e) => setVariants((prev) => prev.map((v, i) => i === index ? { ...v, label: e.target.value } : v))} /></td>
                   <td className="px-2 py-2"><input className="w-full border border-ink/25 px-2 py-1" type="number" step="0.01" value={String(variant.price)} onChange={(e) => setVariants((prev) => prev.map((v, i) => i === index ? { ...v, price: Number(e.target.value || 0) } : v))} /></td>
-                  {finalDates.map((date) => <td key={date.key} className="px-2 py-2 text-center"><input type="checkbox" checked={variant.activeDates.includes(date.key)} onChange={() => setVariants((prev) => prev.map((v, i) => i === index ? { ...v, activeDates: v.activeDates.includes(date.key) ? v.activeDates.filter((k) => k !== date.key) : [...v.activeDates, date.key] } : v))} /></td>)}
                   <td className="px-2 py-2 text-right"><button className="rounded-md border border-ink/25 px-3 py-1 text-xs font-semibold" onClick={() => setVariants((prev) => prev.filter((_, i) => i !== index))}>Retirer</button></td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
-        <button className="mt-3 rounded-md border border-ink/30 px-3 py-1 text-xs font-semibold" onClick={() => setVariants((prev) => [...prev, { id: undefined, tempId: newId(), label: "Nouvelle variante", price: 0, activeDates: finalDates.map((d) => d.key) }])}>Ajouter une variante</button>
+        <button className="mt-3 rounded-md border border-ink/30 px-3 py-1 text-xs font-semibold" onClick={() => setVariants((prev) => [...prev, { id: undefined, tempId: newId(), label: "Nouvelle variante", price: 0 }])}>Ajouter une variante</button>
       </section>
 
       <div className="flex items-center justify-between">
         {message ? <p className="text-sm text-ink/70">{message}</p> : <span />}
-        <button className="rounded-md bg-forest px-4 py-2 text-sm font-semibold text-white disabled:opacity-50" onClick={save} disabled={saving}>
+        <button className="rounded-md bg-forest px-4 py-2 text-sm font-semibold text-white disabled:opacity-50" onClick={save} disabled={saving || distributionLocked}>
           Enregistrer
         </button>
       </div>

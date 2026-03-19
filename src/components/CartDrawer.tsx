@@ -68,7 +68,7 @@ export default function CartDrawer({ open, onClose }: CartDrawerProps) {
         ) : (
           <div className="flex flex-1 flex-col gap-6 overflow-y-auto pr-1">
             {grouped.map(([key, groupItems]) => {
-              const label = groupItems[0]?.saleDateLabel ?? "Date non definie";
+              const label = groupItems[0]?.saleDateLabel ?? "Date non définie";
               const groupTotal = groupItems.reduce(
                 (sum, item) => sum + item.unitPrice * item.quantity,
                 0,

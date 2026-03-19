@@ -4,13 +4,13 @@ import { useEffect, useMemo, useState } from "react";
 import {
   addDoc,
   collection,
+  deleteField,
   doc,
   getDocs,
   limit,
   query,
   setDoc,
   Timestamp,
-  writeBatch,
 } from "firebase/firestore";
 import { firebaseDb } from "@/lib/firebase/client";
 import { useAuth } from "@/components/auth/AuthProvider";
@@ -101,16 +101,48 @@ function displayValue(value: unknown) {
   return String(value);
 }
 
+function toList(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => String(item ?? "").trim()).filter(Boolean);
+}
+
+function uniqueList(values: string[]) {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  values.forEach((value) => {
+    const cleaned = value.trim();
+    if (!cleaned) return;
+    const key = cleaned.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(cleaned);
+  });
+  return out;
+}
+
 function formatMembershipStatus(value: unknown) {
   const normalized = String(value ?? "").toLowerCase();
   if (normalized === "active" || normalized === "adherent") return "Actif";
-  if (normalized === "inactive" || normalized === "non-adherent" || normalized === "non") return "Non";
+  if (normalized === "inactive" || normalized === "non-adherent" || normalized === "non") return "Inactif";
+  return displayValue(value);
+}
+
+function formatMembershipPaymentStatus(value: unknown) {
+  const normalized = String(value ?? "").toLowerCase();
+  if (["up_to_date", "a_jour", "a-jour", "paid", "ok"].includes(normalized)) return "A jour";
+  if (["to_pay", "a_payer", "a-payer", "unpaid", "due"].includes(normalized)) return "A payer";
+  return displayValue(value);
+}
+
+function formatDateValue(value: unknown) {
+  if (value instanceof Timestamp) return value.toDate().toLocaleDateString("fr-FR");
+  if (value instanceof Date) return value.toLocaleDateString("fr-FR");
   return displayValue(value);
 }
 
 function formatRole(value: unknown) {
   if (value === "admin") return "Admin";
-  if (value === "referent") return "Referent";
+  if (value === "referent") return "Référent";
   if (value === "member") return "Membre";
   return displayValue(value);
 }
@@ -122,7 +154,8 @@ export default function MembersEditor({
   fields,
 }: EditorProps) {
   const { role } = useAuth();
-  const isAdmin = role === "admin" || role === "referent";
+  const canEditMembers = role === "admin" || role === "referent";
+  const isAdmin = role === "admin";
   const [docs, setDocs] = useState<DocEntry[]>([]);
   const [producers, setProducers] = useState<Producer[]>([]);
   const [loading, setLoading] = useState(true);
@@ -130,10 +163,12 @@ export default function MembersEditor({
   const [viewingEntry, setViewingEntry] = useState<DocEntry | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<Record<string, unknown>>({});
+  const [editEmails, setEditEmails] = useState<string[]>([""]);
+  const [editPhones, setEditPhones] = useState<string[]>([""]);
   const [createOpen, setCreateOpen] = useState(false);
   const [createDraft, setCreateDraft] = useState<Record<string, unknown>>({});
-  const [selectedProducerIds, setSelectedProducerIds] = useState<string[]>([]);
-  const [producerSearch, setProducerSearch] = useState("");
+  const [createEmails, setCreateEmails] = useState<string[]>([""]);
+  const [createPhones, setCreatePhones] = useState<string[]>([""]);
   const [filter, setFilter] = useState("");
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [filterRole, setFilterRole] = useState<string>("all");
@@ -141,6 +176,29 @@ export default function MembersEditor({
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
 
   const tableFields = useMemo(() => fields.filter((field) => field.table), [fields]);
+  const formFields = useMemo(
+    () =>
+      fields.filter(
+        (field) => !["email", "phone", "accountLabel", "sharedAccountEnabled", "secondaryEmail", "secondaryPhone"].includes(field.path),
+      ),
+    [fields],
+  );
+
+  const extractEmails = (data: Record<string, unknown>) => {
+    const values = uniqueList([
+      ...toList(data.emails),
+      String(data.email ?? ""),
+    ]);
+    return values.length ? values : [""];
+  };
+
+  const extractPhones = (data: Record<string, unknown>) => {
+    const values = uniqueList([
+      ...toList(data.phones),
+      String(data.phone ?? ""),
+    ]);
+    return values.length ? values : [""];
+  };
 
   const load = async () => {
     setLoading(true);
@@ -172,65 +230,68 @@ export default function MembersEditor({
 
   const openEdit = (entry: DocEntry) => {
     setEditingId(entry.id);
-    setEditDraft(entry.data);
+    const normalizedDraft = { ...entry.data };
+    if (!getByPath(normalizedDraft, "membershipJoinedAt") && getByPath(normalizedDraft, "membershipPaymentDate")) {
+      setByPath(normalizedDraft, "membershipJoinedAt", getByPath(normalizedDraft, "membershipPaymentDate"));
+    }
+    const emails = extractEmails(normalizedDraft);
+    const phones = extractPhones(normalizedDraft);
+    normalizedDraft.emails = emails;
+    normalizedDraft.phones = phones;
+    normalizedDraft.email = emails[0] ?? "";
+    normalizedDraft.phone = phones[0] ?? "";
+    setEditDraft(normalizedDraft);
+    setEditEmails(emails);
+    setEditPhones(phones);
     setMessage("");
-    setProducerSearch("");
-    const assigned = producers
-      .filter((producer) => producer.referentId === entry.id)
-      .map((producer) => producer.id);
-    setSelectedProducerIds(assigned);
   };
 
   const saveEdit = async () => {
     if (!editingId) return;
     try {
-      await setDoc(doc(firebaseDb, collectionName, editingId), editDraft, { merge: true });
-      const roleValue = String(getByPath(editDraft, "auth.role") ?? "member");
-      const firstName = String(getByPath(editDraft, "firstName") ?? "");
-      const lastName = String(getByPath(editDraft, "lastName") ?? "");
-      const phone = String(getByPath(editDraft, "phone") ?? "");
-      const referentName = `${firstName} ${lastName}`.trim();
-      const batch = writeBatch(firebaseDb);
-
-      if (roleValue === "referent") {
-        producers.forEach((producer) => {
-          const isSelected = selectedProducerIds.includes(producer.id);
-          const isCurrent = producer.referentId === editingId;
-          if (isSelected || isCurrent) {
-            batch.set(
-              doc(firebaseDb, "producers", producer.id),
-              isSelected
-                ? {
-                    referentId: editingId,
-                    referentName: referentName || null,
-                    referentPhone: phone || null,
-                  }
-                : {
-                    referentId: null,
-                    referentName: null,
-                    referentPhone: null,
-                  },
-              { merge: true },
-            );
-          }
-        });
-      } else {
-        producers.forEach((producer) => {
-          if (producer.referentId === editingId) {
-            batch.set(
-              doc(firebaseDb, "producers", producer.id),
-              { referentId: null, referentName: null, referentPhone: null },
-              { merge: true },
-            );
-          }
-        });
+      const normalizedEmails = uniqueList(editEmails);
+      const normalizedPhones = uniqueList(editPhones);
+      if (!normalizedEmails.length || !normalizedPhones.length) {
+        setMessage("Ajoute au moins un email et un téléphone.");
+        return;
       }
-      await batch.commit();
-      setMessage("Adherent mis a jour.");
+      const payload: Record<string, unknown> = {
+        ...editDraft,
+        emails: normalizedEmails,
+        phones: normalizedPhones,
+        email: normalizedEmails[0],
+        phone: normalizedPhones[0],
+        accessEmails: normalizedEmails.map((value) => value.toLowerCase()),
+        accountLabel: deleteField(),
+        sharedAccountEnabled: deleteField(),
+        secondaryFirstName: deleteField(),
+        secondaryLastName: deleteField(),
+        secondaryEmail: deleteField(),
+        secondaryPhone: deleteField(),
+      };
+      if (!isAdmin) {
+        const existing = docs.find((entry) => entry.id === editingId)?.data ?? {};
+        payload.membershipStatus = getByPath(existing, "membershipStatus") ?? "active";
+        payload.membershipPaymentStatus = getByPath(existing, "membershipPaymentStatus") ?? "to_pay";
+        payload.membershipJoinedAt =
+          getByPath(existing, "membershipJoinedAt") ??
+          getByPath(existing, "membershipPaymentDate") ??
+          null;
+      }
+      if (!payload.membershipStatus) payload.membershipStatus = "active";
+      if (!payload.membershipPaymentStatus) payload.membershipPaymentStatus = "to_pay";
+      if (
+        String(payload.membershipPaymentStatus ?? "").toLowerCase() !== "up_to_date" ||
+        !payload.membershipJoinedAt
+      ) {
+        payload.membershipJoinedAt = null;
+      }
+      await setDoc(doc(firebaseDb, collectionName, editingId), payload, { merge: true });
+      setMessage("Adhérent mis à jour.");
       setEditingId(null);
       setViewingEntry(null);
-      setSelectedProducerIds([]);
-      setProducerSearch("");
+      setEditEmails([""]);
+      setEditPhones([""]);
       await load();
     } catch (error) {
       const err = error instanceof Error ? error.message : "Erreur inconnue.";
@@ -240,10 +301,38 @@ export default function MembersEditor({
 
   const handleCreate = async () => {
     try {
-      await addDoc(collection(firebaseDb, collectionName), createDraft);
+      const normalizedEmails = uniqueList(createEmails);
+      const normalizedPhones = uniqueList(createPhones);
+      if (!normalizedEmails.length || !normalizedPhones.length) {
+        setMessage("Ajoute au moins un email et un téléphone.");
+        return;
+      }
+      const payload: Record<string, unknown> = {
+        ...createDraft,
+        emails: normalizedEmails,
+        phones: normalizedPhones,
+        email: normalizedEmails[0],
+        phone: normalizedPhones[0],
+        accessEmails: normalizedEmails.map((value) => value.toLowerCase()),
+      };
+      if (!isAdmin) {
+        payload.membershipStatus = "active";
+        payload.membershipPaymentStatus = "to_pay";
+      }
+      if (!payload.membershipStatus) payload.membershipStatus = "active";
+      if (!payload.membershipPaymentStatus) payload.membershipPaymentStatus = "to_pay";
+      if (
+        String(payload.membershipPaymentStatus ?? "").toLowerCase() !== "up_to_date" ||
+        !payload.membershipJoinedAt
+      ) {
+        payload.membershipJoinedAt = null;
+      }
+      await addDoc(collection(firebaseDb, collectionName), payload);
       setCreateDraft({});
+      setCreateEmails([""]);
+      setCreatePhones([""]);
       setCreateOpen(false);
-      setMessage("Adherent cree.");
+      setMessage("Adhérent créé.");
       await load();
     } catch (error) {
       const err = error instanceof Error ? error.message : "Erreur inconnue.";
@@ -264,6 +353,8 @@ export default function MembersEditor({
         getByPath(entry.data, "firstName"),
         getByPath(entry.data, "lastName"),
         getByPath(entry.data, "email"),
+        ...(toList(getByPath(entry.data, "emails")) ?? []),
+        ...(toList(getByPath(entry.data, "phones")) ?? []),
         getByPath(entry.data, "membershipStatus"),
         getByPath(entry.data, "auth.role"),
       ]
@@ -306,7 +397,7 @@ export default function MembersEditor({
       <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-clay/70 bg-white/80 p-4 shadow-card">
         <input
           className="w-full max-w-sm rounded-full border border-ink/20 bg-white px-4 py-2 text-sm"
-          placeholder="Rechercher un adherent..."
+          placeholder="Rechercher un adhérent..."
           value={filter}
           onChange={(event) => setFilter(event.target.value)}
         />
@@ -317,16 +408,16 @@ export default function MembersEditor({
         >
           <option value="all">Tous les statuts</option>
           <option value="active">Actif</option>
-          <option value="inactive">Non</option>
+          <option value="inactive">Inactif</option>
         </select>
         <select
           className="rounded-full border border-ink/20 bg-white px-3 py-2 text-sm"
           value={filterRole}
           onChange={(event) => setFilterRole(event.target.value)}
         >
-          <option value="all">Tous les roles</option>
+          <option value="all">Tous les rôles</option>
           <option value="member">Membre</option>
-          <option value="referent">Referent</option>
+          <option value="referent">Référent</option>
           <option value="admin">Admin</option>
         </select>
         <button
@@ -337,11 +428,16 @@ export default function MembersEditor({
             setFilterRole("all");
           }}
         >
-          Reset
+          Réinitialiser
         </button>
         <button
           className="rounded-full bg-ink px-5 py-2 text-sm font-semibold text-stone"
-          onClick={() => setCreateOpen(true)}
+          onClick={() => {
+            setCreateOpen(true);
+            setCreateDraft({});
+            setCreateEmails([""]);
+            setCreatePhones([""]);
+          }}
         >
           Nouveau
         </button>
@@ -379,6 +475,13 @@ export default function MembersEditor({
                       <td key={field.path} className="px-3 py-1.5 text-xs text-ink/70">
                         {field.path === "membershipStatus"
                           ? formatMembershipStatus(getByPath(entry.data, field.path))
+                          : field.path === "membershipPaymentStatus"
+                            ? formatMembershipPaymentStatus(getByPath(entry.data, field.path))
+                            : field.path === "membershipJoinedAt"
+                              ? formatDateValue(
+                                  getByPath(entry.data, "membershipJoinedAt") ??
+                                    getByPath(entry.data, "membershipPaymentDate"),
+                                )
                           : field.path === "auth.role"
                             ? formatRole(getByPath(entry.data, field.path))
                             : displayValue(getByPath(entry.data, field.path))}
@@ -400,7 +503,7 @@ export default function MembersEditor({
       {viewingEntry ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-6">
           <div className="w-full max-w-2xl rounded-3xl border border-clay/70 bg-white p-6 shadow-card">
-            <h3 className="font-serif text-2xl">Fiche adherent</h3>
+            <h3 className="font-serif text-2xl">Fiche adhérent</h3>
             <div className="mt-4 grid gap-4 md:grid-cols-2">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">Nom</p>
@@ -412,20 +515,60 @@ export default function MembersEditor({
               </div>
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">Email</p>
-                <p className="text-sm text-ink">{String(getByPath(viewingEntry.data, "email") ?? "-")}</p>
+                <p className="text-sm text-ink">
+                  {(() => {
+                    const emails = extractEmails(viewingEntry.data).filter(Boolean);
+                    return emails.length ? emails.join(" · ") : "-";
+                  })()}
+                </p>
               </div>
               <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">Telephone</p>
-                <p className="text-sm text-ink">{String(getByPath(viewingEntry.data, "phone") ?? "-")}</p>
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">Téléphone</p>
+                <p className="text-sm text-ink">
+                  {(() => {
+                    const phones = extractPhones(viewingEntry.data).filter(Boolean);
+                    return phones.length ? phones.join(" · ") : "-";
+                  })()}
+                </p>
+              </div>
+              <div className="md:col-span-2">
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">Adresse</p>
+                <p className="text-sm text-ink">
+                  {[
+                    String(getByPath(viewingEntry.data, "address.street") ?? "").trim(),
+                    String(getByPath(viewingEntry.data, "address.postalCode") ?? "").trim(),
+                    String(getByPath(viewingEntry.data, "address.city") ?? "").trim(),
+                  ]
+                    .filter(Boolean)
+                    .join(" ")
+                    || "-"}
+                </p>
               </div>
               <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">Adhesion</p>
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">Statut</p>
                 <p className="text-sm text-ink">
                   {formatMembershipStatus(getByPath(viewingEntry.data, "membershipStatus"))}
                 </p>
               </div>
               <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">Role</p>
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">Adhésion</p>
+                <p className="text-sm text-ink">
+                  {formatMembershipPaymentStatus(getByPath(viewingEntry.data, "membershipPaymentStatus"))}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">Date adhésion</p>
+                <p className="text-sm text-ink">
+                  {String(getByPath(viewingEntry.data, "membershipPaymentStatus") ?? "").toLowerCase() === "up_to_date"
+                    ? formatDateValue(
+                        getByPath(viewingEntry.data, "membershipJoinedAt") ??
+                          getByPath(viewingEntry.data, "membershipPaymentDate"),
+                      )
+                    : "-"}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">Rôle</p>
                 <p className="text-sm text-ink">
                   {formatRole(getByPath(viewingEntry.data, "auth.role") ?? "member")}
                 </p>
@@ -450,14 +593,14 @@ export default function MembersEditor({
                       </a>
                     ))}
                   {!producers.some((producer) => producer.referentId === viewingEntry.id) ? (
-                    <span className="text-xs text-ink/60">Aucun producteur attribue.</span>
+                    <span className="text-xs text-ink/60">Aucun producteur attribué.</span>
                   ) : null}
                 </div>
               </div>
             ) : null}
 
             <div className="mt-6 flex items-center gap-3">
-              {isAdmin ? (
+              {canEditMembers ? (
                 <button
                   className="rounded-full bg-moss px-5 py-2 text-sm font-semibold text-white"
                   onClick={() => {
@@ -465,7 +608,7 @@ export default function MembersEditor({
                     openEdit(viewingEntry);
                   }}
                 >
-                  Editer
+                  Éditer
                 </button>
               ) : null}
               <button
@@ -482,12 +625,21 @@ export default function MembersEditor({
       {editingId ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-6">
           <div className="flex max-h-[88vh] w-full max-w-6xl flex-col rounded-3xl border border-clay/70 bg-white p-6 shadow-card">
-            <h3 className="font-serif text-2xl">Editer adherent</h3>
+            <h3 className="font-serif text-2xl">Éditer adhérent</h3>
             <div className="mt-4 grid flex-1 gap-6 overflow-y-auto pr-1 xl:grid-cols-[1.1fr_1fr]">
               <div className="grid gap-4 md:grid-cols-2">
-                {fields.map((field) => {
+                {formFields.map((field) => {
                   const value = getByPath(editDraft, field.path);
                   const inputValue = toInputValue(value, field.type);
+                  const adminOnlyField = [
+                    "membershipStatus",
+                    "membershipPaymentStatus",
+                    "membershipJoinedAt",
+                  ].includes(field.path);
+                  const fieldDisabled = adminOnlyField && !isAdmin;
+                  const paymentDateLocked =
+                    field.path === "membershipJoinedAt" &&
+                    String(getByPath(editDraft, "membershipPaymentStatus") ?? "").toLowerCase() !== "up_to_date";
                   return (
                     <label key={field.path} className="flex flex-col gap-2 text-sm font-semibold text-ink/70">
                       {field.label}
@@ -500,9 +652,10 @@ export default function MembersEditor({
                             setByPath(next, field.path, event.target.value);
                             setEditDraft(next);
                           }}
+                          disabled={!isAdmin}
                         >
                           <option value="member">Membre</option>
-                          <option value="referent">Referent</option>
+                          <option value="referent">Référent</option>
                           <option value="admin">Admin</option>
                         </select>
                       ) : field.path === "membershipStatus" ? (
@@ -514,9 +667,28 @@ export default function MembersEditor({
                             setByPath(next, field.path, event.target.value);
                             setEditDraft(next);
                           }}
+                          disabled={fieldDisabled}
                         >
                           <option value="active">Actif</option>
-                          <option value="inactive">Non</option>
+                          <option value="inactive">Inactif</option>
+                        </select>
+                      ) : field.path === "membershipPaymentStatus" ? (
+                        <select
+                          className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
+                          value={String(inputValue || "to_pay")}
+                          onChange={(event) => {
+                            const next = { ...editDraft };
+                            const nextValue = event.target.value;
+                            setByPath(next, field.path, nextValue);
+                            if (nextValue !== "up_to_date") {
+                              setByPath(next, "membershipJoinedAt", null);
+                            }
+                            setEditDraft(next);
+                          }}
+                          disabled={fieldDisabled}
+                        >
+                          <option value="up_to_date">A jour</option>
+                          <option value="to_pay">A payer</option>
                         </select>
                       ) : field.type === "boolean" ? (
                         <select
@@ -527,6 +699,7 @@ export default function MembersEditor({
                             setByPath(next, field.path, fromInputValue(event.target.value, field.type));
                             setEditDraft(next);
                           }}
+                          disabled={fieldDisabled}
                         >
                           <option value="true">Oui</option>
                           <option value="false">Non</option>
@@ -541,6 +714,7 @@ export default function MembersEditor({
                             setByPath(next, field.path, fromInputValue(event.target.value, field.type));
                             setEditDraft(next);
                           }}
+                          disabled={fieldDisabled || paymentDateLocked}
                         />
                       ) : (
                         <input
@@ -552,99 +726,75 @@ export default function MembersEditor({
                             setByPath(next, field.path, fromInputValue(event.target.value, field.type));
                             setEditDraft(next);
                           }}
+                          disabled={fieldDisabled}
                         />
                       )}
                     </label>
                   );
                 })}
-              </div>
-
-              {String(getByPath(editDraft, "auth.role") ?? "") === "referent" ? (
-                <div className="flex flex-col gap-4 rounded-2xl border border-ink/10 bg-stone/60 p-4">
-                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">
-                    Producteurs geres
-                  </p>
-                  <div className="grid gap-4 lg:grid-cols-2">
-                    <div>
-                      <p className="text-xs font-semibold text-ink/70">
-                        Attribues ({selectedProducerIds.length})
-                      </p>
-                      <div className="mt-2 max-h-64 overflow-y-auto rounded-xl border border-ink/10 bg-white">
-                        {producers
-                          .filter((producer) => selectedProducerIds.includes(producer.id))
-                          .sort((a, b) => String(a.name ?? "").localeCompare(String(b.name ?? "")))
-                          .map((producer) => (
-                            <div
-                              key={producer.id}
-                              className="flex items-center justify-between border-b border-ink/5 px-3 py-2 text-xs"
-                            >
-                              <a
-                                href={`/admin/producers/${producer.id}`}
-                                className="truncate text-ink/80 hover:underline"
-                              >
-                                {producer.name ?? "Producteur"}
-                              </a>
-                              <button
-                                className="ml-3 rounded-md border border-ink/20 px-2 py-1 text-[11px] font-semibold text-ink/70 hover:bg-stone"
-                                onClick={() =>
-                                  setSelectedProducerIds((prev) =>
-                                    prev.filter((id) => id !== producer.id),
-                                  )
-                                }
-                              >
-                                Supprimer
-                              </button>
-                            </div>
-                          ))}
-                        {!selectedProducerIds.length ? (
-                          <p className="px-3 py-2 text-xs text-ink/50">Aucun producteur attribue.</p>
-                        ) : null}
-                      </div>
-                    </div>
-
-                    <div>
-                      <label className="flex flex-col gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">
-                        Ajouter un producteur
+                <div className="md:col-span-2">
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">Emails</p>
+                  <div className="flex flex-col gap-2">
+                    {editEmails.map((value, index) => (
+                      <div key={`edit-email-${index}`} className="flex items-center gap-2">
                         <input
-                          className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm normal-case"
-                          placeholder="Rechercher..."
-                          value={producerSearch}
-                          onChange={(event) => setProducerSearch(event.target.value)}
+                          className="flex-1 rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
+                          type="email"
+                          value={value}
+                          onChange={(event) =>
+                            setEditEmails((prev) => prev.map((item, i) => (i === index ? event.target.value : item)))
+                          }
                         />
-                      </label>
-                      <div className="mt-2 max-h-64 overflow-y-auto rounded-xl border border-ink/10 bg-white">
-                        {producers
-                          .filter((producer) => !selectedProducerIds.includes(producer.id))
-                          .filter((producer) =>
-                            producerSearch
-                              ? String(producer.name ?? "")
-                                  .toLowerCase()
-                                  .includes(producerSearch.toLowerCase())
-                              : true,
-                          )
-                          .sort((a, b) => String(a.name ?? "").localeCompare(String(b.name ?? "")))
-                          .map((producer) => (
-                            <button
-                              key={producer.id}
-                              className="flex w-full items-center justify-between border-b border-ink/5 px-3 py-2 text-left text-xs text-ink/70 hover:bg-stone/60"
-                              onClick={() =>
-                                setSelectedProducerIds((prev) =>
-                                  prev.includes(producer.id) ? prev : [...prev, producer.id],
-                                )
-                              }
-                            >
-                              <span className="truncate">{producer.name ?? "Producteur"}</span>
-                              <span className="text-[11px] font-semibold text-ink/55">Ajouter</span>
-                            </button>
-                          ))}
-                        {!producers.filter((producer) => !selectedProducerIds.includes(producer.id)).length ? (
-                          <p className="px-3 py-2 text-xs text-ink/50">Tout est deja attribue.</p>
+                        {editEmails.length > 1 ? (
+                          <button
+                            className="rounded-full border border-ink/20 px-3 py-1 text-xs font-semibold"
+                            onClick={() => setEditEmails((prev) => prev.filter((_, i) => i !== index))}
+                          >
+                            Retirer
+                          </button>
                         ) : null}
                       </div>
-                    </div>
+                    ))}
+                    <button
+                      className="w-fit rounded-full border border-ink/20 px-3 py-1 text-xs font-semibold"
+                      onClick={() => setEditEmails((prev) => [...prev, ""])}
+                    >
+                      + Ajouter un email
+                    </button>
                   </div>
                 </div>
-              ) : null}
+                <div className="md:col-span-2">
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">Téléphones</p>
+                  <div className="flex flex-col gap-2">
+                    {editPhones.map((value, index) => (
+                      <div key={`edit-phone-${index}`} className="flex items-center gap-2">
+                        <input
+                          className="flex-1 rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
+                          value={value}
+                          onChange={(event) =>
+                            setEditPhones((prev) => prev.map((item, i) => (i === index ? event.target.value : item)))
+                          }
+                        />
+                        {editPhones.length > 1 ? (
+                          <button
+                            className="rounded-full border border-ink/20 px-3 py-1 text-xs font-semibold"
+                            onClick={() => setEditPhones((prev) => prev.filter((_, i) => i !== index))}
+                          >
+                            Retirer
+                          </button>
+                        ) : null}
+                      </div>
+                    ))}
+                    <button
+                      className="w-fit rounded-full border border-ink/20 px-3 py-1 text-xs font-semibold"
+                      onClick={() => setEditPhones((prev) => [...prev, ""])}
+                    >
+                      + Ajouter un téléphone
+                    </button>
+                  </div>
+                </div>
+              </div>
+
             </div>
             <div className="mt-4 flex items-center gap-3 border-t border-ink/10 pt-4">
               <button
@@ -667,87 +817,191 @@ export default function MembersEditor({
       {createOpen ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-6">
           <div className="w-full max-w-2xl rounded-3xl border border-clay/70 bg-white p-6 shadow-card">
-            <h3 className="font-serif text-2xl">Nouvel adherent</h3>
+            <h3 className="font-serif text-2xl">Nouvel adhérent</h3>
             <div className="mt-4 grid gap-4 md:grid-cols-2">
-              {fields.map((field) => (
-                <label key={field.path} className="flex flex-col gap-2 text-sm font-semibold text-ink/70">
-                  {field.label}
-                  {field.path === "auth.role" ? (
-                    <select
-                      className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
-                      value={String(toInputValue(getByPath(createDraft, field.path), field.type) || "member")}
-                      onChange={(event) => {
-                        const next = { ...createDraft };
-                        setByPath(next, field.path, event.target.value);
-                        setCreateDraft(next);
-                      }}
-                    >
-                      <option value="member">Membre</option>
-                      <option value="referent">Referent</option>
-                      <option value="admin">Admin</option>
-                    </select>
-                  ) : field.path === "membershipStatus" ? (
-                    <select
-                      className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
-                      value={String(toInputValue(getByPath(createDraft, field.path), field.type) || "active")}
-                      onChange={(event) => {
-                        const next = { ...createDraft };
-                        setByPath(next, field.path, event.target.value);
-                        setCreateDraft(next);
-                      }}
-                    >
-                      <option value="active">Actif</option>
-                      <option value="inactive">Non</option>
-                    </select>
-                  ) : field.type === "boolean" ? (
-                    <select
-                      className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
-                      value={String(toInputValue(getByPath(createDraft, field.path), field.type))}
-                      onChange={(event) => {
-                        const next = { ...createDraft };
-                        setByPath(next, field.path, fromInputValue(event.target.value, field.type));
-                        setCreateDraft(next);
-                      }}
-                    >
-                      <option value="true">Oui</option>
-                      <option value="false">Non</option>
-                    </select>
-                  ) : field.type === "date" || field.type === "datetime" ? (
-                    <input
-                      type={field.type === "date" ? "date" : "datetime-local"}
-                      className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
-                      value={String(toInputValue(getByPath(createDraft, field.path), field.type))}
-                      onChange={(event) => {
-                        const next = { ...createDraft };
-                        setByPath(next, field.path, fromInputValue(event.target.value, field.type));
-                        setCreateDraft(next);
-                      }}
-                    />
-                  ) : (
-                    <input
-                      type={field.type === "number" ? "number" : "text"}
-                      className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
-                      value={String(toInputValue(getByPath(createDraft, field.path), field.type))}
-                      onChange={(event) => {
-                        const next = { ...createDraft };
-                        setByPath(next, field.path, fromInputValue(event.target.value, field.type));
-                        setCreateDraft(next);
-                      }}
-                    />
-                  )}
-                </label>
-              ))}
+              {formFields.map((field) => {
+                const inputValue = toInputValue(getByPath(createDraft, field.path), field.type);
+                const adminOnlyField = [
+                  "membershipStatus",
+                  "membershipPaymentStatus",
+                  "membershipJoinedAt",
+                ].includes(field.path);
+                const fieldDisabled = adminOnlyField && !isAdmin;
+                const paymentDateLocked =
+                  field.path === "membershipJoinedAt" &&
+                  String(getByPath(createDraft, "membershipPaymentStatus") ?? "").toLowerCase() !== "up_to_date";
+                return (
+                  <label key={field.path} className="flex flex-col gap-2 text-sm font-semibold text-ink/70">
+                    {field.label}
+                    {field.path === "auth.role" ? (
+                      <select
+                        className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
+                        value={String(inputValue || "member")}
+                        onChange={(event) => {
+                          const next = { ...createDraft };
+                          setByPath(next, field.path, event.target.value);
+                          setCreateDraft(next);
+                        }}
+                        disabled={!isAdmin}
+                      >
+                        <option value="member">Membre</option>
+                        <option value="referent">Référent</option>
+                        <option value="admin">Admin</option>
+                      </select>
+                    ) : field.path === "membershipStatus" ? (
+                      <select
+                        className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
+                        value={String(inputValue || "active")}
+                        onChange={(event) => {
+                          const next = { ...createDraft };
+                          setByPath(next, field.path, event.target.value);
+                          setCreateDraft(next);
+                        }}
+                        disabled={fieldDisabled}
+                      >
+                        <option value="active">Actif</option>
+                        <option value="inactive">Inactif</option>
+                      </select>
+                    ) : field.path === "membershipPaymentStatus" ? (
+                      <select
+                        className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
+                        value={String(inputValue || "to_pay")}
+                        onChange={(event) => {
+                          const next = { ...createDraft };
+                          const nextValue = event.target.value;
+                          setByPath(next, field.path, nextValue);
+                          if (nextValue !== "up_to_date") {
+                            setByPath(next, "membershipJoinedAt", null);
+                          }
+                          setCreateDraft(next);
+                        }}
+                        disabled={fieldDisabled}
+                      >
+                        <option value="up_to_date">A jour</option>
+                        <option value="to_pay">A payer</option>
+                      </select>
+                    ) : field.type === "boolean" ? (
+                      <select
+                        className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
+                        value={String(inputValue)}
+                        onChange={(event) => {
+                          const next = { ...createDraft };
+                          setByPath(next, field.path, fromInputValue(event.target.value, field.type));
+                          setCreateDraft(next);
+                        }}
+                        disabled={fieldDisabled}
+                      >
+                        <option value="true">Oui</option>
+                        <option value="false">Non</option>
+                      </select>
+                    ) : field.type === "date" || field.type === "datetime" ? (
+                      <input
+                        type={field.type === "date" ? "date" : "datetime-local"}
+                        className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
+                        value={String(inputValue)}
+                        onChange={(event) => {
+                          const next = { ...createDraft };
+                          setByPath(next, field.path, fromInputValue(event.target.value, field.type));
+                          setCreateDraft(next);
+                        }}
+                        disabled={fieldDisabled || paymentDateLocked}
+                      />
+                    ) : (
+                      <input
+                        type={field.type === "number" ? "number" : "text"}
+                        className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
+                        value={String(inputValue)}
+                        onChange={(event) => {
+                          const next = { ...createDraft };
+                          setByPath(next, field.path, fromInputValue(event.target.value, field.type));
+                          setCreateDraft(next);
+                        }}
+                        disabled={fieldDisabled}
+                      />
+                    )}
+                  </label>
+                );
+              })}
+              <div className="md:col-span-2">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">Emails</p>
+                <div className="flex flex-col gap-2">
+                  {createEmails.map((value, index) => (
+                    <div key={`create-email-${index}`} className="flex items-center gap-2">
+                      <input
+                        className="flex-1 rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
+                        type="email"
+                        value={value}
+                        onChange={(event) =>
+                          setCreateEmails((prev) =>
+                            prev.map((item, i) => (i === index ? event.target.value : item)),
+                          )
+                        }
+                      />
+                      {createEmails.length > 1 ? (
+                        <button
+                          className="rounded-full border border-ink/20 px-3 py-1 text-xs font-semibold"
+                          onClick={() => setCreateEmails((prev) => prev.filter((_, i) => i !== index))}
+                        >
+                          Retirer
+                        </button>
+                      ) : null}
+                    </div>
+                  ))}
+                  <button
+                    className="w-fit rounded-full border border-ink/20 px-3 py-1 text-xs font-semibold"
+                    onClick={() => setCreateEmails((prev) => [...prev, ""])}
+                  >
+                    + Ajouter un email
+                  </button>
+                </div>
+              </div>
+              <div className="md:col-span-2">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">Téléphones</p>
+                <div className="flex flex-col gap-2">
+                  {createPhones.map((value, index) => (
+                    <div key={`create-phone-${index}`} className="flex items-center gap-2">
+                      <input
+                        className="flex-1 rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
+                        value={value}
+                        onChange={(event) =>
+                          setCreatePhones((prev) =>
+                            prev.map((item, i) => (i === index ? event.target.value : item)),
+                          )
+                        }
+                      />
+                      {createPhones.length > 1 ? (
+                        <button
+                          className="rounded-full border border-ink/20 px-3 py-1 text-xs font-semibold"
+                          onClick={() => setCreatePhones((prev) => prev.filter((_, i) => i !== index))}
+                        >
+                          Retirer
+                        </button>
+                      ) : null}
+                    </div>
+                  ))}
+                  <button
+                    className="w-fit rounded-full border border-ink/20 px-3 py-1 text-xs font-semibold"
+                    onClick={() => setCreatePhones((prev) => [...prev, ""])}
+                  >
+                    + Ajouter un téléphone
+                  </button>
+                </div>
+              </div>
             </div>
             <div className="mt-6 flex items-center gap-3">
               <button
                 className="rounded-full bg-ink px-5 py-2 text-sm font-semibold text-stone"
                 onClick={handleCreate}
               >
-                Creer
+                Créer
               </button>
               <button
                 className="rounded-full border border-ink/20 px-4 py-2 text-sm font-semibold"
-                onClick={() => setCreateOpen(false)}
+                onClick={() => {
+                  setCreateOpen(false);
+                  setCreateEmails([""]);
+                  setCreatePhones([""]);
+                }}
               >
                 Annuler
               </button>

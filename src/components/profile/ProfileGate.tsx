@@ -8,11 +8,17 @@ import ProfileForm from "@/components/profile/ProfileForm";
 import { findMemberByUser } from "@/lib/members";
 
 function isComplete(data: Record<string, unknown>) {
+  const emails = Array.isArray(data.emails)
+    ? data.emails.map((item) => String(item ?? "").trim()).filter(Boolean)
+    : [];
+  const phones = Array.isArray(data.phones)
+    ? data.phones.map((item) => String(item ?? "").trim()).filter(Boolean)
+    : [];
   return Boolean(
     data.firstName &&
       data.lastName &&
-      data.email &&
-      data.phone &&
+      (emails.length > 0 || data.email) &&
+      (phones.length > 0 || data.phone) &&
       data.membershipStatus,
   );
 }
@@ -60,12 +66,16 @@ export default function ProfileGate({ children }: { children: React.ReactNode })
             <p className="text-[11px] font-semibold uppercase tracking-[0.32em] text-ink/60">
               Profil requis
             </p>
-            <h2 className="mt-2 font-serif text-2xl">Complete ton profil</h2>
+            <h2 className="mt-2 font-serif text-2xl">Complète ton profil</h2>
             <p className="mt-2 text-sm text-ink/70">
-              Renseigne ces informations pour acceder au site.
+              Renseigne ces informations pour accéder au site.
             </p>
             <div className="mt-4">
-              <ProfileForm userId={resolvedMemberId ?? user.uid} onSaved={() => setNeedsProfile(false)} />
+              <ProfileForm
+                userId={resolvedMemberId ?? user.uid}
+                onSaved={() => setNeedsProfile(false)}
+                canEditStatus={false}
+              />
             </div>
           </div>
         </div>

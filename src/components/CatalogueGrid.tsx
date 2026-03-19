@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { collection, collectionGroup, getDocs } from "firebase/firestore";
+import { collection, getDocs } from "firebase/firestore";
 import { firebaseDb } from "@/lib/firebase/client";
 import { pickOpenDistribution } from "@/lib/distributions";
 
@@ -15,13 +15,13 @@ type Product = {
   isOrganic?: boolean;
   status?: string;
   tags?: string[];
-  saleDates?: { toDate: () => Date }[];
   categoryId?: string;
 };
 
 type Producer = {
   id: string;
   name?: string;
+  productType?: string;
 };
 
 type Category = {
@@ -35,15 +35,12 @@ type Distribution = {
   dates?: { toDate: () => Date }[];
 };
 
-type Variant = {
-  id: string;
-  productId: string;
-  price?: number;
-  activeDates?: string[];
-};
-
 type OfferItem = {
   productId?: string;
+  saleDateKey?: string;
+  dateIndex?: number;
+  priceApplied?: number;
+  price?: number;
   limitTotal?: number;
 };
 
@@ -51,7 +48,7 @@ function dateKey(date: Date) {
   return date.toISOString().slice(0, 10);
 }
 
-function descriptionExcerpt(value?: string, maxLength = 150) {
+function descriptionExcerpt(value?: string, maxLength = 96) {
   if (!value) return "";
   const plain = value
     .replace(/!\[[^\]]*\]\([^)]+\)/g, " ")
@@ -80,7 +77,7 @@ export default function CatalogueGrid({ hideWhenClosed = false }: { hideWhenClos
   >({});
   const [activeProducerIds, setActiveProducerIds] = useState<string[]>([]);
   const [hasProducerLinks, setHasProducerLinks] = useState(false);
-  const [visibleCount, setVisibleCount] = useState(12);
+  const [visibleCount, setVisibleCount] = useState(16);
 
   useEffect(() => {
     const load = async () => {
@@ -142,50 +139,36 @@ export default function CatalogueGrid({ hideWhenClosed = false }: { hideWhenClos
         setActiveProducerIds(activeIds);
 
         const openDateKeys = (openDist?.dates ?? []).slice(0, 3).map((date) => dateKey(date.toDate()));
-        const openKeySet = new Set(openDateKeys);
         const prices: Record<string, { min: number; max: number }> = {};
         const availability: Record<string, { dateKeys: string[]; hasLimit?: boolean; minLimit?: number }> = {};
-
-        const variantsSnap = await getDocs(collectionGroup(firebaseDb, "variants"));
-        const variantsByProduct = new Map<string, Variant[]>();
-        variantsSnap.docs.forEach((docSnap) => {
-          const productId = docSnap.ref.parent.parent?.id;
-          if (!productId) return;
-          const list = variantsByProduct.get(productId) ?? [];
-          list.push(docSnap.data() as Variant);
-          variantsByProduct.set(productId, list);
-        });
-
-        items.forEach((product) => {
-          const saleKeys = (product.saleDates ?? []).map((date) => dateKey(date.toDate()));
-          const dateSet = new Set<string>();
-          const productVariants = variantsByProduct.get(product.id) ?? [];
-          productVariants.forEach((variant) => {
-            const variantKeys = Array.isArray(variant.activeDates)
-              ? variant.activeDates.filter((key) => typeof key === "string")
-              : [];
-            variantKeys.forEach((key) => dateSet.add(key));
-            const matchesOpen = variantKeys.length
-              ? variantKeys.some((key) => openKeySet.has(key))
-              : saleKeys.some((key) => openKeySet.has(key));
-            if (matchesOpen && typeof variant.price === "number") {
-              if (!prices[product.id]) {
-                prices[product.id] = { min: variant.price, max: variant.price };
-              } else {
-                prices[product.id].min = Math.min(prices[product.id].min, variant.price);
-                prices[product.id].max = Math.max(prices[product.id].max, variant.price);
-              }
-            }
-          });
-
-          const dateKeys = dateSet.size ? Array.from(dateSet) : saleKeys;
-          availability[product.id] = { dateKeys: dateKeys.sort() };
-        });
 
         const offers = offerSnap?.docs.map((docSnap) => docSnap.data() as OfferItem) ?? [];
         offers.forEach((offer) => {
           if (!offer.productId) return;
           const entry = availability[offer.productId] ?? { dateKeys: [] };
+          const offerDateKey =
+            typeof offer.saleDateKey === "string" && offer.saleDateKey
+              ? offer.saleDateKey
+              : typeof offer.dateIndex === "number" && openDateKeys[offer.dateIndex]
+                ? openDateKeys[offer.dateIndex]
+                : "";
+          if (offerDateKey && !entry.dateKeys.includes(offerDateKey)) {
+            entry.dateKeys.push(offerDateKey);
+          }
+          const appliedPrice =
+            typeof offer.priceApplied === "number"
+              ? offer.priceApplied
+              : typeof offer.price === "number"
+                ? offer.price
+                : null;
+          if (appliedPrice !== null) {
+            if (!prices[offer.productId]) {
+              prices[offer.productId] = { min: appliedPrice, max: appliedPrice };
+            } else {
+              prices[offer.productId].min = Math.min(prices[offer.productId].min, appliedPrice);
+              prices[offer.productId].max = Math.max(prices[offer.productId].max, appliedPrice);
+            }
+          }
           const limitTotal = Number(offer.limitTotal ?? 0);
           if (limitTotal > 0) {
             entry.hasLimit = true;
@@ -193,7 +176,7 @@ export default function CatalogueGrid({ hideWhenClosed = false }: { hideWhenClos
               entry.minLimit = limitTotal;
             }
           }
-          availability[offer.productId] = entry;
+          availability[offer.productId] = { ...entry, dateKeys: entry.dateKeys.sort() };
         });
 
         setAvailabilityMap(availability);
@@ -248,7 +231,7 @@ export default function CatalogueGrid({ hideWhenClosed = false }: { hideWhenClos
 
   const visibleProducts = useMemo(() => {
     if (!openDateKeys.length) return [];
-    return inStockProducts.filter((product) => {
+    const filtered = inStockProducts.filter((product) => {
       const productDateKeys = availabilityMap[product.id]?.dateKeys ?? [];
       const matchesDate =
         productDateKeys.length === 0 || dateFilter.length === 0
@@ -266,7 +249,29 @@ export default function CatalogueGrid({ hideWhenClosed = false }: { hideWhenClos
             : !product.isOrganic;
       return matchesCategory && matchesProducer && matchesOrganic && matchesDate;
     });
-  }, [openDateKeys, inStockProducts, categoryFilter, producerFilter, organicFilter, dateFilter]);
+
+    filtered.sort((a, b) => {
+      const aCategory = (a.categoryId ? categoryMap[a.categoryId]?.name : "") ?? "";
+      const bCategory = (b.categoryId ? categoryMap[b.categoryId]?.name : "") ?? "";
+      if (aCategory !== bCategory) return aCategory.localeCompare(bCategory, "fr");
+
+      const aProducer = producerMap[a.producerId]?.name ?? "";
+      const bProducer = producerMap[b.producerId]?.name ?? "";
+      if (aProducer !== bProducer) return aProducer.localeCompare(bProducer, "fr");
+
+      return a.name.localeCompare(b.name, "fr");
+    });
+    return filtered;
+  }, [
+    openDateKeys,
+    inStockProducts,
+    categoryFilter,
+    producerFilter,
+    organicFilter,
+    dateFilter,
+    categoryMap,
+    producerMap,
+  ]);
   const pagedProducts = useMemo(() => visibleProducts.slice(0, visibleCount), [visibleProducts, visibleCount]);
   const hasMore = visibleProducts.length > visibleCount;
 
@@ -297,7 +302,7 @@ export default function CatalogueGrid({ hideWhenClosed = false }: { hideWhenClos
   );
 
   useEffect(() => {
-    setVisibleCount(12);
+    setVisibleCount(16);
   }, [categoryFilter, producerFilter, organicFilter, dateFilter, openDateKeys.join(","), visibleProducts.length]);
 
   if (loading) {
@@ -327,7 +332,7 @@ export default function CatalogueGrid({ hideWhenClosed = false }: { hideWhenClos
   if (visibleProducts.length === 0) {
     return (
       <div className="rounded-2xl border border-clay/70 bg-white/85 p-6 shadow-card">
-        <p className="text-sm text-ink/70">Aucun produit pour cette periode.</p>
+        <p className="text-sm text-ink/70">Aucun produit pour cette période.</p>
       </div>
     );
   }
@@ -341,13 +346,13 @@ export default function CatalogueGrid({ hideWhenClosed = false }: { hideWhenClos
         <div className="mt-3 flex flex-col gap-4 text-sm">
           {categoryOptions.length ? (
             <div className="flex flex-col gap-2">
-              <span className="text-xs font-semibold text-ink/60">Categorie</span>
+              <span className="text-xs font-semibold text-ink/60">Catégorie</span>
               <select
                 className="rounded-full border border-ink/20 bg-white px-3 py-2 text-xs"
                 value={categoryFilter}
                 onChange={(event) => setCategoryFilter(event.target.value)}
               >
-                <option value="all">Toutes les categories</option>
+                <option value="all">Toutes les catégories</option>
                 {categoryOptions.map((category) => (
                   <option key={category.id} value={category.id}>
                     {category.label}
@@ -431,71 +436,65 @@ export default function CatalogueGrid({ hideWhenClosed = false }: { hideWhenClos
               setDateFilter(dateOptions.map((option) => option.key));
             }}
           >
-            Reinitialiser
+            Réinitialiser
           </button>
         </div>
       </aside>
-      <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {pagedProducts.map((product) => (
           <Link
-            className="group flex h-full flex-col gap-4 rounded-xl border border-clay/70 bg-white/95 p-5 shadow-card transition hover:-translate-y-1 hover:border-ink/30"
+            className="group flex h-full overflow-hidden flex-col gap-3 rounded-xl border border-clay/70 bg-white/95 p-4 shadow-card transition hover:-translate-y-1 hover:border-ink/30"
             key={product.id}
             href={`/products/${product.id}`}
           >
-            <div className="flex h-40 items-center justify-center overflow-hidden rounded-lg border border-clay/70 bg-stone">
+            <div className="flex h-28 items-center justify-center overflow-hidden rounded-lg border border-clay/70 bg-stone">
               {product.imageUrl ? (
-                <img className="max-h-32 w-full object-contain" src={product.imageUrl} alt={product.name} />
+                <img className="h-full w-full object-cover" src={product.imageUrl} alt={product.name} />
               ) : (
                 <span className="text-xs uppercase tracking-[0.2em] text-ink/50">Sans image</span>
               )}
             </div>
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-ink/60">
-                  {producerMap[product.producerId]?.name
-                    ? `Producteur ${producerMap[product.producerId]?.name}`
-                    : "Producteur"}
+            <div className="flex items-start gap-3">
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-[11px] font-semibold uppercase tracking-[0.2em] text-ink/60">
+                  {producerMap[product.producerId]?.name || "Sans producteur"}
                 </p>
-                <h2 className="font-serif text-2xl">{product.name}</h2>
+                {producerMap[product.producerId]?.productType ? (
+                  <p className="truncate text-[11px] text-ink/55">
+                    {producerMap[product.producerId]?.productType}
+                  </p>
+                ) : null}
+                <h2 className="mt-1 break-words font-serif text-xl leading-tight">{product.name}</h2>
               </div>
-              <div className="flex flex-col items-end gap-2">
-                <span className="rounded-full border border-ink/15 px-3 py-1 text-xs font-semibold text-ink/70">
+              <div className="ml-auto flex max-w-[48%] flex-wrap justify-end gap-1">
+                <span className="max-w-full break-all rounded-full border border-ink/15 px-2 py-0.5 text-[11px] font-semibold text-ink/70">
                   {product.isOrganic ? "Bio" : "Conventionnel"}
                 </span>
                 {product.categoryId && categoryMap[product.categoryId]?.name ? (
-                  <span className="rounded-full bg-clay/70 px-3 py-1 text-[11px] font-semibold text-ink/70">
+                  <span className="max-w-full break-all rounded-full bg-clay/70 px-2 py-0.5 text-[11px] font-semibold text-ink/70">
                     {categoryMap[product.categoryId]?.name}
                   </span>
                 ) : null}
                 {availabilityMap[product.id]?.hasLimit ? (
-                  <span className="rounded-full bg-ember/10 px-3 py-1 text-[11px] font-semibold text-ember">
+                  <span className="max-w-full break-all rounded-full bg-ember/10 px-2 py-0.5 text-[11px] font-semibold text-ember">
                     {availabilityMap[product.id]?.minLimit
                       ? `Limite ${availabilityMap[product.id]?.minLimit}`
-                      : "Quantites limitees"}
+                      : "Quantités limitées"}
                   </span>
                 ) : null}
               </div>
             </div>
-            <p className="text-sm text-ink/70">
+            <p className="text-xs text-ink/70">
               {descriptionExcerpt(product.description) || "Description disponible sur la fiche produit."}
             </p>
-            {product.tags?.length ? (
-              <div className="flex flex-wrap gap-2">
-                {product.tags.map((tag) => (
-                  <span key={tag} className="rounded-full bg-clay/70 px-3 py-1 text-xs font-semibold text-ink/70">
-                    {tag}
-                  </span>
-                ))}
-              </div>
-            ) : null}
             {priceMap[product.id] ? (
-              <p className="text-sm font-semibold text-ink/70">
+              <p className="text-xs font-semibold text-ink/70">
                 {priceMap[product.id].min === priceMap[product.id].max
                   ? `${priceMap[product.id].min.toFixed(2)} EUR`
                   : `${priceMap[product.id].min.toFixed(2)} EUR - ${priceMap[product.id].max.toFixed(2)} EUR`}
               </p>
             ) : null}
-            <span className="mt-auto inline-flex w-fit items-center gap-2 rounded-full border border-ink/20 bg-white px-4 py-2 text-sm font-semibold text-ink transition group-hover:border-ink/50">
+            <span className="mt-auto inline-flex w-fit items-center gap-2 rounded-full border border-ink/20 bg-white px-3 py-1.5 text-xs font-semibold text-ink transition group-hover:border-ink/50">
               Voir le produit
               <span aria-hidden>-&gt;</span>
             </span>
@@ -506,7 +505,7 @@ export default function CatalogueGrid({ hideWhenClosed = false }: { hideWhenClos
         <div className="mt-2 flex justify-center md:col-span-2 xl:col-span-3">
           <button
             className="rounded-full border border-ink/20 bg-white px-5 py-2 text-sm font-semibold text-ink transition hover:border-ink/45 hover:bg-stone"
-            onClick={() => setVisibleCount((prev) => prev + 12)}
+            onClick={() => setVisibleCount((prev) => prev + 16)}
           >
             Charger plus de produits
           </button>

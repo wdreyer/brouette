@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { addDoc, collection, doc, getDocs, limit, query, setDoc, Timestamp } from "firebase/firestore";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Timestamp, collection, doc, getDoc, getDocs, setDoc, writeBatch } from "firebase/firestore";
 import { firebaseDb } from "@/lib/firebase/client";
+import { distributionLabel } from "@/lib/distributions";
 
 type FieldType = "text" | "number" | "boolean" | "date" | "datetime";
 
@@ -20,276 +21,355 @@ type EditorProps = {
   fields: FieldConfig[];
 };
 
-type DocEntry = {
+type FireDate = { toDate?: () => Date };
+
+type DistributionDoc = {
   id: string;
-  data: Record<string, unknown>;
+  status?: string;
+  dates?: FireDate[];
 };
 
-function isIndex(key: string) {
-  return /^\d+$/.test(key);
+type ProducerDoc = {
+  id: string;
+  name?: string;
+  coopStatus?: string | null;
+  referentId?: string | null;
+  referentName?: string | null;
+};
+
+type CalendarProducerDoc = {
+  producerId?: string;
+  activeDateKeys?: string[];
+};
+
+function toDate(value?: FireDate) {
+  return value?.toDate?.() ?? null;
 }
 
-function getByPath(obj: Record<string, unknown>, path: string) {
-  return path.split(".").reduce<unknown>((acc, key) => {
-    if (Array.isArray(acc)) {
-      const index = Number(key);
-      return Number.isNaN(index) ? undefined : acc[index];
-    }
-    if (acc && typeof acc === "object" && key in (acc as Record<string, unknown>)) {
-      return (acc as Record<string, unknown>)[key];
-    }
-    return undefined;
-  }, obj);
+function dateKey(date: Date) {
+  return date.toISOString().slice(0, 10);
 }
 
-function setByPath(obj: Record<string, unknown>, path: string, value: unknown) {
-  const keys = path.split(".");
-  let current: Record<string, unknown> | unknown[] = obj;
-
-  keys.forEach((key, index) => {
-    const last = index === keys.length - 1;
-    const nextIsIndex = !last && isIndex(keys[index + 1]);
-
-    if (Array.isArray(current)) {
-      const arrIndex = Number(key);
-      if (Number.isNaN(arrIndex)) return;
-      if (last) {
-        current[arrIndex] = value;
-        return;
-      }
-      if (!current[arrIndex] || typeof current[arrIndex] !== "object") {
-        current[arrIndex] = nextIsIndex ? [] : {};
-      }
-      current = current[arrIndex] as Record<string, unknown> | unknown[];
-      return;
-    }
-
-    if (last) {
-      current[key] = value;
-      return;
-    }
-
-    if (!current[key] || typeof current[key] !== "object") {
-      current[key] = nextIsIndex ? [] : {};
-    }
-    current = current[key] as Record<string, unknown> | unknown[];
-  });
+function fromDateKey(key: string) {
+  return new Date(`${key}T00:00:00.000Z`);
 }
 
-function toInputValue(value: unknown, type: FieldType) {
-  if (type === "boolean") return Boolean(value);
-  if (type === "number") return value === undefined || value === null ? "" : String(value);
-  if (value instanceof Timestamp) {
-    const date = value.toDate();
-    return type === "date"
-      ? date.toISOString().slice(0, 10)
-      : date.toISOString().slice(0, 16);
-  }
-  if (value instanceof Date) {
-    return type === "date" ? value.toISOString().slice(0, 10) : value.toISOString().slice(0, 16);
-  }
-  return value === undefined || value === null ? "" : String(value);
+function formatDate(value: Date | null) {
+  if (!value) return "-";
+  return value.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", year: "numeric" });
 }
 
-function fromInputValue(value: string, type: FieldType) {
-  if (type === "number") return value === "" ? null : Number(value);
-  if (type === "boolean") return value === "true";
-  if (type === "date" && value) return Timestamp.fromDate(new Date(`${value}T00:00:00`));
-  if (type === "datetime" && value) return Timestamp.fromDate(new Date(value));
-  return value;
+function formatShortDateKey(key: string) {
+  return formatDate(fromDateKey(key));
 }
 
-function displayValue(value: unknown, type?: FieldType) {
-  if (value instanceof Timestamp) return value.toDate().toLocaleDateString("fr-FR");
-  if (value instanceof Date) return value.toLocaleDateString("fr-FR");
-  if (type === "boolean") return value ? "Oui" : "Non";
-  if (value === undefined || value === null || value === "") return "-";
-  return String(value);
+function statusLabel(status?: string) {
+  const value = String(status ?? "").toLowerCase();
+  if (value === "open") return "Ouverte";
+  if (value === "finished") return "Finie";
+  return "Planifiee";
 }
 
-export default function DistributionsEditor({
-  collectionName,
-  title,
-  description,
-  fields,
-}: EditorProps) {
-  const [docs, setDocs] = useState<DocEntry[]>([]);
+function plusDays(date: Date, days: number) {
+  const next = new Date(date);
+  next.setUTCDate(next.getUTCDate() + days);
+  return next;
+}
+
+function isActiveProducer(status?: string | null) {
+  return !["inactive", "inactif", "off"].includes(String(status ?? "").toLowerCase().trim());
+}
+
+export default function DistributionsEditor({ title, description }: EditorProps) {
   const [loading, setLoading] = useState(true);
-  const [message, setMessage] = useState<string>("");
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editDraft, setEditDraft] = useState<Record<string, unknown>>({});
-  const [createOpen, setCreateOpen] = useState(false);
-  const [createDraft, setCreateDraft] = useState<Record<string, unknown>>({});
-  const [filter, setFilter] = useState("");
-  const [filterStatus, setFilterStatus] = useState("all");
-  const [sortKey, setSortKey] = useState("dates.0");
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const [message, setMessage] = useState("");
+  const [adding, setAdding] = useState(false);
 
-  const tableFields = useMemo(() => fields.filter((field) => field.table), [fields]);
+  const [rows, setRows] = useState<
+    Array<{ distribution: DistributionDoc; checkedProducers: number; totalProducers: number }>
+  >([]);
+  const [producers, setProducers] = useState<ProducerDoc[]>([]);
 
-  const load = async () => {
+  const [editingDistribution, setEditingDistribution] = useState<DistributionDoc | null>(null);
+  const [editingKeys, setEditingKeys] = useState<string[]>([]);
+  const [editingSelection, setEditingSelection] = useState<Record<string, Record<string, boolean>>>({});
+  const [editingExistingCalendarIds, setEditingExistingCalendarIds] = useState<Set<string>>(new Set());
+  const [savingModal, setSavingModal] = useState(false);
+
+  const load = useCallback(async () => {
     setLoading(true);
-    const q = query(collection(firebaseDb, collectionName), limit(50));
-    const snapshot = await getDocs(q);
-    const items = snapshot.docs.map((docSnap) => ({
-      id: docSnap.id,
-      data: docSnap.data() as Record<string, unknown>,
-    }));
-    setDocs(items);
+    setMessage("");
+
+    const now = new Date();
+    const oneYearLater = new Date(now);
+    oneYearLater.setFullYear(oneYearLater.getFullYear() + 1);
+
+    const [distSnap, producerSnap] = await Promise.all([
+      getDocs(collection(firebaseDb, "distributionDates")),
+      getDocs(collection(firebaseDb, "producers")),
+    ]);
+
+    const producerRows = producerSnap.docs
+      .map((docSnap) => ({ id: docSnap.id, ...(docSnap.data() as Omit<ProducerDoc, "id">) }))
+      .filter((producer) => isActiveProducer(producer.coopStatus))
+      .sort((a, b) => String(a.name ?? "").localeCompare(String(b.name ?? ""), "fr"));
+    setProducers(producerRows);
+
+    const distributions = distSnap.docs
+      .map((docSnap) => ({ id: docSnap.id, ...(docSnap.data() as Omit<DistributionDoc, "id">) }))
+      .filter((distribution) => {
+        const firstDate = toDate(distribution.dates?.[0]);
+        if (!firstDate) return false;
+        return firstDate >= now && firstDate <= oneYearLater;
+      })
+      .sort((left, right) => {
+        const a = toDate(left.dates?.[0]) ?? new Date(0);
+        const b = toDate(right.dates?.[0]) ?? new Date(0);
+        return a.getTime() - b.getTime();
+      });
+
+    const nextRows: Array<{ distribution: DistributionDoc; checkedProducers: number; totalProducers: number }> = [];
+    for (const distribution of distributions) {
+      const [calendarSnap, producersSnap] = await Promise.all([
+        getDocs(collection(firebaseDb, "distributionDates", distribution.id, "calendarProducers")),
+        getDocs(collection(firebaseDb, "distributionDates", distribution.id, "producers")),
+      ]);
+      nextRows.push({
+        distribution,
+        checkedProducers: calendarSnap.size,
+        totalProducers: producersSnap.size,
+      });
+    }
+    setRows(nextRows);
     setLoading(false);
-  };
+  }, []);
 
   useEffect(() => {
     load().catch(() => setLoading(false));
-  }, [collectionName]);
+  }, [load]);
 
-  const openEdit = (entry: DocEntry) => {
-    setEditingId(entry.id);
-    setEditDraft(entry.data);
+  const openEditModal = async (distribution: DistributionDoc) => {
+    const distSnap = await getDoc(doc(firebaseDb, "distributionDates", distribution.id));
+    if (!distSnap.exists()) return;
+
+    const freshDistribution = {
+      id: distSnap.id,
+      ...(distSnap.data() as Omit<DistributionDoc, "id">),
+    };
+    const keys = (freshDistribution.dates ?? [])
+      .slice(0, 3)
+      .map((date) => date.toDate?.())
+      .filter(Boolean)
+      .map((date) => dateKey(date as Date));
+
+    const [calendarSnap, producerRowsSnap] = await Promise.all([
+      getDocs(collection(firebaseDb, "distributionDates", freshDistribution.id, "calendarProducers")),
+      getDocs(collection(firebaseDb, "distributionDates", freshDistribution.id, "producers")),
+    ]);
+
+    const fromRows = new Map<string, string[]>();
+    calendarSnap.docs.forEach((docSnap) => {
+      const data = docSnap.data() as CalendarProducerDoc;
+      const producerId = String(data.producerId ?? docSnap.id);
+      const activeDateKeys = Array.isArray(data.activeDateKeys)
+        ? data.activeDateKeys.filter((key): key is string => typeof key === "string")
+        : [];
+      fromRows.set(producerId, activeDateKeys);
+    });
+    producerRowsSnap.docs.forEach((docSnap) => {
+      const data = docSnap.data() as CalendarProducerDoc;
+      const producerId = String(data.producerId ?? docSnap.id);
+      if (fromRows.has(producerId)) return;
+      const activeDateKeys = Array.isArray(data.activeDateKeys)
+        ? data.activeDateKeys.filter((key): key is string => typeof key === "string")
+        : [];
+      fromRows.set(producerId, activeDateKeys);
+    });
+
+    const selection: Record<string, Record<string, boolean>> = {};
+    producers.forEach((producer) => {
+      const producerKeys = fromRows.get(producer.id) ?? [];
+      selection[producer.id] = {};
+      keys.forEach((key) => {
+        selection[producer.id][key] = producerKeys.includes(key);
+      });
+    });
+
+    setEditingDistribution(freshDistribution);
+    setEditingKeys(keys);
+    setEditingSelection(selection);
+    setEditingExistingCalendarIds(new Set(calendarSnap.docs.map((docSnap) => docSnap.id)));
+  };
+
+  const closeModal = () => {
+    setEditingDistribution(null);
+    setEditingKeys([]);
+    setEditingSelection({});
+    setEditingExistingCalendarIds(new Set());
+  };
+
+  const toggleProducerDate = (producerId: string, key: string) => {
+    setEditingSelection((prev) => ({
+      ...prev,
+      [producerId]: {
+        ...(prev[producerId] ?? {}),
+        [key]: !Boolean(prev[producerId]?.[key]),
+      },
+    }));
+  };
+
+  const saveModal = async () => {
+    if (!editingDistribution) return;
+    setSavingModal(true);
     setMessage("");
-  };
-
-  const saveEdit = async () => {
-    if (!editingId) return;
     try {
-      await setDoc(doc(firebaseDb, collectionName, editingId), editDraft, { merge: true });
+      const now = Timestamp.now();
+      const batch = writeBatch(firebaseDb);
+
+      producers.forEach((producer) => {
+        const activeDateKeys = editingKeys.filter((key) => Boolean(editingSelection[producer.id]?.[key]));
+
+        const calendarRef = doc(
+          firebaseDb,
+          "distributionDates",
+          editingDistribution.id,
+          "calendarProducers",
+          producer.id,
+        );
+        const producerRef = doc(firebaseDb, "distributionDates", editingDistribution.id, "producers", producer.id);
+
+        batch.set(
+          producerRef,
+          {
+            producerId: producer.id,
+            referentId: producer.referentId ?? null,
+            referentName: producer.referentName ?? null,
+            active: activeDateKeys.length > 0,
+            activeDateKeys,
+            validatedByReferent: false,
+            validatedAt: null,
+            updatedAt: now,
+          },
+          { merge: true },
+        );
+
+        if (activeDateKeys.length > 0) {
+          batch.set(
+            calendarRef,
+            {
+              producerId: producer.id,
+              active: true,
+              activeDateKeys,
+              updatedAt: now,
+            },
+            { merge: true },
+          );
+        } else if (editingExistingCalendarIds.has(producer.id)) {
+          batch.delete(calendarRef);
+        }
+      });
+
+      await batch.commit();
       setMessage("Distribution mise a jour.");
-      setEditingId(null);
+      closeModal();
       await load();
-    } catch (error) {
-      const err = error instanceof Error ? error.message : "Erreur inconnue.";
-      setMessage(err);
+    } catch {
+      setMessage("Impossible d'enregistrer la distribution.");
+    } finally {
+      setSavingModal(false);
     }
   };
 
-  const handleCreate = async () => {
+  const addDistribution = async () => {
+    setAdding(true);
+    setMessage("");
     try {
-      await addDoc(collection(firebaseDb, collectionName), createDraft);
-      setCreateDraft({});
-      setCreateOpen(false);
-      setMessage("Distribution creee.");
+      const allDates = rows
+        .flatMap((row) => row.distribution.dates ?? [])
+        .map((date) => date.toDate?.())
+        .filter(Boolean) as Date[];
+      const sorted = [...allDates].sort((a, b) => a.getTime() - b.getTime());
+      const baseDate = sorted.length ? sorted[sorted.length - 1] : new Date();
+      const d1 = plusDays(baseDate, 14);
+      const d2 = plusDays(d1, 14);
+      const d3 = plusDays(d2, 14);
+
+      await setDoc(
+        doc(collection(firebaseDb, "distributionDates")),
+        {
+          status: "planned",
+          dates: [d1, d2, d3].map((date) => Timestamp.fromDate(date)),
+          createdAt: Timestamp.now(),
+        },
+        { merge: true },
+      );
+      setMessage("Distribution ajoutee.");
       await load();
-    } catch (error) {
-      const err = error instanceof Error ? error.message : "Erreur inconnue.";
-      setMessage(err);
+    } catch {
+      setMessage("Impossible d'ajouter la distribution.");
+    } finally {
+      setAdding(false);
     }
   };
 
-  const filteredDocs = useMemo(() => {
-    const term = filter.trim().toLowerCase();
-    return docs.filter((entry) => {
-      const status = String(getByPath(entry.data, "status") ?? "");
-      if (filterStatus !== "all" && status !== filterStatus) return false;
-      if (!term) return true;
-      const haystack = [entry.id, getByPath(entry.data, "title")]
-        .map((value) => (value ? String(value).toLowerCase() : ""))
-        .join(" ");
-      return haystack.includes(term);
-    });
-  }, [docs, filter, filterStatus]);
-
-  const sortedDocs = useMemo(() => {
-    const items = [...filteredDocs];
-    items.sort((a, b) => {
-      const aValue = getByPath(a.data, sortKey);
-      const bValue = getByPath(b.data, sortKey);
-      const aText = aValue instanceof Timestamp ? aValue.toDate().getTime() : String(aValue ?? "");
-      const bText = bValue instanceof Timestamp ? bValue.toDate().getTime() : String(bValue ?? "");
-      if (aText < bText) return sortDir === "asc" ? -1 : 1;
-      if (aText > bText) return sortDir === "asc" ? 1 : -1;
-      return 0;
-    });
-    return items;
-  }, [filteredDocs, sortDir, sortKey]);
-
-  const toggleSort = (path: string) => {
-    if (sortKey === path) {
-      setSortDir((prev) => (prev === "asc" ? "desc" : "asc"));
-    } else {
-      setSortKey(path);
-      setSortDir("asc");
-    }
-  };
+  const empty = useMemo(() => !loading && rows.length === 0, [loading, rows.length]);
 
   return (
-    <div className="flex flex-col gap-6">
-      <div className="rounded-3xl border border-clay/70 bg-white/80 p-6 shadow-card">
-        <h2 className="font-serif text-2xl">{title}</h2>
-        {description ? <p className="mt-2 text-sm text-ink/70">{description}</p> : null}
-      </div>
+    <div className="flex flex-col gap-4">
+      <section className="rounded-[10px] border border-clay/90 bg-stone p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="font-serif text-3xl">{title}</h2>
+            <p className="mt-2 text-sm text-ink/70">
+              {description ?? "Liste des distributions sur l'annee a venir."}
+            </p>
+          </div>
+          <button
+            className="rounded-md border border-ink/20 bg-white px-3 py-2 text-sm font-semibold disabled:opacity-50"
+            onClick={addDistribution}
+            disabled={adding}
+          >
+            Ajouter une distribution (3 dates)
+          </button>
+        </div>
+      </section>
 
-      <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-clay/70 bg-white/80 p-4 shadow-card">
-        <input
-          className="w-full max-w-sm rounded-full border border-ink/20 bg-white px-4 py-2 text-sm"
-          placeholder="Rechercher une distribution..."
-          value={filter}
-          onChange={(event) => setFilter(event.target.value)}
-        />
-        <select
-          className="rounded-full border border-ink/20 bg-white px-3 py-2 text-sm"
-          value={filterStatus}
-          onChange={(event) => setFilterStatus(event.target.value)}
-        >
-          <option value="all">Tous les statuts</option>
-          <option value="open">Ouverte</option>
-          <option value="planned">Planifiee</option>
-          <option value="finished">Finie</option>
-        </select>
-        <button
-          className="rounded-full border border-ink/20 px-4 py-2 text-sm font-semibold"
-          onClick={() => {
-            setFilter("");
-            setFilterStatus("all");
-          }}
-        >
-          Reset
-        </button>
-        <button
-          className="rounded-full bg-ink px-5 py-2 text-sm font-semibold text-stone"
-          onClick={() => {
-            setCreateDraft({ status: "planned" });
-            setCreateOpen(true);
-          }}
-        >
-          Nouvelle periode
-        </button>
-      </div>
-
-      <div className="rounded-2xl border border-clay/70 bg-white/80 shadow-card">
+      <section className="rounded-[10px] border border-clay/90 bg-stone p-4">
         {loading ? (
-          <p className="p-6 text-sm text-ink/70">Chargement...</p>
+          <p className="text-sm text-ink/70">Chargement...</p>
+        ) : empty ? (
+          <p className="text-sm text-ink/70">Aucune distribution sur l'annee a venir.</p>
         ) : (
-          <div className="overflow-x-auto">
+          <div className="overflow-auto border border-ink/15 bg-white">
             <table className="min-w-full text-left text-sm">
-              <thead className="border-b border-clay/70 bg-stone/80">
+              <thead className="border-b border-ink/15 bg-ink text-stone">
                 <tr>
-                  {tableFields.map((field) => (
-                    <th
-                      key={field.path}
-                      className="cursor-pointer px-3 py-1.5 text-xs font-semibold text-ink"
-                      onClick={() => toggleSort(field.path)}
-                    >
-                      {field.label}
-                      {sortKey === field.path ? (sortDir === "asc" ? " ↑" : " ↓") : ""}
-                    </th>
-                  ))}
-                  <th className="px-3 py-1.5 text-xs font-semibold text-ink">Actions</th>
+                  <th className="px-3 py-2 text-xs uppercase tracking-[0.12em]">Distribution</th>
+                  <th className="px-3 py-2 text-xs uppercase tracking-[0.12em]">Date 1</th>
+                  <th className="px-3 py-2 text-xs uppercase tracking-[0.12em]">Date 2</th>
+                  <th className="px-3 py-2 text-xs uppercase tracking-[0.12em]">Date 3</th>
+                  <th className="px-3 py-2 text-xs uppercase tracking-[0.12em]">Statut</th>
+                  <th className="px-3 py-2 text-xs uppercase tracking-[0.12em]">Producteurs coches</th>
+                  <th className="px-3 py-2 text-xs uppercase tracking-[0.12em]">Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {sortedDocs.map((entry) => (
-                  <tr key={entry.id} className="border-b border-clay/50">
-                    {tableFields.map((field) => (
-                      <td key={field.path} className="px-3 py-1.5 text-xs text-ink/70">
-                        {displayValue(getByPath(entry.data, field.path), field.type)}
-                      </td>
-                    ))}
-                    <td className="px-3 py-1.5">
+                {rows.map((row) => (
+                  <tr key={row.distribution.id} className="border-b border-ink/10">
+                    <td className="px-3 py-2 text-xs font-semibold">{distributionLabel(row.distribution)}</td>
+                    <td className="px-3 py-2 text-xs text-ink/70">{formatDate(toDate(row.distribution.dates?.[0]))}</td>
+                    <td className="px-3 py-2 text-xs text-ink/70">{formatDate(toDate(row.distribution.dates?.[1]))}</td>
+                    <td className="px-3 py-2 text-xs text-ink/70">{formatDate(toDate(row.distribution.dates?.[2]))}</td>
+                    <td className="px-3 py-2 text-xs text-ink/70">{statusLabel(row.distribution.status)}</td>
+                    <td className="px-3 py-2 text-xs text-ink/70">
+                      {row.checkedProducers} / {row.totalProducers}
+                    </td>
+                    <td className="px-3 py-2">
                       <button
-                        className="rounded-full border border-ink/20 px-3 py-1 text-xs font-semibold"
-                        onClick={() => openEdit(entry)}
+                        className="rounded-md border border-ink/20 bg-white px-3 py-1 text-xs font-semibold"
+                        onClick={() => openEditModal(row.distribution).catch(() => undefined)}
                       >
-                        Editer
+                        Voir
                       </button>
                     </td>
                   </tr>
@@ -298,167 +378,71 @@ export default function DistributionsEditor({
             </table>
           </div>
         )}
-      </div>
+      </section>
 
       {message ? <p className="text-sm text-ink/70">{message}</p> : null}
 
-      {editingId ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-6">
-          <div className="w-full max-w-2xl rounded-3xl border border-clay/70 bg-white p-6 shadow-card">
-            <h3 className="font-serif text-2xl">Editer periode</h3>
-            <div className="mt-4 grid gap-4 md:grid-cols-2">
-              {fields.map((field) => {
-                const value = getByPath(editDraft, field.path);
-                const inputValue = toInputValue(value, field.type);
-                return (
-                  <label key={field.path} className="flex flex-col gap-2 text-sm font-semibold text-ink/70">
-                    {field.label}
-                    {field.path === "status" ? (
-                      <select
-                        className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
-                        value={String(inputValue)}
-                        onChange={(event) => {
-                          const next = { ...editDraft };
-                          setByPath(next, field.path, event.target.value);
-                          setEditDraft(next);
-                        }}
-                      >
-                        <option value="open">Ouverte</option>
-                        <option value="planned">Planifiee</option>
-                        <option value="finished">Finie</option>
-                      </select>
-                    ) : field.type === "boolean" ? (
-                      <select
-                        className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
-                        value={String(inputValue)}
-                        onChange={(event) => {
-                          const next = { ...editDraft };
-                          setByPath(next, field.path, fromInputValue(event.target.value, field.type));
-                          setEditDraft(next);
-                        }}
-                      >
-                        <option value="true">Oui</option>
-                        <option value="false">Non</option>
-                      </select>
-                    ) : field.type === "date" || field.type === "datetime" ? (
-                      <input
-                        type={field.type === "date" ? "date" : "datetime-local"}
-                        className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
-                        value={String(inputValue)}
-                        onChange={(event) => {
-                          const next = { ...editDraft };
-                          setByPath(next, field.path, fromInputValue(event.target.value, field.type));
-                          setEditDraft(next);
-                        }}
-                      />
-                    ) : (
-                      <input
-                        type={field.type === "number" ? "number" : "text"}
-                        className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
-                        value={String(inputValue)}
-                        onChange={(event) => {
-                          const next = { ...editDraft };
-                          setByPath(next, field.path, fromInputValue(event.target.value, field.type));
-                          setEditDraft(next);
-                        }}
-                      />
-                    )}
-                  </label>
-                );
-              })}
+      {editingDistribution ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 p-4">
+          <div className="max-h-[88vh] w-full max-w-6xl overflow-auto border border-ink/15 bg-stone p-4 shadow-lg">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">Distribution</p>
+                <h3 className="font-serif text-2xl">{distributionLabel(editingDistribution)}</h3>
+                <p className="text-xs text-ink/60">
+                  {editingKeys.map((key) => formatShortDateKey(key)).join(" · ")}
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  className="rounded-md border border-ink/20 bg-white px-3 py-2 text-xs font-semibold"
+                  onClick={closeModal}
+                >
+                  Fermer
+                </button>
+                <button
+                  className="rounded-md bg-forest px-4 py-2 text-xs font-semibold text-white disabled:opacity-50"
+                  onClick={() => saveModal().catch(() => undefined)}
+                  disabled={savingModal}
+                >
+                  Enregistrer
+                </button>
+              </div>
             </div>
-            <div className="mt-6 flex items-center gap-3">
-              <button
-                className="rounded-full bg-moss px-5 py-2 text-sm font-semibold text-white"
-                onClick={saveEdit}
-              >
-                Enregistrer
-              </button>
-              <button
-                className="rounded-full border border-ink/20 px-4 py-2 text-sm font-semibold"
-                onClick={() => setEditingId(null)}
-              >
-                Fermer
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
 
-      {createOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-6">
-          <div className="w-full max-w-2xl rounded-3xl border border-clay/70 bg-white p-6 shadow-card">
-            <h3 className="font-serif text-2xl">Nouvelle periode</h3>
-            <div className="mt-4 grid gap-4 md:grid-cols-2">
-              {fields.map((field) => (
-                <label key={field.path} className="flex flex-col gap-2 text-sm font-semibold text-ink/70">
-                  {field.label}
-                    {field.path === "status" ? (
-                      <select
-                        className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
-                        value={String(toInputValue(getByPath(createDraft, field.path), field.type))}
-                        onChange={(event) => {
-                          const next = { ...createDraft };
-                          setByPath(next, field.path, event.target.value);
-                          setCreateDraft(next);
-                        }}
-                      >
-                        <option value="open">Ouverte</option>
-                        <option value="planned">Planifiee</option>
-                        <option value="finished">Finie</option>
-                      </select>
-                    ) : field.type === "boolean" ? (
-                    <select
-                      className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
-                      value={String(toInputValue(getByPath(createDraft, field.path), field.type))}
-                      onChange={(event) => {
-                        const next = { ...createDraft };
-                        setByPath(next, field.path, fromInputValue(event.target.value, field.type));
-                        setCreateDraft(next);
-                      }}
-                    >
-                      <option value="true">Oui</option>
-                      <option value="false">Non</option>
-                    </select>
-                  ) : field.type === "date" || field.type === "datetime" ? (
-                    <input
-                      type={field.type === "date" ? "date" : "datetime-local"}
-                      className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
-                      value={String(toInputValue(getByPath(createDraft, field.path), field.type))}
-                      onChange={(event) => {
-                        const next = { ...createDraft };
-                        setByPath(next, field.path, fromInputValue(event.target.value, field.type));
-                        setCreateDraft(next);
-                      }}
-                    />
-                  ) : (
-                    <input
-                      type={field.type === "number" ? "number" : "text"}
-                      className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
-                      value={String(toInputValue(getByPath(createDraft, field.path), field.type))}
-                      onChange={(event) => {
-                        const next = { ...createDraft };
-                        setByPath(next, field.path, fromInputValue(event.target.value, field.type));
-                        setCreateDraft(next);
-                      }}
-                    />
-                  )}
-                </label>
-              ))}
-            </div>
-            <div className="mt-6 flex items-center gap-3">
-              <button
-                className="rounded-full bg-ink px-5 py-2 text-sm font-semibold text-stone"
-                onClick={handleCreate}
-              >
-                Creer
-              </button>
-              <button
-                className="rounded-full border border-ink/20 px-4 py-2 text-sm font-semibold"
-                onClick={() => setCreateOpen(false)}
-              >
-                Annuler
-              </button>
+            <div className="mt-3 overflow-auto border border-ink/15 bg-white">
+              <table className="min-w-[900px] text-left text-sm">
+                <thead className="border-b border-ink/15 bg-ink text-stone">
+                  <tr>
+                    <th className="sticky left-0 top-0 z-20 border-r border-ink/20 bg-ink px-3 py-2 text-xs uppercase tracking-[0.12em]">
+                      Producteur
+                    </th>
+                    {editingKeys.map((key) => (
+                      <th key={key} className="sticky top-0 z-10 px-2 py-2 text-center text-xs uppercase tracking-[0.12em]">
+                        {formatShortDateKey(key)}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {producers.map((producer) => (
+                    <tr key={producer.id} className="border-b border-ink/10">
+                      <td className="sticky left-0 z-10 border-r border-ink/10 bg-white px-3 py-2 text-xs font-semibold">
+                        {producer.name ?? "Producteur"}
+                      </td>
+                      {editingKeys.map((key) => (
+                        <td key={`${producer.id}-${key}`} className="px-2 py-2 text-center">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(editingSelection[producer.id]?.[key])}
+                            onChange={() => toggleProducerDate(producer.id, key)}
+                          />
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </div>
         </div>

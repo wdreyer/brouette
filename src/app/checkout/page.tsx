@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { addDoc, collection, getDocs, limit, query, serverTimestamp, where } from "firebase/firestore";
+import { addDoc, collection, getDocs, serverTimestamp } from "firebase/firestore";
 import { useRouter } from "next/navigation";
 import { CartItem, clearCart, getCart, removeFromCart, updateCartItem } from "@/lib/cart";
 import { firebaseDb } from "@/lib/firebase/client";
@@ -59,44 +59,36 @@ export default function CheckoutPage() {
         : await findMemberByUser(firebaseDb, user);
       const orderMemberId = memberMatch?.id ?? user.uid;
 
-      const openSnap = await getDocs(
-        query(collection(firebaseDb, "distributionDates"), where("status", "==", "open"), limit(1)),
+      const distSnap = await getDocs(collection(firebaseDb, "distributionDates"));
+      const distItems = distSnap.docs.map((docSnap) => ({
+        id: docSnap.id,
+        ...(docSnap.data() as Record<string, unknown>),
+      }));
+      const resolvedOpenDist = pickOpenDistribution(
+        distItems as {
+          id: string;
+          status?: string;
+          dates?: { toDate?: () => Date }[];
+          openedAt?: { toDate?: () => Date };
+          closeAt?: { toDate?: () => Date };
+        }[],
       );
-      const openDist = openSnap.empty
-        ? null
-        : ({
-            id: openSnap.docs[0].id,
-            ...(openSnap.docs[0].data() as Record<string, unknown>),
-          } as {
-            id: string;
-            status?: string;
-            dates?: { toDate?: () => Date }[];
-            openedAt?: { toDate?: () => Date };
-          });
-      let resolvedOpenDist = openDist;
       if (!resolvedOpenDist) {
-        const distSnap = await getDocs(collection(firebaseDb, "distributionDates"));
-        const distItems = distSnap.docs.map((docSnap) => ({
-          id: docSnap.id,
-          ...(docSnap.data() as Record<string, unknown>),
-        }));
-        resolvedOpenDist = pickOpenDistribution(
-          distItems as {
-            id: string;
-            status?: string;
-            dates?: { toDate?: () => Date }[];
-            openedAt?: { toDate?: () => Date };
-          }[],
-        );
+        setMessage("Aucune vente ouverte. Impossible de valider la commande.");
+        return;
       }
-      const distributionId = resolvedOpenDist?.id ?? null;
+      const distributionId = resolvedOpenDist.id;
       const itemCount = items.reduce((sum, item) => sum + item.quantity, 0);
 
       const orderRef = await addDoc(collection(firebaseDb, "orders"), {
         distributionId,
         memberId: orderMemberId,
+        memberUid: user.uid,
         status: "validated",
         totals: { totalAmount: total, itemCount },
+        memberSnapshot: {
+          email: user.email ?? null,
+        },
         createdAt: serverTimestamp(),
         validatedAt: serverTimestamp(),
       });
@@ -120,6 +112,17 @@ export default function CheckoutPage() {
         ),
       );
 
+      await addDoc(collection(firebaseDb, "members", orderMemberId, "ledger"), {
+        type: "order",
+        amount: -total,
+        label: "Commande",
+        orderId: orderRef.id,
+        memberUid: user.uid,
+        memberId: orderMemberId,
+        createdAt: serverTimestamp(),
+        occurredAt: serverTimestamp(),
+      });
+
       clearCart();
       router.replace("/profil");
     } catch (error) {
@@ -136,7 +139,7 @@ export default function CheckoutPage() {
         <p className="text-[11px] font-semibold uppercase tracking-[0.32em] text-ink/60">Panier</p>
         <h1 className="font-serif text-4xl">Relecture de la commande</h1>
         <p className="text-sm text-ink/70">
-          Verifie les dates et les quantites avant de valider. Paiement sur place.
+          Vérifie les dates et les quantités avant de valider. Paiement sur place.
         </p>
       </section>
 
@@ -148,7 +151,7 @@ export default function CheckoutPage() {
         <div className="grid gap-6 lg:grid-cols-[1.6fr_0.9fr]">
           <div className="flex flex-col gap-5">
             {grouped.map(([key, groupItems]) => {
-              const label = groupItems[0]?.saleDateLabel ?? "Date non definie";
+              const label = groupItems[0]?.saleDateLabel ?? "Date non définie";
               const groupTotal = groupItems.reduce(
                 (sum, item) => sum + item.unitPrice * item.quantity,
                 0,
@@ -226,7 +229,7 @@ export default function CheckoutPage() {
               <span>{formatMoney(total)} EUR</span>
             </div>
             <p className="mt-2 text-xs text-ink/60">
-              Paiement sur place lors du retrait. Tu peux modifier les quantites avant validation.
+              Paiement sur place lors du retrait. Tu peux modifier les quantités avant validation.
             </p>
             {message ? <p className="mt-2 text-xs text-ember">{message}</p> : null}
             <button

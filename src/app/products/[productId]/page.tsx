@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { collection, doc, getDoc, getDocs } from "firebase/firestore";
@@ -16,9 +17,7 @@ type Product = {
   description?: string;
   imageUrl?: string;
   isOrganic?: boolean;
-
   tags?: string[];
-  saleDates?: { toDate: () => Date }[];
   categoryId?: string;
 };
 
@@ -28,12 +27,10 @@ type Variant = {
   type?: string;
   unit?: string;
   price: number;
-  activeDates?: string[];
 };
 
 type Distribution = {
   id: string;
-
   dates?: { toDate: () => Date }[];
 };
 
@@ -45,6 +42,16 @@ type Producer = {
 type Category = {
   id: string;
   name?: string;
+};
+
+type OfferItem = {
+  productId?: string;
+  variantId?: string;
+  saleDateKey?: string;
+  dateIndex?: number;
+  priceApplied?: number;
+  price?: number;
+  active?: boolean;
 };
 
 function dateKey(date: Date) {
@@ -67,24 +74,65 @@ function formatShortDate(date: Date) {
   });
 }
 
+function sanitizeDescriptionForMarkdown(text: string) {
+  return text
+    .replace(/\r\n/g, "\n")
+    .replace(/\t/g, " ")
+    .split("\n")
+    .map((line) => line.replace(/^\s{4,}/, " "))
+    .join("\n");
+}
+
+function sortProducts(
+  items: Product[],
+  producerMap: Record<string, Producer>,
+  categoryMap: Record<string, Category>,
+) {
+  const copy = [...items];
+  copy.sort((a, b) => {
+    const aCategory = (a.categoryId ? categoryMap[a.categoryId]?.name : "") ?? "";
+    const bCategory = (b.categoryId ? categoryMap[b.categoryId]?.name : "") ?? "";
+    if (aCategory !== bCategory) return aCategory.localeCompare(bCategory, "fr");
+
+    const aProducer = producerMap[a.producerId]?.name ?? "";
+    const bProducer = producerMap[b.producerId]?.name ?? "";
+    if (aProducer !== bProducer) return aProducer.localeCompare(bProducer, "fr");
+
+    return a.name.localeCompare(b.name, "fr");
+  });
+  return copy;
+}
+
 export default function ProductPage() {
   const [product, setProduct] = useState<Product | null>(null);
   const [variants, setVariants] = useState<Variant[]>([]);
   const [loading, setLoading] = useState(true);
   const [openDates, setOpenDates] = useState<{ key: string; date: Date; index: number }[]>([]);
+  const [catalogProducts, setCatalogProducts] = useState<Product[]>([]);
   const [relatedProducts, setRelatedProducts] = useState<Product[]>([]);
   const [quantities, setQuantities] = useState<Record<string, Record<string, number>>>({});
   const [producer, setProducer] = useState<Producer | null>(null);
   const [producerMap, setProducerMap] = useState<Record<string, Producer>>({});
   const [category, setCategory] = useState<Category | null>(null);
+  const [categoryMap, setCategoryMap] = useState<Record<string, Category>>({});
+  const [variantDateMap, setVariantDateMap] = useState<Record<string, string[]>>({});
+  const [variantPriceMap, setVariantPriceMap] = useState<Record<string, number>>({});
 
   const params = useParams<{ productId: string }>();
   const productId = params?.productId ?? "";
 
   useEffect(() => {
     const load = async () => {
-      const productRef = doc(firebaseDb, "products", productId);
-      const productSnap = await getDoc(productRef);
+      const [productSnap, variantsSnap, distSnap, productsSnap, producersSnap, categoriesSnap] =
+        await Promise.all([
+          getDoc(doc(firebaseDb, "products", productId)),
+          getDocs(collection(firebaseDb, "products", productId, "variants")),
+          getDocs(collection(firebaseDb, "distributionDates")),
+          getDocs(collection(firebaseDb, "products")),
+          getDocs(collection(firebaseDb, "producers")),
+          getDocs(collection(firebaseDb, "categories")),
+        ]);
+
       if (!productSnap.exists()) {
         setProduct(null);
         setVariants([]);
@@ -92,73 +140,134 @@ export default function ProductPage() {
         return;
       }
 
-      const productData = {
+      const currentProduct = {
         id: productSnap.id,
         ...(productSnap.data() as Omit<Product, "id">),
       };
-      setProduct(productData);
+      setProduct(currentProduct);
 
-      if (productData.producerId) {
-        const producerSnap = await getDoc(doc(firebaseDb, "producers", productData.producerId));
-        setProducer(
-          producerSnap.exists()
-            ? ({ id: producerSnap.id, ...(producerSnap.data() as Omit<Producer, "id">) } as Producer)
-            : null,
-        );
-      } else {
-        setProducer(null);
-      }
-
-      if (productData.categoryId) {
-        const categorySnap = await getDoc(doc(firebaseDb, "categories", productData.categoryId));
-        setCategory(
-          categorySnap.exists()
-            ? ({ id: categorySnap.id, ...(categorySnap.data() as Omit<Category, "id">) } as Category)
-            : null,
-        );
-      } else {
-        setCategory(null);
-      }
-
-      const variantsSnap = await getDocs(collection(firebaseDb, "products", productId, "variants"));
       const variantItems = variantsSnap.docs.map((docSnap) => ({
         id: docSnap.id,
         ...(docSnap.data() as Omit<Variant, "id">),
       }));
       setVariants(variantItems);
 
-      const distSnap = await getDocs(collection(firebaseDb, "distributionDates"));
-      const distItems = distSnap.docs.map(
+      const producerMapNext: Record<string, Producer> = {};
+      producersSnap.docs.forEach((docSnap) => {
+        producerMapNext[docSnap.id] = {
+          id: docSnap.id,
+          ...(docSnap.data() as Omit<Producer, "id">),
+        };
+      });
+      setProducerMap(producerMapNext);
+      setProducer(producerMapNext[currentProduct.producerId] ?? null);
+
+      const categoryMapNext: Record<string, Category> = {};
+      categoriesSnap.docs.forEach((docSnap) => {
+        categoryMapNext[docSnap.id] = {
+          id: docSnap.id,
+          ...(docSnap.data() as Omit<Category, "id">),
+        };
+      });
+      setCategoryMap(categoryMapNext);
+      setCategory(currentProduct.categoryId ? categoryMapNext[currentProduct.categoryId] ?? null : null);
+
+      const distributions = distSnap.docs.map(
         (docSnap) => ({ id: docSnap.id, ...(docSnap.data() as Omit<Distribution, "id">) }) as Distribution,
       );
-      const openDist = pickOpenDistribution(distItems);
+      const openDist = pickOpenDistribution(distributions);
       const openDatesRaw = (openDist?.dates ?? []).slice(0, 3).map((d) => d.toDate());
       setOpenDates(openDatesRaw.map((date, index) => ({ key: dateKey(date), date, index })));
 
-      const [productsSnap, producersSnap] = await Promise.all([
-        getDocs(collection(firebaseDb, "products")),
-        getDocs(collection(firebaseDb, "producers")),
-      ]);
-      const openKeys = new Set(
-        (openDist?.dates ?? []).slice(0, 3).map((date) => dateKey(date.toDate())),
-      );
-      const related = productsSnap.docs
-        .map((docSnap) => ({
-          id: docSnap.id,
-          ...(docSnap.data() as Omit<Product, "id">),
-        }))
-        .filter((item) => item.id !== productId)
-        .filter((item) => {
-          const keys = (item.saleDates ?? []).map((d) => dateKey(d.toDate()));
-          return keys.some((key) => openKeys.has(key));
-        })
-        .slice(0, 6);
-      setRelatedProducts(related);
-      const map: Record<string, Producer> = {};
-      producersSnap.docs.forEach((docSnap) => {
-        map[docSnap.id] = { id: docSnap.id, ...(docSnap.data() as Omit<Producer, "id">) };
+      const allProducts = productsSnap.docs.map((docSnap) => ({
+        id: docSnap.id,
+        ...(docSnap.data() as Omit<Product, "id">),
+      }));
+
+      let sourceProducts = allProducts;
+      let openOffers: OfferItem[] = [];
+      if (openDist) {
+        const offerSnap = await getDocs(
+          collection(firebaseDb, "distributionDates", openDist.id, "offerItems"),
+        );
+        openOffers = offerSnap.docs.map((docSnap) => docSnap.data() as OfferItem);
+        const openProductIds = new Set(
+          openOffers
+            .filter((offer) => offer.active !== false)
+            .map((offer) => String(offer.productId ?? ""))
+            .filter(Boolean),
+        );
+
+        if (openProductIds.size > 0) {
+          const filtered = allProducts.filter((item) => openProductIds.has(item.id));
+          if (filtered.length > 0) {
+            sourceProducts = filtered;
+          }
+        }
+      }
+
+      const variantDates: Record<string, string[]> = {};
+      const variantPrices: Record<string, number> = {};
+      const openDateKeyByIndex: string[] = openDatesRaw.map((date) => dateKey(date));
+      openOffers
+        .filter((offer) => offer.active !== false && String(offer.productId ?? "") === currentProduct.id)
+        .forEach((offer) => {
+          const variantId = String(offer.variantId ?? "");
+          if (!variantId) return;
+          const saleKey =
+            typeof offer.saleDateKey === "string" && offer.saleDateKey
+              ? offer.saleDateKey
+              : typeof offer.dateIndex === "number"
+                ? openDateKeyByIndex[offer.dateIndex] ?? ""
+                : "";
+          if (saleKey) {
+            const currentKeys = variantDates[variantId] ?? [];
+            if (!currentKeys.includes(saleKey)) {
+              variantDates[variantId] = [...currentKeys, saleKey];
+            }
+          }
+          const appliedPrice =
+            typeof offer.priceApplied === "number"
+              ? offer.priceApplied
+              : typeof offer.price === "number"
+                ? offer.price
+                : null;
+          if (appliedPrice !== null) {
+            variantPrices[variantId] = appliedPrice;
+          }
+        });
+      Object.keys(variantDates).forEach((key) => {
+        variantDates[key] = [...variantDates[key]].sort();
       });
-      setProducerMap(map);
+      setVariantDateMap(variantDates);
+      setVariantPriceMap(variantPrices);
+
+      const ordered = sortProducts(sourceProducts, producerMapNext, categoryMapNext);
+      setCatalogProducts(ordered);
+
+      const rankedRelated = ordered
+        .filter((item) => item.id !== productId)
+        .map((item) => {
+          let score = 0;
+          const sameProducer = item.producerId === currentProduct.producerId;
+          const sameCategory =
+            Boolean(item.categoryId) &&
+            Boolean(currentProduct.categoryId) &&
+            item.categoryId === currentProduct.categoryId;
+
+          if (sameProducer && sameCategory) score = 3;
+          else if (sameCategory) score = 2;
+          else if (sameProducer) score = 1;
+
+          return { item, score };
+        })
+        .sort((a, b) => {
+          if (a.score !== b.score) return b.score - a.score;
+          return a.item.name.localeCompare(b.item.name, "fr");
+        });
+
+      const relatedCount = rankedRelated.length >= 4 ? Math.min(8, rankedRelated.length) : rankedRelated.length;
+      setRelatedProducts(rankedRelated.slice(0, relatedCount).map((entry) => entry.item));
 
       setLoading(false);
     };
@@ -166,39 +275,38 @@ export default function ProductPage() {
     load().catch(() => setLoading(false));
   }, [productId]);
 
-  const productSaleKeys = useMemo(
-    () => (product?.saleDates ?? []).map((date) => dateKey(date.toDate())),
-    [product],
-  );
-
-  const variantActiveMap = useMemo(() => {
-    const map: Record<string, string[]> = {};
-    variants.forEach((variant) => {
-      const keys =
-        Array.isArray(variant.activeDates) && variant.activeDates.length > 0
-          ? variant.activeDates
-          : productSaleKeys;
-      map[variant.id] = keys;
-    });
-    return map;
-  }, [variants, productSaleKeys]);
-
   const availableDates = useMemo(() => {
     if (!openDates.length) return [];
     return openDates
       .filter((entry) =>
-        variants.some((variant) => (variantActiveMap[variant.id] ?? []).includes(entry.key)),
+        variants.some((variant) => (variantDateMap[variant.id] ?? []).includes(entry.key)),
       )
       .sort((a, b) => a.date.getTime() - b.date.getTime());
-  }, [openDates, variants, variantActiveMap]);
+  }, [openDates, variants, variantDateMap]);
 
   const activeVariants = useMemo(() => {
     if (!openDates.length) return [];
-    const openKeys = new Set(openDates.map((entry) => entry.key));
-    return variants.filter((variant) =>
-      (variantActiveMap[variant.id] ?? []).some((key) => openKeys.has(key)),
-    );
-  }, [variants, variantActiveMap, openDates]);
+    return variants.filter((variant) => (variantDateMap[variant.id] ?? []).length > 0);
+  }, [variants, variantDateMap, openDates]);
+
+  const currentCatalogIndex = useMemo(
+    () => catalogProducts.findIndex((item) => item.id === productId),
+    [catalogProducts, productId],
+  );
+  const previousProduct = useMemo(() => {
+    const count = catalogProducts.length;
+    if (count <= 1) return null;
+    const currentIndex = currentCatalogIndex >= 0 ? currentCatalogIndex : 0;
+    const previousIndex = (currentIndex - 1 + count) % count;
+    return catalogProducts[previousIndex] ?? null;
+  }, [catalogProducts, currentCatalogIndex]);
+  const nextProduct = useMemo(() => {
+    const count = catalogProducts.length;
+    if (count <= 1) return null;
+    const currentIndex = currentCatalogIndex >= 0 ? currentCatalogIndex : 0;
+    const nextIndex = (currentIndex + 1) % count;
+    return catalogProducts[nextIndex] ?? null;
+  }, [catalogProducts, currentCatalogIndex]);
 
   const setQuantity = (variantId: string, key: string, value: number) => {
     const nextValue = Number.isFinite(value) ? Math.max(0, value) : 0;
@@ -221,34 +329,34 @@ export default function ProductPage() {
     const qtyByDate = quantities[variant.id] ?? {};
     const hasQty = Object.values(qtyByDate).some((value) => value > 0);
     if (!hasQty) {
-      toast.error("Choisis une quantite.");
+      toast.error("Choisis une quantité.");
       return;
     }
 
     availableDates.forEach((date) => {
       const key = date.key;
-      const activeKeys = variantActiveMap[variant.id] ?? [];
+      const activeKeys = variantDateMap[variant.id] ?? [];
       if (!activeKeys.includes(key)) return;
-      const dateLabel = date.date;
       const qty = qtyByDate[key] ?? 0;
       if (qty <= 0) return;
+      const unitPrice = variantPriceMap[variant.id] ?? variant.price;
       addToCart({
         id: `${product.id}_${variant.id}_${key}`,
         productId: product.id,
         variantId: variant.id,
         name: product.name,
         variantLabel: variant.label,
-        unitPrice: variant.price,
+        unitPrice,
         quantity: qty,
         producerId: product.producerId,
         imageUrl: product.imageUrl,
         saleDateKey: key,
-        saleDateLabel: dateLabel ? formatDate(dateLabel) : key,
+        saleDateLabel: formatDate(date.date),
       });
     });
 
     animateToCart();
-    toast.success("Ajout\u00e9 au panier.");
+    toast.success("Ajouté au panier.");
     setQuantities((prev) => {
       const next = { ...prev };
       delete next[variant.id];
@@ -283,7 +391,7 @@ export default function ProductPage() {
     const startTime = performance.now();
     const animate = (time: number) => {
       const t = Math.min(1, (time - startTime) / duration);
-      const ease = 1 - Math.pow(1 - t, 3);
+      const ease = 1 - (1 - t) ** 3;
       const x = start.x + (end.x - start.x) * ease;
       const y = start.y + (end.y - start.y) * ease - 40 * Math.sin(Math.PI * t);
       dot.style.left = `${x}px`;
@@ -310,34 +418,109 @@ export default function ProductPage() {
     return (
       <div className="mx-auto w-full max-w-6xl px-6 py-12">
         <h1 className="font-serif text-3xl">Produit introuvable</h1>
-        <p className="mt-2 text-sm text-ink/70">Verifie l'identifiant du produit.</p>
+        <p className="mt-2 text-sm text-ink/70">Vérifie l'identifiant du produit.</p>
       </div>
     );
   }
 
-  const descriptionText =
+  const descriptionText = sanitizeDescriptionForMarkdown(
     product.description && product.description.trim().length > 0
       ? product.description
-      : "Produits de saison issus des producteurs locaux de la coop. Quantites limitees selon les dates.";
+      : "Produit local de la coop. Quantités limitées selon les dates de distribution.",
+  );
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-6 py-10">
-      <section className="grid gap-6 rounded-xl border border-clay/70 bg-white/95 p-6 shadow-card md:grid-cols-[1.1fr_0.9fr]">
-        <div className="flex flex-col gap-4">
-          <div className="flex items-center justify-center rounded-lg border border-clay/70 bg-stone p-6">
-            {product.imageUrl ? (
-              <img className="max-h-64 w-full object-contain" src={product.imageUrl} alt={product.name} />
-            ) : (
-              <p className="text-sm text-ink/60">Aucune image</p>
-            )}
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-5 px-6 py-10">
+      <div className="flex items-center justify-between gap-3">
+        <Link
+          href="/"
+          className="rounded-full border border-ink/20 bg-white px-4 py-2 text-xs font-semibold text-ink"
+        >
+          Retour catalogue
+        </Link>
+        <div className="flex items-center gap-2">
+          {previousProduct ? (
+            <Link
+              href={`/products/${previousProduct.id}`}
+              className="rounded-full border border-ink/20 bg-white px-3 py-1.5 text-xs font-semibold text-ink"
+            >
+              &larr; Produit précédent
+            </Link>
+          ) : null}
+          {nextProduct ? (
+            <Link
+              href={`/products/${nextProduct.id}`}
+              className="rounded-full border border-ink/20 bg-white px-3 py-1.5 text-xs font-semibold text-ink"
+            >
+              Produit suivant &rarr;
+            </Link>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="relative">
+        {previousProduct ? (
+          <Link
+            href={`/products/${previousProduct.id}`}
+            aria-label="Produit précédent"
+            className="absolute left-0 top-1/2 z-20 hidden h-12 w-12 -translate-x-[115%] -translate-y-1/2 items-center justify-center rounded-full border border-ink/25 bg-white/95 text-2xl font-bold text-ink shadow-sm transition hover:scale-105 hover:bg-white md:flex"
+          >
+            &larr;
+          </Link>
+        ) : null}
+        {nextProduct ? (
+          <Link
+            href={`/products/${nextProduct.id}`}
+            aria-label="Produit suivant"
+            className="absolute right-0 top-1/2 z-20 hidden h-12 w-12 translate-x-[115%] -translate-y-1/2 items-center justify-center rounded-full border border-ink/25 bg-white/95 text-2xl font-bold text-ink shadow-sm transition hover:scale-105 hover:bg-white md:flex"
+          >
+            &rarr;
+          </Link>
+        ) : null}
+
+        <section className="grid gap-6 rounded-xl border border-clay/70 bg-white/95 p-6 shadow-card md:grid-cols-2">
+          <div className="flex min-w-0 flex-col gap-4">
+            <div className="overflow-hidden rounded-lg border border-clay/70 bg-gradient-to-br from-stone to-clay/25">
+              {product.imageUrl ? (
+                <img className="h-[320px] w-full object-cover" src={product.imageUrl} alt={product.name} />
+              ) : (
+                <div className="flex h-[320px] items-center justify-center">
+                  <p className="text-sm text-ink/60">Aucune image</p>
+                </div>
+              )}
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <span className="max-w-full rounded-full border border-ink/15 px-3 py-1 text-xs font-semibold text-ink/70">
+                {product.isOrganic ? "Bio" : "Conventionnel"}
+              </span>
+              {category?.name ? (
+                <span
+                  className="max-w-full truncate rounded-full bg-clay/70 px-3 py-1 text-xs font-semibold text-ink/70"
+                  title={category.name}
+                >
+                  {category.name}
+                </span>
+              ) : null}
+              {product.tags?.map((tag) => (
+                <span
+                  key={tag}
+                  className="max-w-full truncate rounded-full bg-clay/70 px-3 py-1 text-xs font-semibold text-ink/70"
+                  title={tag}
+                >
+                  {tag}
+                </span>
+              ))}
+            </div>
           </div>
-          <div className="flex flex-col gap-3">
-            <div>
-              <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-ink/60">
+
+          <div className="flex min-w-0 flex-col gap-4">
+            <div className="min-w-0">
+              <p className="break-words text-[11px] font-semibold uppercase tracking-[0.24em] text-ink/60">
                 {producer?.name ? (
                   <>
                     Producteur{" "}
-                    <a className="underline" href={`/producers/${producer.id}`}>
+                    <a className="break-words underline" href={`/producers/${producer.id}`}>
                       {producer.name}
                     </a>
                   </>
@@ -345,60 +528,44 @@ export default function ProductPage() {
                   "Producteur"
                 )}
               </p>
-              <h1 className="font-serif text-3xl">{product.name}</h1>
+              <h1 className="break-words [overflow-wrap:anywhere] font-serif text-3xl leading-tight">
+                {product.name}
+              </h1>
             </div>
-            <div className="flex flex-wrap gap-2">
-              <span className="rounded-full border border-ink/15 px-3 py-1 text-xs font-semibold text-ink/70">
-                {product.isOrganic ? "Bio" : "Conventionnel"}
-              </span>
-              {category?.name ? (
-                <span className="rounded-full bg-clay/70 px-3 py-1 text-xs font-semibold text-ink/70">
-                  {category.name}
-                </span>
-              ) : null}
-              {product.tags?.map((tag) => (
-                <span key={tag} className="rounded-full bg-clay/70 px-3 py-1 text-xs font-semibold text-ink/70">
-                  {tag}
-                </span>
-              ))}
-            </div>
-          </div>
-        </div>
-        <div className="flex flex-col gap-4">
-          <div className="rounded-lg border border-clay/70 bg-stone p-4">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-ink/60">
-              Dates disponibles
-            </p>
-            {availableDates.length === 0 ? (
-              <p className="mt-2 text-sm text-ink/70">Aucune date disponible.</p>
-            ) : (
-              <div className="mt-3 flex flex-wrap gap-2 text-xs text-ink/70">
-                {availableDates.map((date) => (
-                  <span
-                    key={date.key}
-                    className="rounded-full border border-clay/70 bg-white px-3 py-1 font-semibold"
-                  >
-                    {formatDate(date.date)}
-                  </span>
-                ))}
-              </div>
-            )}
-          </div>
 
-          <div className="rounded-lg border border-clay/70 bg-white/90 p-5">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-ink/60">Description</p>
-            <div className="mt-3 space-y-3 text-sm text-ink/70">
-              <div className="markdown text-ink/70">
-                <ReactMarkdown>{descriptionText}</ReactMarkdown>
-              </div>
-              <p className="leading-relaxed text-ink/60">
-                Retrait sur place lors des distributions. Quantites limitees selon la saison et la
-                disponibilite.
+            <div className="rounded-lg border border-clay/70 bg-stone p-4">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-ink/60">
+                Dates disponibles
               </p>
+              {availableDates.length === 0 ? (
+                <p className="mt-2 text-sm text-ink/70">Aucune date disponible.</p>
+              ) : (
+                <div className="mt-3 flex flex-wrap gap-2 text-xs text-ink/70">
+                  {availableDates.map((date) => (
+                    <span
+                      key={date.key}
+                      className="rounded-full border border-clay/70 bg-white px-3 py-1 font-semibold"
+                    >
+                      {formatDate(date.date)}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="min-w-0 rounded-lg border border-clay/70 bg-white/90 p-5">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-ink/60">
+                Description
+              </p>
+              <div className="mt-3 min-w-0 space-y-3 text-sm text-ink/70">
+                <div className="markdown break-words [overflow-wrap:anywhere] text-ink/70">
+                  <ReactMarkdown>{descriptionText}</ReactMarkdown>
+                </div>
+              </div>
             </div>
           </div>
-        </div>
-      </section>
+        </section>
+      </div>
 
       {availableDates.length === 0 ? (
         <div className="rounded-lg border border-clay/70 bg-white/90 p-4">
@@ -426,104 +593,101 @@ export default function ProductPage() {
               <span>Actions</span>
             </div>
             <div className="divide-y divide-clay/70">
-              {activeVariants.map((variant) => {
-                return (
-                  <div
-                    key={variant.id}
-                    className="min-w-[720px] px-4 py-2"
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns: `1.1fr 0.6fr repeat(${openDates.length}, minmax(120px, 1fr)) 0.6fr`,
-                      gap: "12px",
-                    }}
-                  >
-                    <div>
-                      <p className="text-sm font-semibold">
-                        {variant.label}
-                        {variant.type ? ` - ${variant.type}` : ""} {variant.unit ? `(${variant.unit})` : ""}
-                      </p>
-                      <p className="text-xs text-ink/60">Variante</p>
-                    </div>
-                    <div className="text-sm font-semibold">{variant.price.toFixed(2)} EUR</div>
-                    {openDates.map((date) => {
-                      const qty = quantities[variant.id]?.[date.key] ?? 0;
-                      const activeKeys = variantActiveMap[variant.id] ?? [];
-                      if (!activeKeys.includes(date.key)) {
-                        return (
-                          <div key={date.key} className="text-xs text-ink/50">
-                            -
-                          </div>
-                        );
-                      }
+              {activeVariants.map((variant) => (
+                <div
+                  key={variant.id}
+                  className="min-w-[720px] px-4 py-2"
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: `1.1fr 0.6fr repeat(${openDates.length}, minmax(120px, 1fr)) 0.6fr`,
+                    gap: "12px",
+                  }}
+                >
+                  <div className="min-w-0">
+                    <p className="break-words [overflow-wrap:anywhere] text-sm font-semibold leading-tight">
+                      {variant.label}
+                      {variant.type ? ` - ${variant.type}` : ""} {variant.unit ? `(${variant.unit})` : ""}
+                    </p>
+                    <p className="text-xs text-ink/60">Variante</p>
+                  </div>
+                  <div className="text-sm font-semibold">
+                    {(variantPriceMap[variant.id] ?? variant.price).toFixed(2)} EUR
+                  </div>
+                  {openDates.map((date) => {
+                    const qty = quantities[variant.id]?.[date.key] ?? 0;
+                    const activeKeys = variantDateMap[variant.id] ?? [];
+                    if (!activeKeys.includes(date.key)) {
                       return (
-                        <div key={date.key} className="flex items-center gap-2">
-                          <button
-                            className="h-7 w-7 rounded-full border border-ink/20 bg-white text-xs font-semibold"
-                            onClick={() => setQuantity(variant.id, date.key, qty - 1)}
-                            disabled={qty <= 0}
-                          >
-                            -
-                          </button>
-                          <span className="w-6 text-center text-xs font-semibold text-ink">{qty}</span>
-                          <button
-                            className="h-7 w-7 rounded-full border border-ink/20 bg-white text-xs font-semibold"
-                            onClick={() => setQuantity(variant.id, date.key, qty + 1)}
-                          >
-                            +
-                          </button>
+                        <div key={date.key} className="text-xs text-ink/50">
+                          -
                         </div>
                       );
-                    })}
-                    <div className="flex items-start">
-                      <button
-                        className="rounded-full border border-ink/20 bg-ink px-4 py-1.5 text-[11px] font-semibold text-stone"
-                        onClick={() => handleAdd(variant)}
-                      >
-                        Ajouter
-                      </button>
-                    </div>
+                    }
+                    return (
+                      <div key={date.key} className="flex items-center gap-2">
+                        <button
+                          className="h-7 w-7 rounded-full border border-ink/20 bg-white text-xs font-semibold"
+                          onClick={() => setQuantity(variant.id, date.key, qty - 1)}
+                          disabled={qty <= 0}
+                        >
+                          -
+                        </button>
+                        <span className="w-6 text-center text-xs font-semibold text-ink">{qty}</span>
+                        <button
+                          className="h-7 w-7 rounded-full border border-ink/20 bg-white text-xs font-semibold"
+                          onClick={() => setQuantity(variant.id, date.key, qty + 1)}
+                        >
+                          +
+                        </button>
+                      </div>
+                    );
+                  })}
+                  <div className="flex items-start">
+                    <button
+                      className="rounded-full border border-ink/20 bg-ink px-4 py-1.5 text-[11px] font-semibold text-stone"
+                      onClick={() => handleAdd(variant)}
+                    >
+                      Ajouter
+                    </button>
                   </div>
-                );
-              })}
+                </div>
+              ))}
             </div>
           </div>
         </section>
       )}
 
       {relatedProducts.length > 0 ? (
-        <section className="flex flex-col gap-4">
-          <div>
-            <p className="text-[11px] font-semibold uppercase tracking-[0.32em] text-ink/60">
-              Meme periode
-            </p>
-            <h2 className="font-serif text-2xl">Produits disponibles aux memes dates</h2>
+        <section className="flex flex-col gap-3">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.32em] text-ink/60">
+                Même période
+              </p>
+              <h2 className="font-serif text-2xl">Tu peux aussi aimer</h2>
+            </div>
           </div>
-          <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+          <div className="grid gap-3 grid-cols-2 md:grid-cols-4">
             {relatedProducts.map((item) => (
-              <a
+              <Link
                 key={item.id}
-                className="group flex h-full flex-col gap-3 rounded-xl border border-clay/70 bg-white/95 p-4 shadow-card transition hover:-translate-y-1 hover:border-ink/30"
+                className="group flex h-full flex-col gap-2 rounded-lg border border-clay/70 bg-white/95 p-3 shadow-card transition hover:-translate-y-1 hover:border-ink/30"
                 href={`/products/${item.id}`}
               >
-                <div className="flex h-32 items-center justify-center overflow-hidden rounded-lg border border-clay/70 bg-stone">
+                <div className="flex h-24 items-center justify-center overflow-hidden rounded-md border border-clay/70 bg-stone">
                   {item.imageUrl ? (
-                    <img className="max-h-24 w-full object-contain" src={item.imageUrl} alt={item.name} />
+                    <img className="h-full w-full object-cover" src={item.imageUrl} alt={item.name} />
                   ) : (
                     <span className="text-xs uppercase tracking-[0.2em] text-ink/50">Sans image</span>
                   )}
                 </div>
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-ink/60">
-                      Producteur {producerMap[item.producerId]?.name ?? "local"}
-                    </p>
-                    <h3 className="font-serif text-xl">{item.name}</h3>
-                  </div>
-                  <span className="rounded-full border border-ink/15 px-3 py-1 text-xs font-semibold text-ink/70">
-                    {item.isOrganic ? "Bio" : "Conventionnel"}
-                  </span>
-                </div>
-              </a>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-ink/60">
+                  {producerMap[item.producerId]?.name ?? "Producteur"}
+                </p>
+                <h3 className="break-words [overflow-wrap:anywhere] font-serif text-lg leading-tight">
+                  {item.name}
+                </h3>
+              </Link>
             ))}
           </div>
         </section>

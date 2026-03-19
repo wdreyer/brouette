@@ -8,9 +8,9 @@ export default function CataloguePage() {
       <section className="flex flex-col gap-6">
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-[0.32em] text-ink/60">Catalogue</p>
-          <h1 className="font-serif text-4xl">Produits de la periode</h1>
+          <h1 className="font-serif text-4xl">Produits de la période</h1>
           <p className="mt-2 text-sm text-ink/70">
-            Chaque produit est lie a une ou plusieurs dates de distribution.
+            Chaque produit est lié à une ou plusieurs dates de distribution.
           </p>
         </div>
         <CatalogueGrid />

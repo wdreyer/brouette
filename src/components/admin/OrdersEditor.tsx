@@ -1,8 +1,17 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { collection, getDocs, orderBy, query } from "firebase/firestore";
+import {
+  collection,
+  doc,
+  getDocs,
+  orderBy,
+  query,
+  where,
+  writeBatch,
+} from "firebase/firestore";
 import { firebaseDb } from "@/lib/firebase/client";
+import { useAuth } from "@/components/auth/AuthProvider";
 
 type Order = {
   id: string;
@@ -103,6 +112,8 @@ function ChartCard({
 }
 
 export default function OrdersEditor() {
+  const { effectiveRole } = useAuth();
+  const isAdmin = effectiveRole === "admin";
   const [orders, setOrders] = useState<Order[]>([]);
   const [orderItems, setOrderItems] = useState<Record<string, OrderItem[]>>({});
   const [members, setMembers] = useState<Record<string, Member>>({});
@@ -110,6 +121,8 @@ export default function OrdersEditor() {
   const [distributions, setDistributions] = useState<Distribution[]>([]);
   const [loading, setLoading] = useState(true);
   const [openedOrderId, setOpenedOrderId] = useState<string | null>(null);
+  const [deletingOrderId, setDeletingOrderId] = useState<string | null>(null);
+  const [deleteMessage, setDeleteMessage] = useState("");
 
   useEffect(() => {
     const load = async () => {
@@ -259,11 +272,71 @@ export default function OrdersEditor() {
     return groups;
   }, [openedItems]);
 
+  const deleteOrderEverywhere = async (order: Order) => {
+    if (!isAdmin) return;
+    const confirmDelete =
+      typeof window === "undefined"
+        ? true
+        : window.confirm(
+            "Supprimer cette commande ? Cette action efface la commande, ses lignes et les écritures de solde liées.",
+          );
+    if (!confirmDelete) return;
+
+    setDeletingOrderId(order.id);
+    setDeleteMessage("");
+    try {
+      const itemsSnap = await getDocs(collection(firebaseDb, "orders", order.id, "items"));
+      let ledgerRefs: Array<ReturnType<typeof doc>> = [];
+      let ledgerWarning = "";
+      if (order.memberId) {
+        try {
+          const memberLedgerSnap = await getDocs(
+            query(
+              collection(firebaseDb, "members", order.memberId, "ledger"),
+              where("orderId", "==", order.id),
+            ),
+          );
+          ledgerRefs = memberLedgerSnap.docs.map((docSnap) => docSnap.ref);
+        } catch {
+          ledgerWarning =
+            " (ecritures de solde non supprimees: droits insuffisants sur members/{id}/ledger)";
+        }
+      }
+
+      const refsToDelete = [
+        ...itemsSnap.docs.map((docSnap) => docSnap.ref),
+        ...ledgerRefs,
+        doc(firebaseDb, "orders", order.id),
+      ];
+
+      const chunkSize = 400;
+      for (let index = 0; index < refsToDelete.length; index += chunkSize) {
+        const batch = writeBatch(firebaseDb);
+        refsToDelete.slice(index, index + chunkSize).forEach((ref) => batch.delete(ref));
+        await batch.commit();
+      }
+
+      setOrders((prev) => prev.filter((entry) => entry.id !== order.id));
+      setOrderItems((prev) => {
+        const next = { ...prev };
+        delete next[order.id];
+        return next;
+      });
+      if (openedOrderId === order.id) setOpenedOrderId(null);
+      setDeleteMessage(`Commande supprimee (commande + lignes)${ledgerWarning}.`);
+    } catch {
+      setDeleteMessage("Erreur lors de la suppression de la commande.");
+    } finally {
+      setDeletingOrderId(null);
+    }
+  };
+
   return (
     <div className="flex flex-col gap-6">
       <div className="rounded-3xl border border-clay/70 bg-white/80 p-6 shadow-card">
         <h2 className="font-serif text-2xl">Commandes</h2>
         <p className="mt-2 text-sm text-ink/70">Toutes les commandes passees par les adherents.</p>
+        {deleteMessage ? <p className="mt-2 text-xs text-ink/70">{deleteMessage}</p> : null}
       </div>
 
       {loading ? (
@@ -345,11 +418,11 @@ export default function OrdersEditor() {
                 <thead className="border-b border-clay/70 bg-stone/80">
                   <tr>
                     <th className="px-4 py-3 font-semibold text-ink">Date</th>
-                    <th className="px-4 py-3 font-semibold text-ink">Adherent</th>
+                    <th className="px-4 py-3 font-semibold text-ink">Adhérent</th>
                     <th className="px-4 py-3 font-semibold text-ink">Email</th>
                     <th className="px-4 py-3 font-semibold text-ink">Total</th>
                     <th className="px-4 py-3 font-semibold text-ink">Articles</th>
-                    <th className="px-4 py-3 font-semibold text-ink">Voir</th>
+                    <th className="px-4 py-3 font-semibold text-ink">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -369,25 +442,52 @@ export default function OrdersEditor() {
                         </td>
                         <td className="px-4 py-3">{order.totals?.itemCount ?? 0}</td>
                         <td className="px-4 py-3">
-                          <button
-                            type="button"
-                            aria-label="Voir la commande"
-                            className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-clay/80 bg-white text-ink transition hover:border-forest/60 hover:text-forest"
-                            onClick={() => setOpenedOrderId(order.id)}
-                          >
-                            <svg
-                              viewBox="0 0 24 24"
-                              fill="none"
-                              stroke="currentColor"
-                              strokeWidth="1.8"
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              className="h-4 w-4"
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              aria-label="Voir la commande"
+                              className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-clay/80 bg-white text-ink transition hover:border-forest/60 hover:text-forest"
+                              onClick={() => setOpenedOrderId(order.id)}
                             >
-                              <path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6Z" />
-                              <circle cx="12" cy="12" r="3" />
-                            </svg>
-                          </button>
+                              <svg
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="1.8"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                className="h-4 w-4"
+                              >
+                                <path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6Z" />
+                                <circle cx="12" cy="12" r="3" />
+                              </svg>
+                            </button>
+                            {isAdmin ? (
+                              <button
+                                type="button"
+                                aria-label="Supprimer la commande"
+                                className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-ember/40 bg-white text-ember transition hover:bg-ember/10 disabled:opacity-50"
+                                onClick={() => deleteOrderEverywhere(order)}
+                                disabled={deletingOrderId === order.id}
+                              >
+                                <svg
+                                  viewBox="0 0 24 24"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="1.8"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  className="h-4 w-4"
+                                >
+                                  <path d="M3 6h18" />
+                                  <path d="M8 6V4h8v2" />
+                                  <path d="M19 6l-1 14H6L5 6" />
+                                  <path d="M10 11v6" />
+                                  <path d="M14 11v6" />
+                                </svg>
+                              </button>
+                            ) : null}
+                          </div>
                         </td>
                       </tr>
                     );
@@ -421,7 +521,7 @@ export default function OrdersEditor() {
             </div>
             <div className="grid gap-3 border-b border-clay/70 px-5 py-3 text-sm text-ink/80 md:grid-cols-3">
               <div>
-                <p className="text-[11px] uppercase tracking-[0.16em] text-ink/55">Adherent</p>
+                <p className="text-[11px] uppercase tracking-[0.16em] text-ink/55">Adhérent</p>
                 <p className="font-semibold">
                   {openedOrder.memberId
                     ? `${members[openedOrder.memberId]?.firstName ?? ""} ${members[openedOrder.memberId]?.lastName ?? ""}`.trim() || "-"

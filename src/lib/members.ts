@@ -19,10 +19,78 @@ type MemberMatch = {
   role: MemberRole;
 };
 
+type EmailMatchType = "primary" | "secondary" | "unknown";
+
 function normalizeRole(value: unknown): MemberRole {
   if (value === "admin") return "admin";
   if (value === "referent") return "referent";
   return "member";
+}
+
+function normalizeEmail(value: unknown) {
+  return String(value ?? "").trim().toLowerCase();
+}
+
+function memberPrimaryEmail(data: Record<string, unknown>) {
+  const main = normalizeEmail(data.email);
+  if (main) return main;
+  const emails = Array.isArray(data.emails)
+    ? data.emails.map((item) => normalizeEmail(item)).filter(Boolean)
+    : [];
+  return emails[0] ?? "";
+}
+
+export function classifyMemberEmail(data: Record<string, unknown>, email: string): EmailMatchType {
+  const target = normalizeEmail(email);
+  if (!target) return "unknown";
+
+  const primary = memberPrimaryEmail(data);
+  if (primary && primary === target) return "primary";
+
+  const emails = Array.isArray(data.emails)
+    ? data.emails.map((item) => normalizeEmail(item)).filter(Boolean)
+    : [];
+  if (emails.includes(target)) return "secondary";
+
+  const accessEmails = Array.isArray(data.accessEmails)
+    ? data.accessEmails.map((item) => normalizeEmail(item)).filter(Boolean)
+    : [];
+  if (accessEmails.includes(target)) return "secondary";
+
+  return "unknown";
+}
+
+export async function findMemberByEmail(db: Firestore, email: string) {
+  const normalized = normalizeEmail(email);
+  if (!normalized) return null;
+
+  const accessQuery = query(collection(db, "members"), where("accessEmails", "array-contains", normalized));
+  const accessSnap = await getDocs(accessQuery);
+  if (!accessSnap.empty) {
+    const docSnap = accessSnap.docs[0];
+    const data = docSnap.data() as Record<string, unknown>;
+    return {
+      id: docSnap.id,
+      data,
+      role: normalizeRole((data.auth as { role?: string } | undefined)?.role),
+      emailMatch: classifyMemberEmail(data, normalized),
+    };
+  }
+
+  const emailQuery = query(collection(db, "members"), where("email", "==", email));
+  const emailSnap = await getDocs(emailQuery);
+  if (!emailSnap.empty) {
+    const docSnap = emailSnap.docs[0];
+    const data = docSnap.data() as Record<string, unknown>;
+    return {
+      id: docSnap.id,
+      data,
+      role: normalizeRole((data.auth as { role?: string } | undefined)?.role),
+      emailMatch: classifyMemberEmail(data, normalized),
+    };
+  }
+
+  return null;
 }
 
 export async function upsertMemberAccess(

@@ -79,6 +79,7 @@ export default function CollectionEditor({
   description,
   fields,
 }: EditorProps) {
+  const createLabel = collectionName === "categories" ? "Nouvelle catégorie" : "Nouveau document";
   const [docs, setDocs] = useState<DocEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState<string>("");
@@ -181,7 +182,7 @@ export default function CollectionEditor({
           className="rounded-full bg-ink px-5 py-2 text-sm font-semibold text-stone"
           onClick={() => setCreateOpen(true)}
         >
-          Nouveau document
+          {createLabel}
         </button>
       </div>
 

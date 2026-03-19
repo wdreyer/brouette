@@ -44,10 +44,10 @@ export default function InvitesEditor() {
         const data = docSnap.data() as {
           firstName?: string;
           lastName?: string;
-          accountLabel?: string;
+          email?: string;
         };
         const fullName = `${data.firstName ?? ""} ${data.lastName ?? ""}`.trim();
-        const label = data.accountLabel?.trim() || fullName || docSnap.id;
+        const label = fullName || data.email || docSnap.id;
         return { id: docSnap.id, label };
       }),
     );
@@ -111,7 +111,7 @@ export default function InvitesEditor() {
     <div className="flex flex-col gap-6">
       <div className="rounded-3xl border border-clay/70 bg-white/80 p-6 shadow-card">
         <h2 className="font-serif text-2xl">Invitations</h2>
-        <p className="mt-2 text-sm text-ink/70">Creer des invitations pour s'inscrire.</p>
+        <p className="mt-2 text-sm text-ink/70">Créer des invitations pour s'inscrire.</p>
       </div>
 
       <div className="rounded-2xl border border-clay/70 bg-white/90 p-4 shadow-card">
@@ -125,14 +125,14 @@ export default function InvitesEditor() {
             />
           </label>
           <label className="flex flex-col gap-2 text-sm font-semibold text-ink/70">
-            Role
+            Rôle
             <select
               className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
               value={role}
               onChange={(event) => setRole(event.target.value)}
             >
               <option value="member">Membre</option>
-              <option value="referent">Referent</option>
+              <option value="referent">Référent</option>
               <option value="admin">Admin</option>
             </select>
           </label>
@@ -145,13 +145,13 @@ export default function InvitesEditor() {
             />
           </label>
           <label className="flex flex-col gap-2 text-sm font-semibold text-ink/70 md:col-span-2">
-            Compte partage (optionnel)
+            Membre lié (optionnel)
             <select
               className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
               value={memberId}
               onChange={(event) => setMemberId(event.target.value)}
             >
-              <option value="">Nouveau compte membre</option>
+              <option value="">Créer un nouveau membre</option>
               {members.map((member) => (
                 <option key={member.id} value={member.id}>
                   {member.label}
@@ -164,7 +164,7 @@ export default function InvitesEditor() {
           className="mt-4 rounded-full bg-ink px-5 py-2 text-sm font-semibold text-stone"
           onClick={createInvite}
         >
-          Creer l'invitation
+          Créer l'invitation
         </button>
         {message ? <p className="mt-2 text-sm text-ink/70">{message}</p> : null}
       </div>
@@ -174,20 +174,20 @@ export default function InvitesEditor() {
           Compte test
         </p>
         <p className="mt-2 text-sm text-ink/70">
-          Cree une invitation pour <span className="font-semibold">test@brouette.local</span> (role
-          adherent).
+          Crée une invitation pour <span className="font-semibold">test@brouette.local</span> (rôle
+          adhérent).
         </p>
         <button
           className="mt-3 rounded-full border border-ink/20 px-4 py-2 text-sm font-semibold"
           onClick={createTestInvite}
         >
-          Creer le compte test
+          Créer le compte test
         </button>
         {testInvite ? (
           <div className="mt-3 text-xs text-ink/70">
             <div>Invite: {testInvite.token}</div>
             <div>URL: {testInvite.url}</div>
-            <div>Mot de passe: choisis-en un (ex: test1234) lors de l'inscription.</div>
+            <div>Mot de passe : choisis-en un (ex: test1234) lors de l'inscription.</div>
           </div>
         ) : null}
       </div>
@@ -198,7 +198,7 @@ export default function InvitesEditor() {
             <thead className="border-b border-clay/70 bg-stone/80">
               <tr>
                 <th className="px-4 py-3 font-semibold text-ink">Email</th>
-                <th className="px-4 py-3 font-semibold text-ink">Role</th>
+                <th className="px-4 py-3 font-semibold text-ink">Rôle</th>
                 <th className="px-4 py-3 font-semibold text-ink">Token</th>
                 <th className="px-4 py-3 font-semibold text-ink">Compte</th>
                 <th className="px-4 py-3 font-semibold text-ink">Statut</th>
@@ -212,14 +212,14 @@ export default function InvitesEditor() {
                   <td className="px-4 py-3">{invite.role ?? "member"}</td>
                   <td className="px-4 py-3">{invite.token ?? "-"}</td>
                   <td className="px-4 py-3">{invite.memberId ?? "-"}</td>
-                  <td className="px-4 py-3">{invite.used ? "Utilisee" : "En attente"}</td>
+                  <td className="px-4 py-3">{invite.used ? "Utilisée" : "En attente"}</td>
                   <td className="px-4 py-3">
                     {!invite.used ? (
                       <button
                         className="rounded-full border border-ink/20 px-3 py-1 text-xs font-semibold"
                         onClick={() => revokeInvite(invite.id)}
                       >
-                        Revoquer
+                        Révoquer
                       </button>
                     ) : null}
                   </td>

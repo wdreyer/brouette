@@ -78,7 +78,7 @@ export default function SalesStatusPanel() {
       ) : (
         <div className="flex flex-wrap items-center gap-3 text-sm text-ink/72">
           <span className="rounded-full border border-ember/30 bg-ember/10 px-3 py-1 text-xs font-semibold text-ember">
-            Vente fermee
+            Vente fermée
           </span>
           <span>Aucune vente ouverte pour le moment.</span>
         </div>

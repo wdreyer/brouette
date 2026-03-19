@@ -7,8 +7,8 @@ import { Toaster } from "sonner";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Brouette - Coop Locale",
-  description: "Catalogue et commandes de la coop Brouette.",
+  title: "Brouette - Coop locale",
+  description: "Catalogue et commandes de la coopérative Brouette.",
 };
 
 export default function RootLayout({

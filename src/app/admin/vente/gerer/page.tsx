@@ -13,6 +13,7 @@ import {
   where,
 } from "firebase/firestore";
 import { firebaseDb } from "@/lib/firebase/client";
+import { isDistributionOpenNow } from "@/lib/distributions";
 
 type FireDate = { toDate?: () => Date };
 
@@ -98,7 +99,9 @@ export default function AdminSaleProducerManagerPage() {
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
   const [producer, setProducer] = useState<Producer | null>(null);
+  const [distributionLocked, setDistributionLocked] = useState(false);
   const [saleDates, setSaleDates] = useState<{ key: string; label: string }[]>([]);
+  const [allowedDateKeys, setAllowedDateKeys] = useState<string[]>([]);
   const [draftProducts, setDraftProducts] = useState<ProductDraft[]>([]);
   const [showAddProductModal, setShowAddProductModal] = useState(false);
   const [addDraft, setAddDraft] = useState<AddProductDraft>({
@@ -112,12 +115,16 @@ export default function AdminSaleProducerManagerPage() {
   });
 
   const saleDateKeys = useMemo(() => saleDates.map((date) => date.key), [saleDates]);
+  const editableDateKeys = useMemo(
+    () => (allowedDateKeys.length ? allowedDateKeys : saleDateKeys),
+    [allowedDateKeys, saleDateKeys],
+  );
 
   const createDraftVariant = (): VariantDraft => ({
     tempId: newId(),
     label: "Nouvelle variante",
     price: 0,
-    activeDates: [...saleDateKeys],
+    activeDates: [...editableDateKeys],
   });
 
   useEffect(() => {
@@ -126,9 +133,12 @@ export default function AdminSaleProducerManagerPage() {
       setLoading(true);
       let loadedSaleDateKeys: string[] = [];
 
-      const [producerSnap, distSnap, productSnap] = await Promise.all([
+      const [producerSnap, distSnap, calendarSnap, productSnap] = await Promise.all([
         getDoc(doc(firebaseDb, "producers", currentProducerId)),
         distributionId ? getDoc(doc(firebaseDb, "distributionDates", distributionId)) : Promise.resolve(null),
+        distributionId
+          ? getDoc(doc(firebaseDb, "distributionDates", distributionId, "calendarProducers", currentProducerId))
+          : Promise.resolve(null),
         getDocs(query(collection(firebaseDb, "products"), where("producerId", "==", currentProducerId))),
       ]);
 
@@ -139,7 +149,7 @@ export default function AdminSaleProducerManagerPage() {
       }
 
       if (distSnap?.exists()) {
-        const distData = distSnap.data() as { dates?: FireDate[] };
+        const distData = distSnap.data() as { dates?: FireDate[]; status?: string; closeAt?: FireDate };
         const dates = (distData.dates ?? [])
           .slice(0, 3)
           .map((item) => item.toDate?.())
@@ -154,8 +164,62 @@ export default function AdminSaleProducerManagerPage() {
         }));
         loadedSaleDateKeys = nextDates.map((item) => item.key);
         setSaleDates(nextDates);
+        setDistributionLocked(
+          isDistributionOpenNow({
+            id: distributionId || "distribution",
+            status: distData.status,
+            closeAt: distData.closeAt,
+          }),
+        );
       } else {
         setSaleDates([]);
+        setDistributionLocked(false);
+      }
+
+      const allowedFromCalendar =
+        calendarSnap?.exists() && Array.isArray((calendarSnap.data() as { activeDateKeys?: string[] }).activeDateKeys)
+          ? ((calendarSnap.data() as { activeDateKeys?: string[] }).activeDateKeys ?? []).filter((key) =>
+              loadedSaleDateKeys.includes(key),
+            )
+          : [];
+      setAllowedDateKeys(allowedFromCalendar);
+      const nextEditableDateKeys = allowedFromCalendar.length
+        ? allowedFromCalendar
+        : loadedSaleDateKeys;
+
+      const offersByVariant = new Map<string, string[]>();
+      if (distributionId) {
+        const offerSnap = await getDocs(
+          query(
+            collection(firebaseDb, "distributionDates", distributionId, "offerItems"),
+            where("producerId", "==", currentProducerId),
+          ),
+        );
+        offerSnap.docs.forEach((offerDoc) => {
+          const data = offerDoc.data() as {
+            productId?: string;
+            variantId?: string;
+            saleDateKey?: string;
+            dateIndex?: number;
+            active?: boolean;
+          };
+          if (data.active === false) return;
+          const productId = String(data.productId ?? "");
+          const variantId = String(data.variantId ?? "");
+          if (!productId || !variantId) return;
+          const resolvedDateKey =
+            typeof data.saleDateKey === "string" && data.saleDateKey
+              ? data.saleDateKey
+              : typeof data.dateIndex === "number"
+                ? loadedSaleDateKeys[data.dateIndex] ?? ""
+                : "";
+          if (!resolvedDateKey) return;
+          const mapKey = `${productId}:${variantId}`;
+          const current = offersByVariant.get(mapKey) ?? [];
+          if (!current.includes(resolvedDateKey)) {
+            offersByVariant.set(mapKey, [...current, resolvedDateKey]);
+          }
+        });
       }
 
       const variantsByProduct = new Map<string, VariantDraft[]>();
@@ -167,14 +231,17 @@ export default function AdminSaleProducerManagerPage() {
         const productId = productSnap.docs[index]?.id;
         if (!productId) return;
         const variants = variantSnap.docs.map((variantDoc) => {
-          const variantData = variantDoc.data() as { label?: string; price?: number; activeDates?: string[] };
-          const existingDates = Array.isArray(variantData.activeDates) ? variantData.activeDates : [];
+          const variantData = variantDoc.data() as { label?: string; price?: number };
+          const activeDates =
+            offersByVariant.get(`${productId}:${variantDoc.id}`)?.filter((key) =>
+              nextEditableDateKeys.includes(key),
+            ) ?? [];
           return {
             id: variantDoc.id,
             tempId: variantDoc.id,
             label: String(variantData.label ?? "Variante"),
             price: Number(variantData.price ?? 0),
-            activeDates: loadedSaleDateKeys.length ? [...loadedSaleDateKeys] : existingDates,
+            activeDates: activeDates.length > 0 ? activeDates : [...nextEditableDateKeys],
           } satisfies VariantDraft;
         });
         variantsByProduct.set(productId, variants);
@@ -204,7 +271,7 @@ export default function AdminSaleProducerManagerPage() {
           existingVariantIds: variants.map((variant) => variant.id!).filter(Boolean),
         });
       }
-      setDraftProducts(nextDrafts.length ? nextDrafts : [createDraftProductWithDates(loadedSaleDateKeys)]);
+      setDraftProducts(nextDrafts.length ? nextDrafts : [createDraftProductWithDates(nextEditableDateKeys)]);
       setLoading(false);
     };
 
@@ -233,7 +300,7 @@ export default function AdminSaleProducerManagerPage() {
         ...product,
         variants: product.variants.map((variant) => ({
           ...variant,
-          activeDates: selected ? [...saleDateKeys] : [],
+          activeDates: selected ? [...editableDateKeys] : [],
         })),
       })),
     );
@@ -252,6 +319,7 @@ export default function AdminSaleProducerManagerPage() {
     product.variants.every((variant) => variant.activeDates.includes(targetDateKey));
 
   const toggleProductDate = (productIndex: number, targetDateKey: string) => {
+    if (!editableDateKeys.includes(targetDateKey)) return;
     setDraftProducts((prev) =>
       prev.map((product, idx) => {
         if (idx !== productIndex) return product;
@@ -297,7 +365,7 @@ export default function AdminSaleProducerManagerPage() {
             tempId: newId(),
             label: addDraft.variantLabel.trim() || "Variante",
             price: Number.isFinite(price) ? price : 0,
-            activeDates: [...saleDateKeys],
+            activeDates: [...editableDateKeys],
           },
         ],
         existingVariantIds: [],
@@ -308,6 +376,10 @@ export default function AdminSaleProducerManagerPage() {
 
   const saveDraft = async () => {
     if (!currentProducerId) return;
+    if (distributionLocked) {
+      setMessage("Cette distribution est ouverte : modifications verrouillees.");
+      return;
+    }
     setSaving(true);
     setMessage("");
 
@@ -344,15 +416,17 @@ export default function AdminSaleProducerManagerPage() {
       const savedVariants: Array<{ id: string; label: string; price: number; activeDates: string[] }> = [];
       for (const variant of product.variants) {
         const variantId = variant.id ?? doc(collection(firebaseDb, "products", productId, "variants")).id;
+        const selectedActiveDates = Array.from(
+          new Set(variant.activeDates.filter((key) => editableDateKeys.includes(key))),
+        );
         const variantPayload = {
           label: variant.label.trim() || "Variante",
           price: Number(variant.price || 0),
-          activeDates: Array.from(new Set(variant.activeDates)),
         };
         keptVariantIds.add(variantId);
         const variantRef = doc(firebaseDb, "products", productId, "variants", variantId);
         batchOps.push((batch) => batch.set(variantRef, variantPayload, { merge: true }));
-        savedVariants.push({ id: variantId, ...variantPayload });
+        savedVariants.push({ id: variantId, ...variantPayload, activeDates: selectedActiveDates });
       }
 
       for (const existingId of product.existingVariantIds) {
@@ -455,10 +529,13 @@ export default function AdminSaleProducerManagerPage() {
 
       <section className="border border-ink/20 bg-stone/90 p-5">
         <div className="mb-4 flex flex-wrap gap-2">
-          <button className="rounded-md border border-ink/25 px-3 py-1.5 text-sm font-semibold" onClick={() => applyAllDates(true)}>Tout selectionner</button>
-          <button className="rounded-md border border-ink/25 px-3 py-1.5 text-sm font-semibold" onClick={() => applyAllDates(false)}>Tout deselectionner</button>
-          <button className="rounded-md border border-ink/25 px-3 py-1.5 text-sm font-semibold" onClick={openAddModal}>Ajouter un produit</button>
+          <button className="rounded-md border border-ink/25 px-3 py-1.5 text-sm font-semibold disabled:opacity-50" onClick={() => applyAllDates(true)} disabled={saving || distributionLocked}>Tout selectionner</button>
+          <button className="rounded-md border border-ink/25 px-3 py-1.5 text-sm font-semibold disabled:opacity-50" onClick={() => applyAllDates(false)} disabled={saving || distributionLocked}>Tout deselectionner</button>
+          <button className="rounded-md border border-ink/25 px-3 py-1.5 text-sm font-semibold disabled:opacity-50" onClick={openAddModal} disabled={saving || distributionLocked}>Ajouter un produit</button>
         </div>
+        {distributionLocked ? (
+          <p className="mb-3 text-sm font-semibold text-ember">Cette distribution est ouverte : edition verrouillee.</p>
+        ) : null}
 
         <div className="overflow-x-auto border border-ink/20">
           <table className="w-full min-w-[980px] text-sm">
@@ -519,11 +596,14 @@ export default function AdminSaleProducerManagerPage() {
                           <input
                             type="checkbox"
                             checked={product.variants[0]?.activeDates.includes(date.key)}
+                            disabled={!editableDateKeys.includes(date.key)}
                             onChange={() =>
                               updateDraftVariant(productIndex, 0, {
                                 activeDates: product.variants[0]?.activeDates.includes(date.key)
                                   ? product.variants[0].activeDates.filter((key) => key !== date.key)
-                                  : [...(product.variants[0]?.activeDates ?? []), date.key],
+                                  : editableDateKeys.includes(date.key)
+                                    ? [...(product.variants[0]?.activeDates ?? []), date.key]
+                                    : [...(product.variants[0]?.activeDates ?? [])],
                               })
                             }
                           />
@@ -531,6 +611,7 @@ export default function AdminSaleProducerManagerPage() {
                           <input
                             type="checkbox"
                             checked={isProductDateChecked(product, date.key)}
+                            disabled={!editableDateKeys.includes(date.key)}
                             onChange={() => toggleProductDate(productIndex, date.key)}
                           />
                         )}
@@ -571,7 +652,20 @@ export default function AdminSaleProducerManagerPage() {
                       </td>
                       {saleDates.map((date) => (
                         <td key={`${variant.tempId}-${date.key}`} className="px-2 py-2 text-center">
-                          <input type="checkbox" checked={variant.activeDates.includes(date.key)} onChange={() => updateDraftVariant(productIndex, variantIndex, { activeDates: variant.activeDates.includes(date.key) ? variant.activeDates.filter((key) => key !== date.key) : [...variant.activeDates, date.key] })} />
+                          <input
+                            type="checkbox"
+                            checked={variant.activeDates.includes(date.key)}
+                            disabled={!editableDateKeys.includes(date.key)}
+                            onChange={() =>
+                              updateDraftVariant(productIndex, variantIndex, {
+                                activeDates: variant.activeDates.includes(date.key)
+                                  ? variant.activeDates.filter((key) => key !== date.key)
+                                  : editableDateKeys.includes(date.key)
+                                    ? [...variant.activeDates, date.key]
+                                    : [...variant.activeDates],
+                              })
+                            }
+                          />
                         </td>
                       ))}
                       <td className="px-2 py-2 text-right">
@@ -635,7 +729,7 @@ export default function AdminSaleProducerManagerPage() {
 
       <div className="flex items-center justify-between">
         <p className="text-sm text-ink/70">{message}</p>
-        <button className="rounded-md bg-forest px-4 py-2 text-sm font-semibold text-white disabled:opacity-50" onClick={saveDraft} disabled={saving}>
+        <button className="rounded-md bg-forest px-4 py-2 text-sm font-semibold text-white disabled:opacity-50" onClick={saveDraft} disabled={saving || distributionLocked}>
           Enregistrer
         </button>
       </div>

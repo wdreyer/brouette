@@ -1,94 +1,265 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
-import { firebaseDb } from "@/lib/firebase/client";
+import { useEffect, useMemo, useState } from "react";
+import { updateEmail } from "firebase/auth";
+import { deleteField, doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
+import { useAuth } from "@/components/auth/AuthProvider";
+import { firebaseAuth, firebaseDb } from "@/lib/firebase/client";
 
 type ProfileData = {
   firstName: string;
   lastName: string;
-  email: string;
-  phone: string;
-  accountLabel: string;
-  sharedAccountEnabled: boolean;
-  secondaryFirstName: string;
-  secondaryLastName: string;
-  secondaryEmail: string;
-  secondaryPhone: string;
+  addressStreet: string;
+  addressPostalCode: string;
+  addressCity: string;
   membershipStatus: "active" | "inactive";
+  membershipPaymentStatus: "up_to_date" | "to_pay";
+  membershipJoinedAt: string;
+  emails: string[];
+  phones: string[];
 };
 
 const DEFAULT_PROFILE: ProfileData = {
   firstName: "",
   lastName: "",
-  email: "",
-  phone: "",
-  accountLabel: "",
-  sharedAccountEnabled: false,
-  secondaryFirstName: "",
-  secondaryLastName: "",
-  secondaryEmail: "",
-  secondaryPhone: "",
+  addressStreet: "",
+  addressPostalCode: "",
+  addressCity: "",
   membershipStatus: "active",
+  membershipPaymentStatus: "to_pay",
+  membershipJoinedAt: "",
+  emails: [""],
+  phones: [""],
 };
+
+function uniqueNonEmpty(values: string[]) {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  values.forEach((value) => {
+    const cleaned = value.trim();
+    if (!cleaned) return;
+    const key = cleaned.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(cleaned);
+  });
+  return out;
+}
+
+function toStringArray(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => String(item ?? "").trim()).filter(Boolean);
+}
+
+function includesEmail(values: string[], email: string) {
+  const target = email.trim().toLowerCase();
+  if (!target) return false;
+  return values.some((value) => value.trim().toLowerCase() === target);
+}
+
+function toDateString(value: unknown) {
+  if (!value) return "";
+  if (value instanceof Date) return value.toLocaleDateString("fr-FR");
+  if (typeof value === "object" && "toDate" in value) {
+    const date = (value as { toDate?: () => Date }).toDate?.();
+    if (date) return date.toLocaleDateString("fr-FR");
+  }
+  return "";
+}
 
 export default function ProfileForm({
   userId,
-  locked,
   onSaved,
+  requireEditToggle = false,
+  startInEdit = false,
+  canEditStatus = true,
 }: {
   userId: string;
-  locked?: boolean;
   onSaved?: () => void;
+  requireEditToggle?: boolean;
+  startInEdit?: boolean;
+  canEditStatus?: boolean;
 }) {
+  const { user, memberId } = useAuth();
   const [draft, setDraft] = useState<ProfileData>(DEFAULT_PROFILE);
+  const [initialDraft, setInitialDraft] = useState<ProfileData>(DEFAULT_PROFILE);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
+  const [editing, setEditing] = useState(startInEdit || !requireEditToggle);
+
+  const editable = useMemo(() => (!requireEditToggle ? true : editing), [editing, requireEditToggle]);
+  const isOwnProfile = useMemo(() => {
+    if (!user) return false;
+    if (memberId && memberId === userId) return true;
+    return user.uid === userId;
+  }, [memberId, user, userId]);
+  const authEmail = useMemo(
+    () => (isOwnProfile ? String(user?.email ?? "").trim() : ""),
+    [isOwnProfile, user?.email],
+  );
 
   useEffect(() => {
     const load = async () => {
       setLoading(true);
+      setMessage("");
       const snap = await getDoc(doc(firebaseDb, "members", userId));
       if (snap.exists()) {
-        const data = snap.data() as Partial<ProfileData>;
+        const data = snap.data() as Record<string, unknown>;
         const rawStatus = String(data.membershipStatus ?? "");
-        const normalizedStatus =
-          rawStatus === "inactive" || rawStatus === "non-adherent" ? "inactive" : "active";
-        setDraft({
-          firstName: data.firstName ?? "",
-          lastName: data.lastName ?? "",
-          email: data.email ?? "",
-          phone: data.phone ?? "",
-          accountLabel: String((data as Record<string, unknown>).accountLabel ?? ""),
-          sharedAccountEnabled: Boolean((data as Record<string, unknown>).sharedAccountEnabled),
-          secondaryFirstName: String((data as Record<string, unknown>).secondaryFirstName ?? ""),
-          secondaryLastName: String((data as Record<string, unknown>).secondaryLastName ?? ""),
-          secondaryEmail: String((data as Record<string, unknown>).secondaryEmail ?? ""),
-          secondaryPhone: String((data as Record<string, unknown>).secondaryPhone ?? ""),
-          membershipStatus: normalizedStatus,
-        });
+        const membershipStatus = rawStatus === "inactive" || rawStatus === "non-adherent" ? "inactive" : "active";
+        const rawPaymentStatus = String(data.membershipPaymentStatus ?? "");
+        const membershipPaymentStatus =
+          rawPaymentStatus === "up_to_date" || rawPaymentStatus === "a_jour" ? "up_to_date" : "to_pay";
+        const emails = uniqueNonEmpty([
+          ...toStringArray(data.emails),
+          String(data.email ?? "").trim(),
+        ]);
+        const phones = uniqueNonEmpty([
+          ...toStringArray(data.phones),
+          String(data.phone ?? "").trim(),
+        ]);
+        const next: ProfileData = {
+          firstName: String(data.firstName ?? ""),
+          lastName: String(data.lastName ?? ""),
+          addressStreet: String((data.address as { street?: string } | undefined)?.street ?? ""),
+          addressPostalCode: String((data.address as { postalCode?: string } | undefined)?.postalCode ?? ""),
+          addressCity: String((data.address as { city?: string } | undefined)?.city ?? ""),
+          membershipStatus,
+          membershipPaymentStatus,
+          membershipJoinedAt: toDateString(data.membershipJoinedAt ?? data.membershipPaymentDate),
+          emails: (() => {
+            const nextEmails = emails.length ? emails : [""];
+            if (!authEmail) return nextEmails;
+            const withoutAuth = nextEmails.filter(
+              (item) => item.trim().toLowerCase() !== authEmail.toLowerCase(),
+            );
+            return [authEmail, ...withoutAuth];
+          })(),
+          phones: phones.length ? phones : [""],
+        };
+        setDraft(next);
+        setInitialDraft(next);
       } else {
-        setDraft(DEFAULT_PROFILE);
+        const emptyProfile: ProfileData = {
+          ...DEFAULT_PROFILE,
+          emails: authEmail ? [authEmail] : [""],
+        };
+        setDraft(emptyProfile);
+        setInitialDraft(emptyProfile);
       }
+      setEditing(startInEdit || !requireEditToggle);
       setLoading(false);
     };
 
     load().catch(() => setLoading(false));
-  }, [userId]);
+  }, [userId, startInEdit, requireEditToggle, authEmail]);
+
+  const setEmailAt = (index: number, value: string) => {
+    setDraft((prev) => ({
+      ...prev,
+      emails: prev.emails.map((item, i) => (i === index ? value : item)),
+    }));
+  };
+
+  const setPhoneAt = (index: number, value: string) => {
+    setDraft((prev) => ({
+      ...prev,
+      phones: prev.phones.map((item, i) => (i === index ? value : item)),
+    }));
+  };
 
   const save = async () => {
     setMessage("");
-    const accessEmails = [draft.email, draft.secondaryEmail]
-      .map((value) => value.trim().toLowerCase())
-      .filter(Boolean);
-    const payload = {
-      ...draft,
-      accessEmails: Array.from(new Set(accessEmails)),
+    let emails = uniqueNonEmpty(draft.emails);
+    const phones = uniqueNonEmpty(draft.phones);
+    if (!draft.firstName.trim() || !draft.lastName.trim() || emails.length === 0 || phones.length === 0) {
+      setMessage("Renseigne prénom, nom, au moins un email et un téléphone.");
+      return;
+    }
+
+    if (isOwnProfile) {
+      const loginEmail = String(draft.emails[0] ?? "").trim();
+      if (!loginEmail) {
+        setMessage("L'email principal est obligatoire.");
+        return;
+      }
+      const currentEmail = String(firebaseAuth.currentUser?.email ?? "").trim();
+      if (
+        firebaseAuth.currentUser &&
+        currentEmail &&
+        loginEmail.toLowerCase() !== currentEmail.toLowerCase()
+      ) {
+        try {
+          await updateEmail(firebaseAuth.currentUser, loginEmail);
+        } catch (error) {
+          const code = (error as { code?: string } | null)?.code;
+          if (code === "auth/requires-recent-login") {
+            setMessage("Reconnecte-toi puis reessaie de modifier l'email principal.");
+            return;
+          }
+            setMessage("Impossible de modifier l'email principal.");
+            return;
+        }
+      }
+      emails = uniqueNonEmpty([loginEmail, ...emails.filter((item) => item !== loginEmail)]);
+      if (!includesEmail(emails, loginEmail)) {
+        emails = [loginEmail, ...emails];
+      }
+    } else if (authEmail && !includesEmail(emails, authEmail)) {
+      emails = [authEmail, ...emails];
+    }
+
+    const payload: Record<string, unknown> = {
+      firstName: draft.firstName.trim(),
+      lastName: draft.lastName.trim(),
+      address: {
+        street: draft.addressStreet.trim(),
+        postalCode: draft.addressPostalCode.trim(),
+        city: draft.addressCity.trim(),
+      },
+      emails,
+      phones,
+      email: emails[0],
+      phone: phones[0],
+      accessEmails: emails.map((item) => item.toLowerCase()),
+      accountLabel: deleteField(),
+      sharedAccountEnabled: deleteField(),
+      secondaryFirstName: deleteField(),
+      secondaryLastName: deleteField(),
+      secondaryEmail: deleteField(),
+      secondaryPhone: deleteField(),
       updatedAt: serverTimestamp(),
     };
+    if (canEditStatus) {
+      payload.membershipStatus = draft.membershipStatus;
+      payload.membershipPaymentStatus = draft.membershipPaymentStatus;
+      payload.membershipPaymentDate = deleteField();
+      payload.membershipJoinedAt =
+        draft.membershipPaymentStatus === "up_to_date" && draft.membershipJoinedAt
+          ? draft.membershipJoinedAt
+          : null;
+    }
+
     await setDoc(doc(firebaseDb, "members", userId), payload, { merge: true });
-    setMessage("Profil mis a jour.");
+
+    const nextDraft: ProfileData = {
+      ...draft,
+      emails,
+      phones,
+      firstName: draft.firstName.trim(),
+      lastName: draft.lastName.trim(),
+    };
+    setDraft(nextDraft);
+    setInitialDraft(nextDraft);
+    if (requireEditToggle) setEditing(false);
+    setMessage("Profil mis à jour.");
     onSaved?.();
+  };
+
+  const cancelEdit = () => {
+    setDraft(initialDraft);
+    setEditing(false);
+    setMessage("");
   };
 
   return (
@@ -97,141 +268,239 @@ export default function ProfileForm({
         <p className="text-sm text-ink/70">Chargement...</p>
       ) : (
         <>
-          <div className="grid gap-4 md:grid-cols-2">
-            <label className="flex flex-col gap-2 text-sm font-semibold text-ink/70">
-              Prenom
-              <input
-                className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
-                value={draft.firstName}
-                onChange={(event) => setDraft((prev) => ({ ...prev, firstName: event.target.value }))}
-                disabled={locked}
-              />
-            </label>
-            <label className="flex flex-col gap-2 text-sm font-semibold text-ink/70">
-              Nom
-              <input
-                className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
-                value={draft.lastName}
-                onChange={(event) => setDraft((prev) => ({ ...prev, lastName: event.target.value }))}
-                disabled={locked}
-              />
-            </label>
-            <label className="flex flex-col gap-2 text-sm font-semibold text-ink/70">
-              Email
-              <input
-                className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
-                type="email"
-                value={draft.email}
-                onChange={(event) => setDraft((prev) => ({ ...prev, email: event.target.value }))}
-                disabled={locked}
-              />
-            </label>
-            <label className="flex flex-col gap-2 text-sm font-semibold text-ink/70">
-              Telephone
-              <input
-                className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
-                value={draft.phone}
-                onChange={(event) => setDraft((prev) => ({ ...prev, phone: event.target.value }))}
-                disabled={locked}
-              />
-            </label>
-          </div>
+          {requireEditToggle ? (
+            <div className="flex flex-wrap gap-2">
+              {!editing ? (
+                <button
+                  className="w-fit rounded-full bg-ink px-5 py-2 text-sm font-semibold text-stone"
+                  onClick={() => setEditing(true)}
+                >
+                  Modifier
+                </button>
+              ) : (
+                <>
+                  <button
+                    className="w-fit rounded-full bg-ink px-5 py-2 text-sm font-semibold text-stone"
+                    onClick={save}
+                  >
+                    Enregistrer
+                  </button>
+                  <button
+                    className="w-fit rounded-full border border-ink/20 px-4 py-2 text-sm font-semibold"
+                    onClick={cancelEdit}
+                  >
+                    Annuler
+                  </button>
+                </>
+              )}
+            </div>
+          ) : null}
 
-          <div className="rounded-xl border border-clay/70 bg-stone/60 p-4">
-            <label className="flex items-center gap-2 text-sm font-semibold text-ink/70">
-              <input
-                type="checkbox"
-                checked={draft.sharedAccountEnabled}
-                onChange={(event) =>
-                  setDraft((prev) => ({ ...prev, sharedAccountEnabled: event.target.checked }))
-                }
-                disabled={locked}
-              />
-              Activer un compte partage (plusieurs acces sur la meme fiche)
-            </label>
-
-            <label className="mt-3 flex flex-col gap-2 text-sm font-semibold text-ink/70">
-              Nom du compte (ex: Famille Martin)
-              <input
-                className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
-                value={draft.accountLabel}
-                onChange={(event) => setDraft((prev) => ({ ...prev, accountLabel: event.target.value }))}
-                disabled={locked}
-              />
-            </label>
-
-            {draft.sharedAccountEnabled ? (
-              <div className="mt-4 grid gap-4 md:grid-cols-2">
+          {editable ? (
+            <>
+              <div className="grid gap-4 md:grid-cols-2">
                 <label className="flex flex-col gap-2 text-sm font-semibold text-ink/70">
-                  Prenom 2
+                  Prénom
                   <input
                     className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
-                    value={draft.secondaryFirstName}
-                    onChange={(event) =>
-                      setDraft((prev) => ({ ...prev, secondaryFirstName: event.target.value }))
-                    }
-                    disabled={locked}
+                    value={draft.firstName}
+                    onChange={(event) => setDraft((prev) => ({ ...prev, firstName: event.target.value }))}
                   />
                 </label>
                 <label className="flex flex-col gap-2 text-sm font-semibold text-ink/70">
-                  Nom 2
+                  Nom
                   <input
                     className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
-                    value={draft.secondaryLastName}
-                    onChange={(event) =>
-                      setDraft((prev) => ({ ...prev, secondaryLastName: event.target.value }))
-                    }
-                    disabled={locked}
-                  />
-                </label>
-                <label className="flex flex-col gap-2 text-sm font-semibold text-ink/70">
-                  Email 2
-                  <input
-                    className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
-                    type="email"
-                    value={draft.secondaryEmail}
-                    onChange={(event) =>
-                      setDraft((prev) => ({ ...prev, secondaryEmail: event.target.value }))
-                    }
-                    disabled={locked}
-                  />
-                </label>
-                <label className="flex flex-col gap-2 text-sm font-semibold text-ink/70">
-                  Telephone 2
-                  <input
-                    className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
-                    value={draft.secondaryPhone}
-                    onChange={(event) =>
-                      setDraft((prev) => ({ ...prev, secondaryPhone: event.target.value }))
-                    }
-                    disabled={locked}
+                    value={draft.lastName}
+                    onChange={(event) => setDraft((prev) => ({ ...prev, lastName: event.target.value }))}
                   />
                 </label>
               </div>
-            ) : null}
-          </div>
 
-          <label className="flex flex-col gap-2 text-sm font-semibold text-ink/70">
-            Statut
-            <select
-              className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
-              value={draft.membershipStatus}
-              onChange={(event) =>
-                setDraft((prev) => ({
-                  ...prev,
-                  membershipStatus: event.target.value as ProfileData["membershipStatus"],
-                }))
-              }
-              disabled={locked}
-            >
-              <option value="active">Actif</option>
-              <option value="inactive">Non</option>
-            </select>
-          </label>
+              <div className="grid gap-4 md:grid-cols-3">
+                <label className="flex flex-col gap-2 text-sm font-semibold text-ink/70 md:col-span-2">
+                  Adresse
+                  <input
+                    className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
+                    value={draft.addressStreet}
+                    onChange={(event) => setDraft((prev) => ({ ...prev, addressStreet: event.target.value }))}
+                  />
+                </label>
+                <label className="flex flex-col gap-2 text-sm font-semibold text-ink/70">
+                  Code postal
+                  <input
+                    className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
+                    value={draft.addressPostalCode}
+                    onChange={(event) => setDraft((prev) => ({ ...prev, addressPostalCode: event.target.value }))}
+                  />
+                </label>
+                <label className="flex flex-col gap-2 text-sm font-semibold text-ink/70 md:col-span-3">
+                  Ville
+                  <input
+                    className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
+                    value={draft.addressCity}
+                    onChange={(event) => setDraft((prev) => ({ ...prev, addressCity: event.target.value }))}
+                  />
+                </label>
+              </div>
+
+              <div className="rounded-xl border border-clay/70 bg-stone/60 p-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">Emails</p>
+                <div className="mt-3 flex flex-col gap-2">
+                  {draft.emails.map((value, index) => (
+                    <div key={`email-${index}`} className="flex items-center gap-2">
+                      <input
+                        className="flex-1 rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
+                        type="email"
+                        value={value}
+                        onChange={(event) => setEmailAt(index, event.target.value)}
+                      />
+                      {draft.emails.length > 1 && !(isOwnProfile && index === 0) ? (
+                        <button
+                          className="rounded-full border border-ink/20 px-3 py-2 text-xs font-semibold"
+                          onClick={() =>
+                            setDraft((prev) => ({
+                              ...prev,
+                              emails: prev.emails.filter((_, i) => i !== index),
+                            }))
+                          }
+                        >
+                          Retirer
+                        </button>
+                      ) : null}
+                      {isOwnProfile && index === 0 ? (
+                        <span className="rounded-full border border-forest/30 bg-forest/10 px-2 py-1 text-[11px] font-semibold text-forest">
+                          Email principal
+                        </span>
+                      ) : null}
+                    </div>
+                  ))}
+                  <button
+                    className="w-fit rounded-full border border-ink/20 px-3 py-1.5 text-xs font-semibold"
+                    onClick={() => setDraft((prev) => ({ ...prev, emails: [...prev.emails, ""] }))}
+                  >
+                    + Ajouter un email
+                  </button>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-clay/70 bg-stone/60 p-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">Téléphones</p>
+                <div className="mt-3 flex flex-col gap-2">
+                  {draft.phones.map((value, index) => (
+                    <div key={`phone-${index}`} className="flex items-center gap-2">
+                      <input
+                        className="flex-1 rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
+                        value={value}
+                        onChange={(event) => setPhoneAt(index, event.target.value)}
+                      />
+                      {draft.phones.length > 1 ? (
+                        <button
+                          className="rounded-full border border-ink/20 px-3 py-2 text-xs font-semibold"
+                          onClick={() =>
+                            setDraft((prev) => ({
+                              ...prev,
+                              phones: prev.phones.filter((_, i) => i !== index),
+                            }))
+                          }
+                        >
+                          Retirer
+                        </button>
+                      ) : null}
+                    </div>
+                  ))}
+                  <button
+                    className="w-fit rounded-full border border-ink/20 px-3 py-1.5 text-xs font-semibold"
+                    onClick={() => setDraft((prev) => ({ ...prev, phones: [...prev.phones, ""] }))}
+                  >
+                    + Ajouter un téléphone
+                  </button>
+                </div>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="rounded-xl border border-clay/70 bg-stone/40 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">Prénom</p>
+                  <p className="mt-1 text-sm text-ink">{draft.firstName || "-"}</p>
+                </div>
+                <div className="rounded-xl border border-clay/70 bg-stone/40 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">Nom</p>
+                  <p className="mt-1 text-sm text-ink">{draft.lastName || "-"}</p>
+                </div>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-3">
+                <div className="rounded-xl border border-clay/70 bg-stone/40 p-3 md:col-span-2">
+                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">Adresse</p>
+                  <p className="mt-1 text-sm text-ink">{draft.addressStreet || "-"}</p>
+                </div>
+                <div className="rounded-xl border border-clay/70 bg-stone/40 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">Code postal</p>
+                  <p className="mt-1 text-sm text-ink">{draft.addressPostalCode || "-"}</p>
+                </div>
+                <div className="rounded-xl border border-clay/70 bg-stone/40 p-3 md:col-span-3">
+                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">Ville</p>
+                  <p className="mt-1 text-sm text-ink">{draft.addressCity || "-"}</p>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-clay/70 bg-stone/60 p-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">Emails</p>
+                <div className="mt-3 flex flex-col gap-2">
+                  {uniqueNonEmpty(draft.emails).map((value, index) => (
+                    <div key={`email-view-${index}`} className="flex items-center justify-between rounded-lg border border-clay/60 bg-white px-3 py-2">
+                      <span className="text-sm text-ink">{value}</span>
+                      {isOwnProfile && index === 0 ? (
+                        <span className="rounded-full border border-forest/30 bg-forest/10 px-2 py-1 text-[11px] font-semibold text-forest">
+                          Principal
+                        </span>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-clay/70 bg-stone/60 p-4">
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">Téléphones</p>
+                <div className="mt-3 flex flex-col gap-2">
+                  {uniqueNonEmpty(draft.phones).map((value, index) => (
+                    <div key={`phone-view-${index}`} className="rounded-lg border border-clay/60 bg-white px-3 py-2 text-sm text-ink">
+                      {value}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
+
+          <div className="grid gap-4 rounded-xl border border-clay/70 bg-stone/50 p-4 md:grid-cols-2">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">Statut</p>
+              <p className="mt-1 text-sm font-semibold text-ink">
+                {draft.membershipStatus === "inactive" ? "Inactif" : "Actif"}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">Adhésion</p>
+              <p className="mt-1 text-sm font-semibold text-ink">
+                {draft.membershipPaymentStatus === "up_to_date" ? "A jour" : "A payer"}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">Date adhésion</p>
+              <p className="mt-1 text-sm text-ink">
+                {draft.membershipPaymentStatus === "up_to_date" && draft.membershipJoinedAt
+                  ? draft.membershipJoinedAt
+                  : "-"}
+              </p>
+            </div>
+          </div>
 
           {message ? <p className="text-sm text-moss">{message}</p> : null}
 
-          {!locked ? (
+          {!requireEditToggle ? (
             <button
               className="w-fit rounded-full bg-ink px-5 py-2 text-sm font-semibold text-stone"
               onClick={save}

@@ -5,12 +5,13 @@ import { useRouter, useSearchParams } from "next/navigation";
 import {
   createUserWithEmailAndPassword,
   sendPasswordResetEmail,
+  signOut,
   signInWithEmailAndPassword,
 } from "firebase/auth";
-import { collection, doc, getDocs, query, setDoc, serverTimestamp, updateDoc, where } from "firebase/firestore";
+import { addDoc, collection, doc, getDocs, query, setDoc, serverTimestamp, updateDoc, where } from "firebase/firestore";
 import { firebaseAuth, firebaseDb } from "@/lib/firebase/client";
 import { useAuth } from "@/components/auth/AuthProvider";
-import { findMemberByUser, upsertMemberAccess } from "@/lib/members";
+import { findMemberByEmail, findMemberByUser, upsertMemberAccess } from "@/lib/members";
 
 const ADHESION_EMAIL = "contact@labrouetteetlepanier.fr";
 
@@ -23,21 +24,21 @@ function authErrorMessage(error: unknown) {
     case "auth/invalid-credential":
       return "Email ou mot de passe incorrect.";
     case "auth/user-disabled":
-      return "Ce compte est desactive.";
+      return "Ce compte est désactivé.";
     case "auth/too-many-requests":
-      return "Trop de tentatives. Reessaie plus tard.";
+      return "Trop de tentatives. Réessaie plus tard.";
     case "auth/email-already-in-use":
-      return "Cet email est deja utilise.";
+      return "Cet email est déjà utilisé.";
     case "auth/weak-password":
-      return "Mot de passe trop faible (minimum 6 caracteres).";
+      return "Mot de passe trop faible (minimum 6 caractères).";
     case "auth/operation-not-allowed":
-      return "L'inscription par email/mot de passe n'est pas activee sur Firebase.";
+      return "L'inscription par email/mot de passe n'est pas activée sur Firebase.";
     case "permission-denied":
-      return "Droits insuffisants sur la base. Verifie les regles Firestore.";
+      return "Droits insuffisants sur la base. Vérifie les règles Firestore.";
     case "unavailable":
-      return "Service temporairement indisponible. Reessaie dans un instant.";
+      return "Service temporairement indisponible. Réessaie dans un instant.";
     default:
-      return String((error as { message?: string }).message ?? "Une erreur est survenue. Reessaie.");
+      return String((error as { message?: string }).message ?? "Une erreur est survenue. Réessaie.");
   }
 }
 
@@ -84,8 +85,30 @@ export default function AuthClient() {
     setResetSent(false);
     try {
       const cred = await signInWithEmailAndPassword(firebaseAuth, email, password);
+      const loginEmail = String(cred.user.email ?? email).trim().toLowerCase();
+      const memberEmailMatch = await findMemberByEmail(firebaseDb, loginEmail);
+      if (memberEmailMatch?.emailMatch === "secondary") {
+        await signOut(firebaseAuth);
+        setMessage(
+          "Vous essayez de vous connecter avec un email secondaire. Utilisez l'email principal du compte.",
+        );
+        return;
+      }
       await redirectByRole(cred.user);
     } catch (error) {
+      try {
+        await addDoc(collection(firebaseDb, "authLoginAttempts"), {
+          email: email.trim().toLowerCase(),
+          success: false,
+          code:
+            error && typeof error === "object" && "code" in error
+              ? String((error as { code?: string }).code ?? "")
+              : "",
+          createdAt: serverTimestamp(),
+        });
+      } catch {
+        // ignore logging failure
+      }
       setMessage(authErrorMessage(error));
     } finally {
       setLoading(false);
@@ -106,14 +129,14 @@ export default function AuthClient() {
         query(collection(firebaseDb, "invites"), where("token", "==", token), where("used", "==", false)),
       );
       if (inviteSnap.empty) {
-        setMessage("Invitation invalide ou deja utilisee.");
+        setMessage("Invitation invalide ou déjà utilisée.");
         setLoading(false);
         return;
       }
       const inviteDoc = inviteSnap.docs[0];
       const invite = inviteDoc.data() as { email?: string; role?: string; memberId?: string };
       if (invite.email && invite.email.toLowerCase() !== email.toLowerCase()) {
-        setMessage("Cette invitation est liee a un autre email.");
+        setMessage("Cette invitation est liée à un autre email.");
         setLoading(false);
         return;
       }
@@ -147,6 +170,8 @@ export default function AuthClient() {
         doc(firebaseDb, "members", targetMemberId),
         {
           email,
+          emails: [email],
+          accessEmails: [email.trim().toLowerCase()],
           auth: { uid: cred.user.uid, role },
           createdAt: serverTimestamp(),
         },
@@ -187,7 +212,7 @@ export default function AuthClient() {
       });
       setResetSent(true);
       setMessage(
-        "Si ce compte existe, un lien de reinitialisation vient d'etre envoye. Verifie aussi tes spams.",
+        "Si ce compte existe, un lien de réinitialisation vient d'être envoyé. Vérifie aussi tes spams.",
       );
     } catch (error) {
       setMessage(authErrorMessage(error));
@@ -205,14 +230,14 @@ export default function AuthClient() {
             ? "Se connecter"
             : mode === "signup"
               ? "Activer mon compte"
-              : "Reinitialiser le mot de passe"}
+              : "Réinitialiser le mot de passe"}
         </h1>
         <p className="mt-2 text-sm text-ink/70">
           {mode === "login"
-            ? "Connecte-toi pour acceder au catalogue."
+            ? "Connecte-toi pour accéder au catalogue."
             : mode === "signup"
               ? "Un compte est possible uniquement sur invitation."
-              : "Saisis ton email et recois un lien de reinitialisation."}
+              : "Saisis ton email et reçois un lien de réinitialisation."}
         </p>
       </section>
 
@@ -286,7 +311,7 @@ export default function AuthClient() {
                 }}
                 disabled={loading}
               >
-                Mot de passe oublie ?
+                Mot de passe oublié ?
               </button>
             ) : null}
           </>
@@ -311,7 +336,7 @@ export default function AuthClient() {
               onClick={handleSignup}
               disabled={loading}
             >
-              {loading ? "Activation..." : "Creer le compte"}
+              {loading ? "Activation..." : "Créer le compte"}
             </button>
           ) : (
             <button
@@ -322,7 +347,7 @@ export default function AuthClient() {
                 setResetSent(false);
               }}
             >
-              Retour connexion
+              Retour à la connexion
             </button>
           )}
           {mode !== "forgot" ? (
@@ -334,7 +359,7 @@ export default function AuthClient() {
                 setResetSent(false);
               }}
             >
-              {mode === "login" ? "J'ai une invitation" : "J'ai deja un compte"}
+              {mode === "login" ? "J'ai une invitation" : "J'ai déjà un compte"}
             </button>
           ) : null}
         </div>
@@ -342,17 +367,17 @@ export default function AuthClient() {
 
       <section className="rounded-xl border border-clay/70 bg-white/95 p-6 shadow-card">
         <p className="text-[11px] font-semibold uppercase tracking-[0.32em] text-ink/60">
-          Pas encore adherent ?
+          Pas encore adhérent ?
         </p>
-        <h2 className="mt-2 font-serif text-2xl">Decouvrir la coop</h2>
+        <h2 className="mt-2 font-serif text-2xl">Découvrir la coop</h2>
         <p className="mt-2 text-sm text-ink/70">
-          L'inscription est reservee aux adherents invites. Pour rejoindre la coop ou obtenir une
-          invitation, contacte l'equipe ou viens nous rencontrer lors d'une distribution.
+          L'inscription est réservée aux adhérents invités. Pour rejoindre la coop ou obtenir une
+          invitation, contacte l'équipe ou viens nous rencontrer lors d'une distribution.
         </p>
         <div className="mt-4 flex flex-wrap gap-3">
           <a
             className="rounded-full border border-ink/20 bg-white px-4 py-2 text-sm font-semibold text-ink"
-            href={`mailto:${ADHESION_EMAIL}?subject=${encodeURIComponent("Demande d'adhesion")}`}
+            href={`mailto:${ADHESION_EMAIL}?subject=${encodeURIComponent("Demande d'adhésion")}`}
           >
             Nous contacter
           </a>

@@ -9,6 +9,7 @@ import {
   collectionGroup,
   deleteDoc,
   doc,
+  getDoc,
   getDocs,
   setDoc,
   updateDoc,
@@ -16,11 +17,22 @@ import {
 } from "firebase/firestore";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { firebaseDb } from "@/lib/firebase/client";
-import { distributionLabel, isOpenStatus, pickOpenDistribution } from "@/lib/distributions";
+import {
+  distributionLabel,
+  isDistributionExpired,
+  isOpenStatus,
+  pickOpenDistribution,
+} from "@/lib/distributions";
 
 type FireDate = { toDate?: () => Date };
 
-type Distribution = { id: string; status?: string; dates?: FireDate[]; openedAt?: FireDate };
+type Distribution = {
+  id: string;
+  status?: string;
+  dates?: FireDate[];
+  openedAt?: FireDate;
+  closeAt?: FireDate;
+};
 type Producer = {
   id: string;
   name?: string;
@@ -29,7 +41,7 @@ type Producer = {
   coopStatus?: string | null;
 };
 type Member = { id: string; firstName?: string; lastName?: string };
-type Order = { distributionId?: string | null; totals?: { totalAmount?: number } };
+type Order = { distributionId?: string | null; memberId?: string | null; totals?: { totalAmount?: number } };
 type Variant = { id: string; label: string; price: number; activeDates: string[] };
 type Product = {
   id: string;
@@ -41,6 +53,14 @@ type Product = {
   variants: Variant[];
 };
 
+type DistributionMetrics = {
+  producersActive: number;
+  producersValidated: number;
+  offersCount: number;
+  productsCount: number;
+  ordersCount: number;
+};
+
 type ProducerRow = {
   producerId: string;
   producerName: string;
@@ -49,6 +69,11 @@ type ProducerRow = {
   validatedByReferent: boolean;
   validatedAtLabel: string;
   productCount: number;
+};
+
+type CalendarProducerLink = {
+  producerId?: string;
+  activeDateKeys?: string[];
 };
 
 type VariantDraft = {
@@ -91,6 +116,11 @@ const newId = () =>
   typeof crypto !== "undefined" && "randomUUID" in crypto
     ? crypto.randomUUID()
     : `tmp_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+const sameStringSet = (left: string[], right: string[]) => {
+  if (left.length !== right.length) return false;
+  const rightSet = new Set(right);
+  return left.every((item) => rightSet.has(item));
+};
 
 export default function OpenSalesWizard() {
   const router = useRouter();
@@ -98,6 +128,7 @@ export default function OpenSalesWizard() {
   const isAdmin = effectiveRole === "admin";
   const isReferent = effectiveRole === "referent";
   const canManageAdmin = isAdmin || isReferent;
+  const canManageLifecycle = isAdmin;
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -108,8 +139,15 @@ export default function OpenSalesWizard() {
   const [membersById, setMembersById] = useState<Record<string, Member>>({});
   const [productsByProducer, setProductsByProducer] = useState<Record<string, Product[]>>({});
   const [rows, setRows] = useState<ProducerRow[]>([]);
-  const [targetId, setTargetId] = useState("");
-  const [orderStats, setOrderStats] = useState<Record<string, { count: number; amount: number }>>({});
+  const [saleOverview, setSaleOverview] = useState({
+    offerCount: 0,
+    offerProducerCount: 0,
+    orderCount: 0,
+    memberCount: 0,
+    revenue: 0,
+    averageBasket: 0,
+  });
+  const [distributionMetrics, setDistributionMetrics] = useState<Record<string, DistributionMetrics>>({});
 
   const [flowOpen, setFlowOpen] = useState(false);
   const [flowProducerIds, setFlowProducerIds] = useState<string[]>([]);
@@ -117,11 +155,20 @@ export default function OpenSalesWizard() {
   const [draftProducts, setDraftProducts] = useState<ProductDraft[]>([]);
 
   const openDistribution = useMemo(() => pickOpenDistribution(distributions), [distributions]);
-  const planned = useMemo(() => distributions.filter((d) => isPlanned(d.status)), [distributions]);
-  const targetDistribution = useMemo(
-    () => distributions.find((d) => d.id === targetId) ?? openDistribution ?? planned[0] ?? null,
-    [distributions, targetId, openDistribution, planned],
+  const plannedDistributions = useMemo(
+    () =>
+      distributions
+        .filter((distribution) => isPlanned(distribution.status))
+        .sort(
+          (left, right) =>
+            (toDate(left.dates?.[0]) ?? new Date(0)).getTime() -
+            (toDate(right.dates?.[0]) ?? new Date(0)).getTime(),
+        ),
+    [distributions],
   );
+  const nextPlannedDistribution = plannedDistributions[0] ?? null;
+  // Preparation is always done on the next planned distribution.
+  const targetDistribution = useMemo(() => nextPlannedDistribution ?? null, [nextPlannedDistribution]);
   const saleDates = useMemo(
     () =>
       ((targetDistribution?.dates ?? []).slice(0, 3).map((d) => toDate(d)).filter(Boolean) as Date[]).map((d) => ({
@@ -148,6 +195,7 @@ export default function OpenSalesWizard() {
       producerList: Producer[],
       memberMap: Record<string, Member>,
       productMap: Record<string, Product[]>,
+      distributionDateKeys: string[],
     ) => {
       if (!distributionId) {
         setRows([]);
@@ -158,15 +206,38 @@ export default function OpenSalesWizard() {
       producerList.forEach((producer) => {
         producerById[producer.id] = producer;
       });
-      const producerIds = Object.keys(productMap).filter(
-        (id) => (productMap[id] ?? []).length > 0 && Boolean(producerById[id]),
+      const calendarSnap = await getDocs(
+        collection(firebaseDb, "distributionDates", distributionId, "calendarProducers"),
       );
+      const calendarByProducer = new Map<string, string[]>();
+      calendarSnap.docs.forEach((calendarDoc) => {
+        const data = calendarDoc.data() as CalendarProducerLink;
+        const producerId = String(data.producerId ?? calendarDoc.id);
+        const activeDateKeys = Array.isArray(data.activeDateKeys)
+          ? data.activeDateKeys.filter((key): key is string => typeof key === "string")
+          : [];
+        calendarByProducer.set(producerId, activeDateKeys);
+      });
+      const useCalendar = calendarSnap.size > 0;
+
+      const producerIds = Object.keys(productMap).filter((id) => {
+        if ((productMap[id] ?? []).length === 0 || !producerById[id]) return false;
+        if (!useCalendar) return true;
+        const activeDateKeys = calendarByProducer.get(id) ?? [];
+        return activeDateKeys.some((key) => distributionDateKeys.includes(key));
+      });
       const producerSet = new Set(producerIds);
 
       const linkSnap = await getDocs(collection(firebaseDb, "distributionDates", distributionId, "producers"));
       const existing = new Map<
         string,
-        { validatedByReferent?: boolean; validatedAt?: FireDate; referentId?: string | null; referentName?: string | null }
+        {
+          validatedByReferent?: boolean;
+          validatedAt?: FireDate;
+          referentId?: string | null;
+          referentName?: string | null;
+          activeDateKeys?: string[];
+        }
       >();
       linkSnap.docs.forEach((linkDoc) => existing.set(linkDoc.id, linkDoc.data() as never));
 
@@ -183,6 +254,11 @@ export default function OpenSalesWizard() {
       const nextRows = producerIds.map((producerId) => {
         const producer = producerById[producerId];
         const dbRow = existing.get(producerId);
+        const activeDateKeys = (
+          useCalendar
+            ? (calendarByProducer.get(producerId) ?? []).filter((key) => distributionDateKeys.includes(key))
+            : [...distributionDateKeys]
+        ).sort();
         const referentId = producer?.referentId ?? dbRow?.referentId ?? null;
         const referentName =
           fullName(referentId ? memberMap[referentId] : null) ||
@@ -193,7 +269,8 @@ export default function OpenSalesWizard() {
         if (
           !dbRow ||
           referentId !== (dbRow?.referentId ?? null) ||
-          referentName !== String(dbRow?.referentName ?? "")
+          referentName !== String(dbRow?.referentName ?? "") ||
+          !sameStringSet(activeDateKeys, Array.isArray(dbRow?.activeDateKeys) ? dbRow.activeDateKeys : [])
         ) {
           batch.set(
             doc(firebaseDb, "distributionDates", distributionId, "producers", producerId),
@@ -202,6 +279,7 @@ export default function OpenSalesWizard() {
               referentId,
               referentName,
               active: true,
+              activeDateKeys,
               validatedByReferent: false,
               validatedAt: null,
             },
@@ -230,7 +308,7 @@ export default function OpenSalesWizard() {
   const load = useCallback(async () => {
     setLoading(true);
 
-    const [distSnap, producerSnap, memberSnap, orderSnap, productSnap, variantSnap] = await Promise.all([
+    const [initialDistSnap, producerSnap, memberSnap, orderSnap, productSnap, variantSnap] = await Promise.all([
       getDocs(collection(firebaseDb, "distributionDates")),
       getDocs(collection(firebaseDb, "producers")),
       getDocs(collection(firebaseDb, "members")),
@@ -239,7 +317,29 @@ export default function OpenSalesWizard() {
       getDocs(collectionGroup(firebaseDb, "variants")),
     ]);
 
-    const distItems = distSnap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Distribution, "id">) }));
+    let distSnap = initialDistSnap;
+    let distItems = distSnap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Distribution, "id">) }));
+
+    const autoClosed = distItems.filter((distribution) =>
+      isOpenStatus(distribution.status) && isDistributionExpired(distribution),
+    );
+
+    if (autoClosed.length > 0) {
+      const batch = writeBatch(firebaseDb);
+      autoClosed.forEach((distribution) => {
+        batch.update(doc(firebaseDb, "distributionDates", distribution.id), {
+          status: "finished",
+          closedAt: Timestamp.now(),
+        });
+      });
+      await batch.commit();
+      distSnap = await getDocs(collection(firebaseDb, "distributionDates"));
+      distItems = distSnap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Distribution, "id">) }));
+      setMessage(
+        `${autoClosed.length} vente(s) fermee(s) automatiquement (date limite depassee).`,
+      );
+    }
+
     distItems.sort(
       (a, b) =>
         (toDate(a.dates?.[0]) ?? new Date(0)).getTime() -
@@ -259,6 +359,7 @@ export default function OpenSalesWizard() {
     setMembersById(memberMap);
 
     const stats: Record<string, { count: number; amount: number }> = {};
+    const orders = orderSnap.docs.map((d) => d.data() as Order);
     orderSnap.docs.forEach((d) => {
       const order = d.data() as Order;
       const key = String(order.distributionId ?? "");
@@ -268,7 +369,6 @@ export default function OpenSalesWizard() {
       prev.amount += Number(order.totals?.totalAmount ?? 0);
       stats[key] = prev;
     });
-    setOrderStats(stats);
 
     const variantsByProduct: Record<string, Variant[]> = {};
     variantSnap.docs.forEach((d) => {
@@ -311,12 +411,108 @@ export default function OpenSalesWizard() {
     );
     setProductsByProducer(nextProductsByProducer);
 
+    const metricsEntries = await Promise.all(
+      distItems.map(async (distribution) => {
+        const [producersLinkSnap, offerSnap] = await Promise.all([
+          getDocs(collection(firebaseDb, "distributionDates", distribution.id, "producers")),
+          getDocs(collection(firebaseDb, "distributionDates", distribution.id, "offerItems")),
+        ]);
+
+        let producersActive = 0;
+        let producersValidated = 0;
+        producersLinkSnap.docs.forEach((linkDoc) => {
+          const data = linkDoc.data() as {
+            active?: boolean;
+            activeDateKeys?: string[];
+            validatedByReferent?: boolean;
+          };
+          const activeDateKeys = Array.isArray(data.activeDateKeys) ? data.activeDateKeys : [];
+          const isActive = data.active !== false && activeDateKeys.length > 0;
+          if (!isActive) return;
+          producersActive += 1;
+          if (data.validatedByReferent === true) producersValidated += 1;
+        });
+
+        const productIds = new Set(
+          offerSnap.docs
+            .map((docSnap) => String((docSnap.data() as { productId?: string }).productId ?? ""))
+            .filter(Boolean),
+        );
+
+        const ordersCount = orders.filter(
+          (order) => String(order.distributionId ?? "") === distribution.id,
+        ).length;
+
+        return [
+          distribution.id,
+          {
+            producersActive,
+            producersValidated,
+            offersCount: offerSnap.size,
+            productsCount: productIds.size,
+            ordersCount,
+          } satisfies DistributionMetrics,
+        ] as const;
+      }),
+    );
+    setDistributionMetrics(Object.fromEntries(metricsEntries));
+
     const open = pickOpenDistribution(distItems);
     const plannedDist = distItems.filter((d) => isPlanned(d.status));
-    const defaultTarget = open?.id ?? plannedDist[0]?.id ?? "";
-    setTargetId((prev) => (prev && distItems.some((d) => d.id === prev) ? prev : defaultTarget));
+    const defaultTarget = plannedDist[0]?.id ?? "";
 
-    await syncRows(defaultTarget, activeProducerItems, memberMap, nextProductsByProducer);
+    const defaultTargetDateKeys = (
+      (distItems.find((distribution) => distribution.id === defaultTarget)?.dates ?? [])
+        .slice(0, 3)
+        .map((date) => toDate(date))
+        .filter(Boolean) as Date[]
+    ).map((date) => dateKey(date));
+    await syncRows(defaultTarget, activeProducerItems, memberMap, nextProductsByProducer, defaultTargetDateKeys);
+
+    const overviewDistributionId = open?.id ?? "";
+    if (overviewDistributionId) {
+      const offerSnap = await getDocs(
+        collection(firebaseDb, "distributionDates", overviewDistributionId, "offerItems"),
+      );
+      const offerProductIds = new Set(
+        offerSnap.docs
+          .map((docSnap) => String((docSnap.data() as { productId?: string }).productId ?? ""))
+          .filter(Boolean),
+      );
+      const offerProducerIds = new Set(
+        offerSnap.docs
+          .map((docSnap) => String((docSnap.data() as { producerId?: string }).producerId ?? ""))
+          .filter(Boolean),
+      );
+      const overviewOrders = orders.filter(
+        (order) => String(order.distributionId ?? "") === overviewDistributionId,
+      );
+      const orderingMembers = new Set(
+        overviewOrders.map((order) => String(order.memberId ?? "")).filter(Boolean),
+      );
+      const revenue = overviewOrders.reduce(
+        (sum, order) => sum + Number(order.totals?.totalAmount ?? 0),
+        0,
+      );
+      setSaleOverview({
+        offerCount: offerProductIds.size,
+        offerProducerCount: offerProducerIds.size,
+        orderCount: overviewOrders.length,
+        memberCount: orderingMembers.size,
+        revenue,
+        averageBasket: overviewOrders.length ? revenue / overviewOrders.length : 0,
+      });
+    } else {
+      setSaleOverview({
+        offerCount: 0,
+        offerProducerCount: 0,
+        orderCount: 0,
+        memberCount: 0,
+        revenue: 0,
+        averageBasket: 0,
+      });
+    }
+
     setLoading(false);
   }, [syncRows]);
 
@@ -325,16 +521,24 @@ export default function OpenSalesWizard() {
   }, [load]);
 
   useEffect(() => {
-    if (!targetId || loading) return;
-    syncRows(targetId, producers, membersById, productsByProducer).catch(() => undefined);
-  }, [targetId, loading, producers, membersById, productsByProducer, syncRows]);
+    if (loading) return;
+    if (!targetDistribution?.id) {
+      setRows([]);
+      return;
+    }
+    syncRows(targetDistribution.id, producers, membersById, productsByProducer, saleDateKeys).catch(() => undefined);
+  }, [targetDistribution?.id, loading, producers, membersById, productsByProducer, saleDateKeys, syncRows]);
 
   const validatedCount = rows.filter((row) => row.validatedByReferent).length;
   const pendingCount = Math.max(rows.length - validatedCount, 0);
-  const canOpen = canManageAdmin && !openDistribution && validatedCount > 0;
-  const openStats = openDistribution
-    ? orderStats[openDistribution.id] ?? { count: 0, amount: 0 }
-    : { count: 0, amount: 0 };
+  const canOpen =
+    canManageLifecycle &&
+    !openDistribution &&
+    Boolean(targetDistribution) &&
+    isPlanned(targetDistribution?.status) &&
+    rows.length > 0 &&
+    validatedCount === rows.length;
+  const saleLocked = isOpenStatus(targetDistribution?.status);
 
   const groups = useMemo(() => {
     const map: Record<
@@ -367,10 +571,25 @@ export default function OpenSalesWizard() {
         .sort((a, b) => (a.name ?? "").localeCompare(b.name ?? "")),
     [producers, productsByProducer],
   );
+  const upcomingPlannedDistributions = useMemo(
+    () => plannedDistributions,
+    [plannedDistributions],
+  );
+  const nextMetrics = nextPlannedDistribution
+    ? distributionMetrics[nextPlannedDistribution.id]
+    : null;
 
   const openFlow = (producerIds: string[], startAt = 0) => {
+    if (!targetDistribution?.id) {
+      setMessage("Aucune distribution planifiee a preparer.");
+      return;
+    }
+    if (saleLocked) {
+      setMessage("Cette distribution est ouverte : preparation verrouillee.");
+      return;
+    }
     if (!producerIds.length) {
-      setMessage("Aucun producteur a gerer pour cette vue.");
+      setMessage("Aucun producteur à gérer pour cette vue.");
       return;
     }
     setMessage("");
@@ -536,6 +755,14 @@ export default function OpenSalesWizard() {
     if (!targetDistribution || !canOpen) return;
     setSaving(true);
     const batch = writeBatch(firebaseDb);
+    const firstDate = toDate(targetDistribution.dates?.[0]);
+    let closeAt: Timestamp | null = null;
+    if (firstDate) {
+      const closeDate = new Date(firstDate);
+      closeDate.setDate(closeDate.getDate() - 10);
+      closeDate.setHours(22, 0, 0, 0);
+      closeAt = Timestamp.fromDate(closeDate);
+    }
     distributions.forEach((distribution) => {
       if (isOpenStatus(distribution.status) && distribution.id !== targetDistribution.id) {
         batch.update(doc(firebaseDb, "distributionDates", distribution.id), { status: "finished" });
@@ -544,6 +771,7 @@ export default function OpenSalesWizard() {
     batch.update(doc(firebaseDb, "distributionDates", targetDistribution.id), {
       status: "open",
       openedAt: Timestamp.now(),
+      closeAt,
     });
     await batch.commit();
     await load();
@@ -551,7 +779,7 @@ export default function OpenSalesWizard() {
   };
 
   const closeSale = async () => {
-    if (!openDistribution || !canManageAdmin) return;
+    if (!openDistribution || !canManageLifecycle) return;
     setSaving(true);
     await updateDoc(doc(firebaseDb, "distributionDates", openDistribution.id), {
       status: "finished",
@@ -581,21 +809,18 @@ export default function OpenSalesWizard() {
       <section className="rounded-md border border-ink/20 bg-white p-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <h2 className="font-serif text-4xl">
-              {openDistribution ? "Vente ouverte" : "Aucune vente ouverte"}
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-ink/60">Vente en cours</p>
+            <h2 className="mt-1 font-serif text-4xl">
+              {openDistribution ? distributionLabel(openDistribution) : "Aucune vente ouverte"}
             </h2>
             <p className="mt-2 text-sm text-ink/70">
               {openDistribution
-                ? `${distributionLabel(openDistribution)} ouverte le ${formatLongDate(
-                    toDate(openDistribution.openedAt),
-                  )}.`
-                : targetDistribution
-                  ? `Distribution cible : ${distributionLabel(targetDistribution)}.`
-                  : "Aucune distribution planifiee."}
+                ? `Ouverte le ${formatLongDate(toDate(openDistribution.openedAt))}${toDate(openDistribution.closeAt) ? ` · fermeture auto le ${formatLongDate(toDate(openDistribution.closeAt))} a 22h` : ""}.`
+                : "La boutique est actuellement fermee."}
             </p>
           </div>
           <div className="flex gap-2">
-            {canManageAdmin && openDistribution ? (
+            {canManageLifecycle && openDistribution ? (
               <button
                 className="rounded-md border border-ink/25 px-4 py-2 text-sm font-semibold"
                 onClick={closeSale}
@@ -604,7 +829,7 @@ export default function OpenSalesWizard() {
                 Fermer la vente
               </button>
             ) : null}
-            {canManageAdmin && !openDistribution ? (
+            {canManageLifecycle && !openDistribution ? (
               <button
                 className="rounded-md bg-forest px-5 py-2 text-sm font-semibold text-white disabled:opacity-50"
                 onClick={openSale}
@@ -616,13 +841,88 @@ export default function OpenSalesWizard() {
           </div>
         </div>
 
-        {openDistribution ? (
-          <div className="mt-4 grid gap-2 sm:grid-cols-2">
-            <div className="rounded-sm border border-forest/30 bg-forest/10 px-3 py-2 text-sm">
-              Commandes : <span className="font-semibold">{openStats.count}</span>
+        <div className="mt-4 grid gap-2 sm:grid-cols-3 xl:grid-cols-6">
+          <div className="rounded-sm border border-forest/30 bg-forest/10 px-3 py-2 text-sm">
+            Produits: <span className="font-semibold">{saleOverview.offerCount}</span>
+          </div>
+          <div className="rounded-sm border border-forest/30 bg-forest/10 px-3 py-2 text-sm">
+            Producteurs: <span className="font-semibold">{saleOverview.offerProducerCount}</span>
+          </div>
+          <div className="rounded-sm border border-forest/30 bg-forest/10 px-3 py-2 text-sm">
+            Commandes: <span className="font-semibold">{saleOverview.orderCount}</span>
+          </div>
+          <div className="rounded-sm border border-forest/30 bg-forest/10 px-3 py-2 text-sm">
+            Adherents: <span className="font-semibold">{saleOverview.memberCount}</span>
+          </div>
+          <div className="rounded-sm border border-forest/30 bg-forest/10 px-3 py-2 text-sm">
+            CA: <span className="font-semibold">{money(saleOverview.revenue)} EUR</span>
+          </div>
+          <div className="rounded-sm border border-forest/30 bg-forest/10 px-3 py-2 text-sm">
+            Panier moyen: <span className="font-semibold">{money(saleOverview.averageBasket)} EUR</span>
+          </div>
+        </div>
+
+        {canManageLifecycle && !openDistribution && !canOpen ? (
+          <p className="mt-3 text-sm text-ink/70">
+            Pour ouvrir la vente, valide tous les producteurs actifs de la prochaine distribution.
+          </p>
+        ) : null}
+      </section>
+
+      <section className="rounded-md border border-ink/20 bg-white p-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-ink/60">🟩 Prochaine vente</p>
+            <h3 className="mt-1 font-serif text-3xl">Preparation de la prochaine distribution</h3>
+            <p className="mt-1 text-sm text-ink/70">
+              {nextPlannedDistribution
+                ? `${distributionLabel(nextPlannedDistribution)}`
+                : "Aucune prochaine vente planifiee."}
+            </p>
+            <p className="mt-1 text-xs text-ink/60">
+              Tu peux preparer et pre-valider cette prochaine vente. Les effets boutique deviennent visibles uniquement quand elle est ouverte.
+            </p>
+          </div>
+          <div className="flex gap-2">
+            {!openDistribution && canManageLifecycle && nextPlannedDistribution ? (
+              <button
+                className="rounded-md bg-forest px-5 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                onClick={openSale}
+                disabled={saving || !canOpen}
+              >
+                Ouvrir cette vente
+              </button>
+            ) : null}
+            {openDistribution ? (
+              <span className="rounded-sm border border-ink/20 bg-ink/5 px-3 py-2 text-xs text-ink/70">
+                Ferme la vente en cours avant d'ouvrir celle-ci.
+              </span>
+            ) : null}
+          </div>
+        </div>
+
+        {nextPlannedDistribution ? (
+          <div className="mt-3 grid gap-2 md:grid-cols-4">
+            <div className="rounded-sm border border-clay/70 bg-clay/10 px-3 py-2 text-sm">
+              Dates:{" "}
+              <span className="font-semibold">
+                {(nextPlannedDistribution.dates ?? [])
+                  .slice(0, 3)
+                  .map((d) => formatDate(toDate(d)))
+                  .join(" · ")}
+              </span>
             </div>
-            <div className="rounded-sm border border-forest/30 bg-forest/10 px-3 py-2 text-sm">
-              Chiffre : <span className="font-semibold">{money(openStats.amount)} EUR</span>
+            <div className="rounded-sm border border-clay/70 bg-clay/10 px-3 py-2 text-sm">
+              Producteurs actifs:{" "}
+              <span className="font-semibold">{nextMetrics?.producersActive ?? rows.length}</span>
+            </div>
+            <div className="rounded-sm border border-clay/70 bg-clay/10 px-3 py-2 text-sm">
+              Producteurs valides:{" "}
+              <span className="font-semibold">{nextMetrics?.producersValidated ?? validatedCount}</span>
+            </div>
+            <div className="rounded-sm border border-clay/70 bg-clay/10 px-3 py-2 text-sm">
+              Produits prevus:{" "}
+              <span className="font-semibold">{nextMetrics?.productsCount ?? 0}</span>
             </div>
           </div>
         ) : null}
@@ -631,39 +931,34 @@ export default function OpenSalesWizard() {
       <section className="rounded-md border border-ink/20 bg-white p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h3 className="font-serif text-3xl">Producteurs a valider</h3>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-ink/60">Validation referents</p>
+            <h3 className="mt-1 font-serif text-3xl">Producteurs a valider</h3>
             <p className="mt-1 text-sm text-ink/70">
               Seuls les producteurs avec produits apparaissent dans le tableau.
             </p>
+            {saleLocked ? (
+              <p className="mt-1 text-xs text-ember">
+                Cette distribution est ouverte : validations et editions verrouillees.
+              </p>
+            ) : null}
           </div>
           <div className="flex flex-wrap gap-2">
-            {planned.length > 1 ? (
-              <select
-                className="rounded-md border border-ink/25 bg-stone px-4 py-2 text-sm"
-                value={targetDistribution?.id ?? ""}
-                onChange={(e) => setTargetId(e.target.value)}
-              >
-                {planned.map((distribution) => (
-                  <option key={distribution.id} value={distribution.id}>
-                    {distributionLabel(distribution)}
-                  </option>
-                ))}
-              </select>
-            ) : null}
             {isReferent ? (
               <button
-                className="rounded-md bg-forest px-4 py-2 text-sm font-semibold text-white"
+                className="rounded-md bg-forest px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
                 onClick={() =>
                   openFlow(rows.filter((row) => row.referentId === effectiveMemberId).map((row) => row.producerId))
                 }
+                disabled={saleLocked}
               >
                 Gerer mes producteurs pour la vente
               </button>
             ) : null}
             {canManageAdmin ? (
               <button
-                className="rounded-md border border-ink/25 px-4 py-2 text-sm font-semibold"
+                className="rounded-md border border-ink/25 px-4 py-2 text-sm font-semibold disabled:opacity-50"
                 onClick={() => openFlow(rows.map((row) => row.producerId))}
+                disabled={saleLocked}
               >
                 Gerer tous les producteurs
               </button>
@@ -698,7 +993,7 @@ export default function OpenSalesWizard() {
             <tbody>
               {groups.map((group) =>
                 group.rows.map((row, index) => {
-                  const canEdit = canManageAdmin;
+                  const canEdit = canManageAdmin && !saleLocked;
                   const myProducerIds = rows
                     .filter((item) => item.referentId === effectiveMemberId)
                     .map((item) => item.producerId);
@@ -715,29 +1010,31 @@ export default function OpenSalesWizard() {
                               : "border border-ink/20 bg-ink/5 text-ink/70"
                           }`}
                         >
-                          {row.validatedByReferent ? "Valide" : "A valider"}
+                          {row.validatedByReferent ? "Validé" : "À valider"}
                         </span>
                       </td>
                       <td className="px-3 py-2 text-xs text-ink/60">{row.validatedAtLabel}</td>
                       <td className="px-3 py-2">
                         <div className="flex flex-wrap gap-2">
                           <button
-                            className="rounded-md border border-ink/25 px-3 py-1 text-xs font-semibold"
+                            className="rounded-md border border-ink/25 px-3 py-1 text-xs font-semibold disabled:opacity-50"
                             onClick={() => openFlow([row.producerId])}
+                            disabled={saleLocked}
                           >
-                            Gerer
+                            Gérer
                           </button>
                           {isReferent && row.referentId === effectiveMemberId ? (
                             <button
-                              className="rounded-md border border-ink/25 px-3 py-1 text-xs font-semibold"
+                              className="rounded-md border border-ink/25 px-3 py-1 text-xs font-semibold disabled:opacity-50"
                               onClick={() =>
                                 openFlow(
                                   myProducerIds,
                                   myProducerIds.findIndex((id) => id === row.producerId),
                                 )
                               }
+                              disabled={saleLocked}
                             >
-                              Gerer tous mes producteurs
+                              Gérer tous mes producteurs
                             </button>
                           ) : null}
                           {canEdit ? (
@@ -778,6 +1075,57 @@ export default function OpenSalesWizard() {
             </div>
           </div>
         ) : null}
+      </section>
+
+      <section className="rounded-md border border-ink/20 bg-white p-5">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-ink/60">📅 Ventes a venir</p>
+            <h3 className="mt-1 font-serif text-3xl">Recap des prochaines distributions</h3>
+          </div>
+          <p className="text-xs text-ink/65">
+            {upcomingPlannedDistributions.length} distribution(s) planifiee(s)
+          </p>
+        </div>
+
+        {upcomingPlannedDistributions.length > 0 ? (
+          <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+            {upcomingPlannedDistributions.map((distribution) => {
+              const metrics = distributionMetrics[distribution.id];
+              const dates = (distribution.dates ?? [])
+                .slice(0, 3)
+                .map((d) => formatDate(toDate(d)))
+                .join(" · ");
+              return (
+                <article key={distribution.id} className="rounded-sm border border-clay/70 bg-stone p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm font-semibold text-ink">{distributionLabel(distribution)}</p>
+                    <span className="rounded-sm border border-honey/40 bg-honey/15 px-2 py-0.5 text-[11px] font-semibold text-ink/80">
+                      Planifiee
+                    </span>
+                  </div>
+                  <p className="mt-1 text-xs text-ink/65">{dates || "-"}</p>
+                  <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
+                    <div className="rounded-sm border border-clay/70 bg-white px-2 py-1">
+                      Producteurs: <span className="font-semibold">{metrics?.producersActive ?? 0}</span>
+                    </div>
+                    <div className="rounded-sm border border-clay/70 bg-white px-2 py-1">
+                      Valides: <span className="font-semibold">{metrics?.producersValidated ?? 0}</span>
+                    </div>
+                    <div className="rounded-sm border border-clay/70 bg-white px-2 py-1">
+                      Produits: <span className="font-semibold">{metrics?.productsCount ?? 0}</span>
+                    </div>
+                    <div className="rounded-sm border border-clay/70 bg-white px-2 py-1">
+                      Commandes: <span className="font-semibold">{metrics?.ordersCount ?? 0}</span>
+                    </div>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        ) : (
+          <p className="mt-3 text-sm text-ink/70">Aucune distribution planifiee.</p>
+        )}
       </section>
 
       {message ? <p className="text-sm text-ink/70">{message}</p> : null}

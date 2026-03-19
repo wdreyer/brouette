@@ -14,7 +14,7 @@ export default function SeedButton() {
       const result = await resetDistributions();
       setStatus("done");
       setMessage(
-        `Periode reinitialisee: ${result.deleted} supprimees, ${result.created} creee.`,
+        `Période réinitialisée : ${result.deleted} supprimées, ${result.created} créée.`,
       );
     } catch (error) {
       const err = error instanceof Error ? error.message : "Erreur inconnue.";
@@ -30,7 +30,7 @@ export default function SeedButton() {
         onClick={handleSeed}
         disabled={status === "loading"}
       >
-        {status === "loading" ? "Reinitialisation..." : "Reinitialiser les distributions"}
+        {status === "loading" ? "Réinitialisation..." : "Réinitialiser les distributions"}
       </button>
       {message ? (
         <p className={status === "error" ? "text-sm text-ember" : "text-sm text-moss"}>{message}</p>

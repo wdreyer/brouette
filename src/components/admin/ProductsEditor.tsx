@@ -11,7 +11,6 @@ import {
   query,
   setDoc,
   Timestamp,
-  where,
 } from "firebase/firestore";
 import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
 import { firebaseDb, firebaseStorage } from "@/lib/firebase/client";
@@ -37,12 +36,6 @@ type DocEntry = {
   data: Record<string, unknown>;
 };
 
-type Distribution = {
-  id: string;
-  dates?: { toDate: () => Date }[];
-  status?: string;
-};
-
 type Producer = {
   id: string;
   name?: string;
@@ -60,7 +53,6 @@ type VariantDraft = {
   type?: string;
   unit?: string;
   price: number;
-  activeDates?: string[];
   isNew?: boolean;
   toDelete?: boolean;
 };
@@ -89,14 +81,6 @@ function setByPath(obj: Record<string, unknown>, path: string, value: unknown) {
   });
 }
 
-function dateKey(date: Date) {
-  return date.toISOString().slice(0, 10);
-}
-
-function dateFromKey(key: string) {
-  return new Date(`${key}T12:00:00`);
-}
-
 function toInputValue(value: unknown, type: FieldType) {
   if (type === "boolean") return Boolean(value);
   if (type === "number") return value === undefined || value === null ? "" : String(value);
@@ -119,10 +103,6 @@ function parseTags(input: string) {
     .filter(Boolean);
 }
 
-function formatDate(date: Date) {
-  return date.toLocaleDateString("fr-FR", { day: "numeric", month: "long" });
-}
-
 function shortText(value: unknown, max = 90) {
   const text = String(value ?? "").replace(/\s+/g, " ").trim();
   if (!text) return "-";
@@ -141,7 +121,6 @@ export default function ProductsEditor({
   fields,
 }: EditorProps) {
   const [docs, setDocs] = useState<DocEntry[]>([]);
-  const [distributions, setDistributions] = useState<Distribution[]>([]);
   const [producers, setProducers] = useState<Producer[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
@@ -150,16 +129,16 @@ export default function ProductsEditor({
   const [editDraft, setEditDraft] = useState<Record<string, unknown>>({});
   const [editTags, setEditTags] = useState("");
   const [editVariants, setEditVariants] = useState<VariantDraft[]>([]);
-  const [editVariantDates, setEditVariantDates] = useState<Record<string, string[]>>({});
   const [removedVariantIds, setRemovedVariantIds] = useState<string[]>([]);
-  const [openPeriodDates, setOpenPeriodDates] = useState<string[]>([]);
-  const [openDistributionId, setOpenDistributionId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [createDraft, setCreateDraft] = useState<Record<string, unknown>>({});
   const [createTags, setCreateTags] = useState("");
   const [filter, setFilter] = useState("");
   const [producerFilter, setProducerFilter] = useState("all");
   const [categoryFilter, setCategoryFilter] = useState("all");
+  const [organicFilter, setOrganicFilter] = useState<"all" | "bio" | "conv">("all");
+  const [sortBy, setSortBy] = useState<"name" | "producer" | "category">("name");
+  const [savingCategoryId, setSavingCategoryId] = useState<string | null>(null);
   const [uploadingEditImage, setUploadingEditImage] = useState(false);
   const [uploadingCreateImage, setUploadingCreateImage] = useState(false);
 
@@ -167,28 +146,16 @@ export default function ProductsEditor({
 
   const load = async () => {
     setLoading(true);
-    const [productsSnap, distributionsSnap, openDistSnap, producersSnap, categoriesSnap] = await Promise.all([
-      getDocs(query(collection(firebaseDb, collectionName), limit(100))),
-      getDocs(query(collection(firebaseDb, "distributionDates"), limit(50))),
-      getDocs(query(collection(firebaseDb, "distributionDates"), where("status", "==", "open"), limit(1))),
-      getDocs(query(collection(firebaseDb, "producers"), limit(100))),
-      getDocs(query(collection(firebaseDb, "categories"), limit(100))),
+    const [productsSnap, producersSnap, categoriesSnap] = await Promise.all([
+      getDocs(collection(firebaseDb, collectionName)),
+      getDocs(collection(firebaseDb, "producers")),
+      getDocs(collection(firebaseDb, "categories")),
     ]);
     const items = productsSnap.docs.map((docSnap) => ({
       id: docSnap.id,
       data: docSnap.data() as Record<string, unknown>,
     }));
-    const periods = distributionsSnap.docs.map((docSnap) => ({
-      id: docSnap.id,
-      ...(docSnap.data() as Omit<Distribution, "id">),
-    }));
-    periods.sort((a, b) => {
-      const aDate = a.dates?.[0]?.toDate?.() ?? new Date(0);
-      const bDate = b.dates?.[0]?.toDate?.() ?? new Date(0);
-      return aDate.getTime() - bDate.getTime();
-    });
     setDocs(items);
-    setDistributions(periods);
     setProducers(
       producersSnap.docs.map((docSnap) => ({
         id: docSnap.id,
@@ -201,29 +168,12 @@ export default function ProductsEditor({
         ...(docSnap.data() as Omit<Category, "id">),
       })),
     );
-    const openDistDoc = openDistSnap.docs[0];
-    const openDist = openDistDoc?.data() as Distribution | undefined;
-    const openDates = (openDist?.dates ?? []).map((date) => dateKey(date.toDate()));
-    setOpenPeriodDates(openDates);
-    setOpenDistributionId(openDistDoc?.id ?? null);
     setLoading(false);
   };
 
   useEffect(() => {
     load().catch(() => setLoading(false));
   }, [collectionName]);
-
-  const activePeriodDates = useMemo(() => {
-    if (openPeriodDates.length > 0) return openPeriodDates;
-    return distributions
-      .flatMap((dist) => (dist.dates ?? []).map((date) => dateKey(date.toDate())))
-      .sort((a, b) => a.localeCompare(b));
-  }, [openPeriodDates, distributions]);
-
-  const activePeriodLabels = useMemo(
-    () => activePeriodDates.map((key) => formatDate(dateFromKey(key))),
-    [activePeriodDates],
-  );
 
   const producerOptions = useMemo(() => {
     if (producers.length > 0) {
@@ -253,35 +203,120 @@ export default function ProductsEditor({
     return [];
   }, [categories]);
 
+  const producerLabelById = useMemo(() => {
+    const map = new Map<string, string>();
+    producerOptions.forEach((producer) => {
+      map.set(producer.id, producer.label);
+    });
+    return map;
+  }, [producerOptions]);
+
+  const categoryLabelById = useMemo(() => {
+    const map = new Map<string, string>();
+    categoryOptions.forEach((category) => {
+      map.set(category.id, category.label);
+    });
+    return map;
+  }, [categoryOptions]);
+
+  const docsMeta = useMemo(
+    () =>
+      docs.map((entry) => {
+        const producerId = String(getByPath(entry.data, "producerId") ?? "");
+        const categoryId = String(getByPath(entry.data, "categoryId") ?? "");
+        const name = String(getByPath(entry.data, "name") ?? "");
+        const producerLabel = producerLabelById.get(producerId) ?? producerId;
+        const categoryLabel = categoryLabelById.get(categoryId) ?? categoryId;
+        const isOrganic = Boolean(getByPath(entry.data, "isOrganic"));
+        const searchable = [
+          entry.id,
+          name,
+          producerLabel,
+          categoryLabel,
+          String(getByPath(entry.data, "description") ?? ""),
+        ]
+          .join(" ")
+          .toLowerCase();
+        return {
+          entry,
+          producerId,
+          categoryId,
+          name,
+          producerLabel,
+          categoryLabel,
+          isOrganic,
+          searchable,
+        };
+      }),
+    [docs, producerLabelById, categoryLabelById],
+  );
+
   const filteredDocs = useMemo(() => {
     const term = filter.trim().toLowerCase();
-    return docs.filter((entry) => {
-      const producerId = String(getByPath(entry.data, "producerId") ?? "");
-      if (producerFilter !== "all" && producerId !== producerFilter) return false;
+    const filtered = docsMeta.filter((item) => {
+      if (producerFilter !== "all" && item.producerId !== producerFilter) return false;
       if (categoryFilter !== "all") {
-        const categoryId = String(getByPath(entry.data, "categoryId") ?? "");
-        if (categoryId !== categoryFilter) return false;
+        if (item.categoryId !== categoryFilter) return false;
       }
+      if (organicFilter === "bio" && !item.isOrganic) return false;
+      if (organicFilter === "conv" && item.isOrganic) return false;
       if (!term) return true;
-      const haystack = [
-        entry.id,
-        getByPath(entry.data, "name"),
-        getByPath(entry.data, "producerId"),
-      ]
-        .map((value) => (value ? String(value).toLowerCase() : ""))
-        .join(" ");
-      return haystack.includes(term);
+      return item.searchable.includes(term);
     });
-  }, [docs, filter, producerFilter, categoryFilter]);
+    filtered.sort((a, b) => {
+      if (sortBy === "producer") {
+        const byProducer = a.producerLabel.localeCompare(b.producerLabel, "fr");
+        if (byProducer !== 0) return byProducer;
+      }
+      if (sortBy === "category") {
+        const byCategory = a.categoryLabel.localeCompare(b.categoryLabel, "fr");
+        if (byCategory !== 0) return byCategory;
+      }
+      return a.name.localeCompare(b.name, "fr");
+    });
+    return filtered.map((item) => item.entry);
+  }, [docsMeta, filter, producerFilter, categoryFilter, organicFilter, sortBy]);
+
+  const producerCounts = useMemo(() => {
+    const term = filter.trim().toLowerCase();
+    const counts = new Map<string, number>();
+    docsMeta.forEach((item) => {
+      if (categoryFilter !== "all" && item.categoryId !== categoryFilter) return;
+      if (organicFilter === "bio" && !item.isOrganic) return;
+      if (organicFilter === "conv" && item.isOrganic) return;
+      if (term && !item.searchable.includes(term)) return;
+      counts.set(item.producerId, (counts.get(item.producerId) ?? 0) + 1);
+    });
+    return counts;
+  }, [docsMeta, filter, categoryFilter, organicFilter]);
+
+  const categoryCounts = useMemo(() => {
+    const term = filter.trim().toLowerCase();
+    const counts = new Map<string, number>();
+    docsMeta.forEach((item) => {
+      if (producerFilter !== "all" && item.producerId !== producerFilter) return;
+      if (organicFilter === "bio" && !item.isOrganic) return;
+      if (organicFilter === "conv" && item.isOrganic) return;
+      if (term && !item.searchable.includes(term)) return;
+      counts.set(item.categoryId, (counts.get(item.categoryId) ?? 0) + 1);
+    });
+    return counts;
+  }, [docsMeta, filter, producerFilter, organicFilter]);
+
+  const producerTotalInScope = useMemo(
+    () => Array.from(producerCounts.values()).reduce((sum, value) => sum + value, 0),
+    [producerCounts],
+  );
+  const categoryTotalInScope = useMemo(
+    () => Array.from(categoryCounts.values()).reduce((sum, value) => sum + value, 0),
+    [categoryCounts],
+  );
 
   const openEdit = async (entry: DocEntry) => {
     setEditingId(entry.id);
     setEditDraft(entry.data);
     const tags = (entry.data.tags as string[] | undefined) ?? [];
     setEditTags(tags.join(", "));
-    const saleDates = ((entry.data.saleDates as Timestamp[] | undefined) ?? []).map((date) =>
-      dateKey(date.toDate()),
-    );
 
     const variantSnap = await getDocs(
       query(collection(firebaseDb, "products", entry.id, "variants"), limit(50)),
@@ -296,16 +331,8 @@ export default function ProductsEditor({
       type: variant.type ?? "",
       unit: variant.unit ?? "",
       price: Number(variant.price ?? 0),
-      activeDates: (variant as VariantDraft).activeDates ?? [],
     }));
     setEditVariants(variants);
-    const dateMap: Record<string, string[]> = {};
-    variants.forEach((variant) => {
-      const key = variant.id ?? variant.tempId ?? "";
-      if (!key) return;
-      dateMap[key] = Array.isArray(variant.activeDates) ? variant.activeDates : saleDates;
-    });
-    setEditVariantDates(dateMap);
     setRemovedVariantIds([]);
     setMessage("");
   };
@@ -326,7 +353,6 @@ export default function ProductsEditor({
         tempId,
       },
     ]);
-    setEditVariantDates((prev) => ({ ...prev, [tempId]: activePeriodDates }));
   };
 
   const updateVariant = (index: number, patch: Partial<VariantDraft>) => {
@@ -345,22 +371,8 @@ export default function ProductsEditor({
       if (target.id) {
         setRemovedVariantIds((ids) => Array.from(new Set([...ids, target.id!]))); 
       }
-      const key = target.id ?? target.tempId ?? String(index);
-      setEditVariantDates((prevDates) => {
-        const copy = { ...prevDates };
-        delete copy[key];
-        return copy;
-      });
       next.splice(index, 1);
       return next;
-    });
-  };
-
-  const toggleVariantDate = (variantKey: string, key: string) => {
-    setEditVariantDates((prev) => {
-      const current = prev[variantKey] ?? [];
-      const next = current.includes(key) ? current.filter((item) => item !== key) : [...current, key];
-      return { ...prev, [variantKey]: next };
     });
   };
 
@@ -369,9 +381,6 @@ export default function ProductsEditor({
     try {
       const payload = { ...editDraft };
       payload.tags = parseTags(editTags);
-      const allDates = Object.values(editVariantDates).flat();
-      const uniqueDates = Array.from(new Set(allDates));
-      payload.saleDates = uniqueDates.map((key) => Timestamp.fromDate(dateFromKey(key)));
       await setDoc(doc(firebaseDb, collectionName, editingId), payload, { merge: true });
 
       for (const variantId of removedVariantIds) {
@@ -379,13 +388,11 @@ export default function ProductsEditor({
       }
 
       for (const variant of editVariants) {
-        const key = variant.id ?? variant.tempId ?? "";
         const data = {
           label: variant.label,
           type: variant.type,
           unit: variant.unit,
           price: Number(variant.price || 0),
-          activeDates: key ? editVariantDates[key] ?? [] : [],
         };
         if (variant.id) {
           await setDoc(doc(firebaseDb, "products", editingId, "variants", variant.id), data, {
@@ -394,21 +401,6 @@ export default function ProductsEditor({
         } else {
           await addDoc(collection(firebaseDb, "products", editingId, "variants"), data);
         }
-      }
-
-      const producerId = String(getByPath(editDraft, "producerId") ?? "");
-      const hasOpenDates =
-        openDistributionId &&
-        openPeriodDates.length > 0 &&
-        Object.values(editVariantDates).some((dates) =>
-          dates.some((key) => openPeriodDates.includes(key)),
-        );
-      if (producerId && openDistributionId && hasOpenDates) {
-        await setDoc(
-          doc(firebaseDb, "distributionDates", openDistributionId, "producers", producerId),
-          { producerId, active: true },
-          { merge: true },
-        );
       }
 
       setMessage("Produit mis a jour.");
@@ -460,7 +452,6 @@ export default function ProductsEditor({
     try {
       const payload = { ...createDraft };
       payload.tags = parseTags(createTags);
-      payload.saleDates = activePeriodDates.map((key) => Timestamp.fromDate(dateFromKey(key)));
       await addDoc(collection(firebaseDb, collectionName), payload);
       setCreateDraft({});
       setCreateTags("");
@@ -473,6 +464,33 @@ export default function ProductsEditor({
     }
   };
 
+  const updateRowCategory = async (productId: string, categoryId: string) => {
+    try {
+      setSavingCategoryId(productId);
+      await setDoc(
+        doc(firebaseDb, collectionName, productId),
+        {
+          categoryId: categoryId || null,
+          updatedAt: Timestamp.now(),
+        },
+        { merge: true },
+      );
+      setDocs((prev) =>
+        prev.map((entry) =>
+          entry.id === productId
+            ? { ...entry, data: { ...entry.data, categoryId: categoryId || null } }
+            : entry,
+        ),
+      );
+      setMessage("Categorie mise a jour.");
+    } catch (error) {
+      const err = error instanceof Error ? error.message : "Erreur inconnue.";
+      setMessage(err);
+    } finally {
+      setSavingCategoryId(null);
+    }
+  };
+
   return (
     <div className="flex flex-col gap-6">
       <div className="rounded-3xl border border-clay/70 bg-white/80 p-6 shadow-card">
@@ -480,53 +498,84 @@ export default function ProductsEditor({
         {description ? <p className="mt-2 text-sm text-ink/70">{description}</p> : null}
       </div>
 
-      <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-clay/70 bg-white/80 p-4 shadow-card">
-        <input
-          className="w-full max-w-sm rounded-full border border-ink/20 bg-white px-4 py-2 text-sm"
-          placeholder="Rechercher un produit..."
-          value={filter}
-          onChange={(event) => setFilter(event.target.value)}
-        />
-        <select
-          className="rounded-full border border-ink/20 bg-white px-3 py-2 text-sm"
-          value={producerFilter}
-          onChange={(event) => setProducerFilter(event.target.value)}
-        >
-          <option value="all">Tous les producteurs</option>
-          {producerOptions.map((producer) => (
-            <option key={producer.id} value={producer.id}>
-              {producer.label}
-            </option>
-          ))}
-        </select>
-        <select
-          className="rounded-full border border-ink/20 bg-white px-3 py-2 text-sm"
-          value={categoryFilter}
-          onChange={(event) => setCategoryFilter(event.target.value)}
-        >
-          <option value="all">Toutes les categories</option>
-          {categoryOptions.map((category) => (
-            <option key={category.id} value={category.id}>
-              {category.label}
-            </option>
-          ))}
-        </select>
-        <button
-          className="rounded-full border border-ink/20 px-4 py-2 text-sm font-semibold"
-          onClick={() => {
-            setFilter("");
-            setProducerFilter("all");
-            setCategoryFilter("all");
-          }}
-        >
-          Reset
-        </button>
-        <button
-          className="rounded-full bg-ink px-5 py-2 text-sm font-semibold text-stone"
-          onClick={() => setCreateOpen(true)}
-        >
-          Nouveau produit
-        </button>
+      <div className="rounded-2xl border border-clay/70 bg-white/80 p-4 shadow-card">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-2 text-sm">
+            <span className="rounded-full bg-moss/15 px-3 py-1 font-semibold text-moss">
+              {filteredDocs.length} trouves
+            </span>
+            <span className="text-ink/65">sur {docs.length} produits</span>
+          </div>
+          <button
+            className="rounded-full bg-ink px-5 py-2 text-sm font-semibold text-stone"
+            onClick={() => setCreateOpen(true)}
+          >
+            Nouveau produit
+          </button>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3">
+          <input
+            className="w-full min-w-[220px] flex-1 rounded-full border border-ink/20 bg-white px-4 py-2 text-sm"
+            placeholder="Rechercher: nom, producteur, categorie..."
+            value={filter}
+            onChange={(event) => setFilter(event.target.value)}
+          />
+          <select
+            className="rounded-full border border-ink/20 bg-white px-3 py-2 text-sm"
+            value={producerFilter}
+            onChange={(event) => setProducerFilter(event.target.value)}
+          >
+            <option value="all">Tous les producteurs ({producerTotalInScope})</option>
+            {producerOptions.map((producer) => (
+              <option key={producer.id} value={producer.id}>
+                {producer.label} ({producerCounts.get(producer.id) ?? 0})
+              </option>
+            ))}
+          </select>
+          <select
+            className="rounded-full border border-ink/20 bg-white px-3 py-2 text-sm"
+            value={categoryFilter}
+            onChange={(event) => setCategoryFilter(event.target.value)}
+          >
+            <option value="all">Toutes les categories ({categoryTotalInScope})</option>
+            {categoryOptions.map((category) => (
+              <option key={category.id} value={category.id}>
+                {category.label} ({categoryCounts.get(category.id) ?? 0})
+              </option>
+            ))}
+          </select>
+          <select
+            className="rounded-full border border-ink/20 bg-white px-3 py-2 text-sm"
+            value={organicFilter}
+            onChange={(event) => setOrganicFilter(event.target.value as "all" | "bio" | "conv")}
+          >
+            <option value="all">Tous (Bio + Conv.)</option>
+            <option value="bio">Bio uniquement</option>
+            <option value="conv">Conventionnel</option>
+          </select>
+          <select
+            className="rounded-full border border-ink/20 bg-white px-3 py-2 text-sm"
+            value={sortBy}
+            onChange={(event) => setSortBy(event.target.value as "name" | "producer" | "category")}
+          >
+            <option value="name">Tri: Nom</option>
+            <option value="producer">Tri: Producteur</option>
+            <option value="category">Tri: Categorie</option>
+          </select>
+          <button
+            className="rounded-full border border-ink/20 px-4 py-2 text-sm font-semibold"
+            onClick={() => {
+              setFilter("");
+              setProducerFilter("all");
+              setCategoryFilter("all");
+              setOrganicFilter("all");
+              setSortBy("name");
+            }}
+          >
+            Reinitialiser
+          </button>
+        </div>
       </div>
 
       {loading ? (
@@ -723,7 +772,7 @@ export default function ProductsEditor({
 
               <div>
                 <div className="flex items-center justify-between gap-3">
-                  <p className="text-sm font-semibold text-ink/70">Variantes & dates actives</p>
+                  <p className="text-sm font-semibold text-ink/70">Variantes</p>
                   <button
                     className="rounded-full border border-ink/20 px-3 py-1 text-xs font-semibold"
                     onClick={addVariant}
@@ -736,28 +785,24 @@ export default function ProductsEditor({
                     className="min-w-[720px] border-b border-clay/70 bg-stone px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-ink/60"
                     style={{
                       display: "grid",
-                      gridTemplateColumns: `1.4fr 0.6fr repeat(${activePeriodLabels.length || 1}, minmax(80px, 1fr)) 0.6fr`,
+                      gridTemplateColumns: "1.8fr 0.8fr 0.6fr",
                       gap: "12px",
                     }}
                   >
                     <span>Variante</span>
                     <span className="text-[10px] tracking-[0.18em]">Prix</span>
-                    {(activePeriodLabels.length ? activePeriodLabels : ["Dates"]).map((label, index) => (
-                      <span key={`${label}-${index}`}>{label}</span>
-                    ))}
                     <span>Actions</span>
                   </div>
                   <div className="divide-y divide-clay/70">
                     {editVariants.map((variant, index) => {
                       const variantKey = variant.id ?? variant.tempId ?? String(index);
-                      const selectedDates = editVariantDates[variantKey] ?? [];
                       return (
                         <div
                           key={variantKey}
                           className="min-w-[720px] px-4 py-2"
                           style={{
                             display: "grid",
-                            gridTemplateColumns: `1.4fr 0.6fr repeat(${activePeriodLabels.length || 1}, minmax(80px, 1fr)) 0.6fr`,
+                            gridTemplateColumns: "1.8fr 0.8fr 0.6fr",
                             gap: "12px",
                           }}
                         >
@@ -778,19 +823,6 @@ export default function ProductsEditor({
                             value={String(variant.price ?? 0)}
                             onChange={(event) => updateVariant(index, { price: Number(event.target.value) || 0 })}
                           />
-                          {activePeriodDates.length ? (
-                            activePeriodDates.map((dateKeyItem) => (
-                              <div key={dateKeyItem} className="flex items-center justify-center">
-                                <input
-                                  type="checkbox"
-                                  checked={selectedDates.includes(dateKeyItem)}
-                                  onChange={() => toggleVariantDate(variantKey, dateKeyItem)}
-                                />
-                              </div>
-                            ))
-                          ) : (
-                            <span className="text-xs text-ink/60">Aucune date</span>
-                          )}
                           <button
                             className="rounded-full border border-ink/20 px-3 py-1 text-xs font-semibold"
                             onClick={() => removeVariant(index)}
@@ -829,14 +861,21 @@ export default function ProductsEditor({
                 <tr>
                   <th className="px-4 py-3">Produit</th>
                   <th className="px-4 py-3">Producteur</th>
-                  <th className="px-4 py-3">Categorie</th>
+                  <th className="px-4 py-3">Catégorie</th>
                   <th className="px-4 py-3">Bio</th>
                   <th className="px-4 py-3">Description</th>
                   <th className="px-4 py-3">Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {filteredDocs.map((entry) => {
+                {filteredDocs.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="px-4 py-8 text-center text-sm text-ink/60">
+                      Aucun produit pour ces filtres.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredDocs.map((entry) => {
                   const producerLabel =
                     producerOptions.find(
                       (producer) => producer.id === String(getByPath(entry.data, "producerId") ?? ""),
@@ -871,7 +910,25 @@ export default function ProductsEditor({
                         </div>
                       </td>
                       <td className="px-4 py-3 text-xs text-ink/70">{producerLabel}</td>
-                      <td className="px-4 py-3 text-xs text-ink/70">{categoryLabel || "-"}</td>
+                      <td className="px-4 py-3 text-xs text-ink/70">
+                        <select
+                          className="min-w-[170px] rounded-md border border-ink/20 bg-white px-2 py-1.5 text-xs"
+                          value={categoryId}
+                          disabled={savingCategoryId === entry.id}
+                          onClick={(event) => event.stopPropagation()}
+                          onChange={(event) => {
+                            event.stopPropagation();
+                            updateRowCategory(entry.id, event.target.value);
+                          }}
+                        >
+                          <option value="">{categoryLabel ? "Sans categorie" : "Selectionner"}</option>
+                          {categoryOptions.map((category) => (
+                            <option key={category.id} value={category.id}>
+                              {category.label}
+                            </option>
+                          ))}
+                        </select>
+                      </td>
                       <td className="px-4 py-3 text-xs text-ink/70">
                         {isOrganic ? "Bio" : "Conv."}
                       </td>
@@ -891,7 +948,8 @@ export default function ProductsEditor({
                       </td>
                     </tr>
                   );
-                })}
+                  })
+                )}
               </tbody>
             </table>
           </div>

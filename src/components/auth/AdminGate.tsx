@@ -4,11 +4,30 @@ import { useEffect } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/components/auth/AuthProvider";
 
+const REFERENT_ALLOWED_PREFIXES = [
+  "/admin/vente",
+  "/admin/stats",
+  "/admin/orders",
+  "/admin/products",
+  "/admin/producers",
+  "/admin/members",
+  "/admin/invites",
+  "/admin/invite",
+  "/admin/invitations",
+  "/admin/messages",
+  "/admin/documents",
+];
+
+function isReferentPathAllowed(pathname: string) {
+  if (pathname === "/admin") return true;
+  return REFERENT_ALLOWED_PREFIXES.some((prefix) => pathname.startsWith(prefix));
+}
+
 export default function AdminGate({ children }: { children: React.ReactNode }) {
   const { user, loading, role, effectiveRole } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
-  const allowReferent = pathname.startsWith("/admin");
+  const allowReferent = isReferentPathAllowed(pathname);
   const isAllowed =
     Boolean(user) && (role === "admin" || (effectiveRole === "referent" && allowReferent));
 
