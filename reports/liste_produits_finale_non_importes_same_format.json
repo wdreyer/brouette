@@ -10,8 +10,7 @@
     "xlsx_rows": 313,
     "firebase_products": 283,
     "imported_rows_detected": 278,
-    "non_imported_rows": 35,
-    "distinct_source_producers": 41
+    "non_imported_rows": 35
   },
   "nonImportedRows": [
     {
@@ -20,7 +19,7 @@
       "Product": "2- Journal \"L'âge de faire\" Février 2025",
       "SKU": "AGE 02",
       "Price": 1.5,
-      "_reason": "producteur introuvable"
+      "_reason": "exclu_journal"
     },
     {
       "CODE  Producteur": " AGE ",
@@ -28,7 +27,7 @@
       "Product": "2- Journal \"L'âge de faire\" Mars 2026",
       "SKU": "AGE 01",
       "Price": 1.5,
-      "_reason": "producteur introuvable"
+      "_reason": "exclu_journal"
     },
     {
       "CODE  Producteur": " ARD ",
@@ -36,7 +35,7 @@
       "Product": "EP- Miel d'Ardèche 1 kg",
       "SKU": "ARD 02",
       "Price": 0,
-      "_reason": "producteur introuvable"
+      "_reason": "produit non trouv? chez producteur mapp?"
     },
     {
       "CODE  Producteur": " ARD ",
@@ -44,7 +43,7 @@
       "Product": "EP- Miel d'Ardèche 500 g",
       "SKU": "ARD 01",
       "Price": 0,
-      "_reason": "producteur introuvable"
+      "_reason": "produit non trouv? chez producteur mapp?"
     },
     {
       "CODE  Producteur": " BELOR ",
@@ -52,7 +51,6 @@
       "Product": "AN- Nèfles Golden Nugget bio 2",
       "SKU": null,
       "Price": null,
-      "_mappedProducer": "La Belle Orange",
       "_reason": "produit non trouv? chez producteur mapp?"
     },
     {
@@ -61,7 +59,6 @@
       "Product": "A- Ail bio blanchi 1 kg",
       "SKU": "BIOTIFUL 02",
       "Price": 7.5,
-      "_mappedProducer": "Ferme Baud",
       "_reason": "produit non trouv? chez producteur mapp?"
     },
     {
@@ -70,24 +67,23 @@
       "Product": "A- Ail bio brut 1 kg",
       "SKU": "BIOTIFUL 01",
       "Price": 6.5,
-      "_mappedProducer": "Ferme Baud",
       "_reason": "produit non trouv? chez producteur mapp?"
     },
     {
       "CODE  Producteur": " CHAMPI ",
-      "NOM du producteur": null,
+      "NOM du producteur": "GAEL Le Chalet",
       "Product": "A- Champignons sauvages séchés",
       "SKU": "CHAMPI 01",
       "Price": 0,
-      "_reason": "ligne incomplete"
+      "_reason": "produit non trouv? chez producteur mapp?"
     },
     {
       "CODE  Producteur": " CHOC ",
-      "NOM du producteur": null,
+      "NOM du producteur": "GAEL Le Chalet",
       "Product": "EP- Chocolats 150 g",
       "SKU": "CHOC 01",
       "Price": 9.55,
-      "_reason": "ligne incomplete"
+      "_reason": "produit non trouv? chez producteur mapp?"
     },
     {
       "CODE  Producteur": " CRIOU ",
@@ -95,7 +91,6 @@
       "Product": "FV- Faisselles 6 x 120 g",
       "SKU": "CRIOU 01",
       "Price": 3.5,
-      "_mappedProducer": "GAEC Gorges de Tines (cassina)",
       "_reason": "produit non trouv? chez producteur mapp?"
     },
     {
@@ -104,7 +99,6 @@
       "Product": "FV- Fraïcheur du Criou",
       "SKU": "CRIOU 03",
       "Price": 2.2,
-      "_mappedProducer": "GAEC Gorges de Tines (cassina)",
       "_reason": "produit non trouv? chez producteur mapp?"
     },
     {
@@ -113,7 +107,6 @@
       "Product": "FB- Bélotin",
       "SKU": "EOL 03",
       "Price": 7,
-      "_mappedProducer": "Bergerie des roches",
       "_reason": "produit non trouv? chez producteur mapp?"
     },
     {
@@ -122,7 +115,6 @@
       "Product": "FB- Fromage affiné de brebis",
       "SKU": "EOL 02",
       "Price": 2.8,
-      "_mappedProducer": "Bergerie des roches",
       "_reason": "produit non trouv? chez producteur mapp?"
     },
     {
@@ -131,7 +123,6 @@
       "Product": "FB- Fromage de l'Aiguille",
       "SKU": "EOL 04",
       "Price": 10,
-      "_mappedProducer": "Bergerie des roches",
       "_reason": "produit non trouv? chez producteur mapp?"
     },
     {
@@ -140,7 +131,6 @@
       "Product": "FB- Fromage frais de brebis",
       "SKU": "EOL 01",
       "Price": 2.6,
-      "_mappedProducer": "Bergerie des roches",
       "_reason": "produit non trouv? chez producteur mapp?"
     },
     {
@@ -149,7 +139,6 @@
       "Product": "FB- Féta 300 g",
       "SKU": "EOL 06",
       "Price": 8,
-      "_mappedProducer": "Bergerie des roches",
       "_reason": "produit non trouv? chez producteur mapp?"
     },
     {
@@ -158,40 +147,39 @@
       "Product": "V- Demi agneau de lait bio",
       "SKU": "EOL 05",
       "Price": 90,
-      "_mappedProducer": "Bergerie des roches",
       "_reason": "produit non trouv? chez producteur mapp?"
     },
     {
       "CODE  Producteur": " FRAMB ",
-      "NOM du producteur": null,
+      "NOM du producteur": "Bergerie de l'Eolienne",
       "Product": "EP- Pâtes de fruits",
       "SKU": "FRAMB 01",
       "Price": 4.77,
-      "_reason": "ligne incomplete"
+      "_reason": "produit non trouv? chez producteur mapp?"
     },
     {
       "CODE  Producteur": " GACHET ",
-      "NOM du producteur": null,
+      "NOM du producteur": "Bergerie de l'Eolienne",
       "Product": "EP- Miel de montagne 1 kg",
       "SKU": "GACHET 02",
       "Price": 18,
-      "_reason": "ligne incomplete"
+      "_reason": "produit non trouv? chez producteur mapp?"
     },
     {
       "CODE  Producteur": " GACHET ",
-      "NOM du producteur": null,
+      "NOM du producteur": "Bergerie de l'Eolienne",
       "Product": "EP- Miel de montagne 500 g",
       "SKU": "GACHET 01",
       "Price": 10,
-      "_reason": "ligne incomplete"
+      "_reason": "produit non trouv? chez producteur mapp?"
     },
     {
       "CODE  Producteur": " GAUF ",
-      "NOM du producteur": null,
+      "NOM du producteur": "Bergerie de l'Eolienne",
       "Product": "E- Gaufres salées crousti savoyard x4",
       "SKU": "GAUF 02",
       "Price": 12,
-      "_reason": "ligne incomplete"
+      "_reason": "produit non trouv? chez producteur mapp?"
     },
     {
       "CODE  Producteur": " HUMB ",
@@ -199,7 +187,6 @@
       "Product": "V- Côtelettes d'agneau 1 kg",
       "SKU": "HUMB 03",
       "Price": 25,
-      "_mappedProducer": "GAEC Le coin",
       "_reason": "produit non trouv? chez producteur mapp?"
     },
     {
@@ -208,7 +195,6 @@
       "Product": "V- Epaule d'agneau",
       "SKU": "HUMB 02",
       "Price": 30,
-      "_mappedProducer": "GAEC Le coin",
       "_reason": "produit non trouv? chez producteur mapp?"
     },
     {
@@ -217,7 +203,6 @@
       "Product": "V- Gigot d'agneau",
       "SKU": "HUMB 01",
       "Price": 60,
-      "_mappedProducer": "GAEC Le coin",
       "_reason": "produit non trouv? chez producteur mapp?"
     },
     {
@@ -226,7 +211,6 @@
       "Product": "V- Navarin d'agneau 500 g",
       "SKU": "HUMB 04",
       "Price": 6.5,
-      "_mappedProducer": "GAEC Le coin",
       "_reason": "produit non trouv? chez producteur mapp?"
     },
     {
@@ -235,7 +219,7 @@
       "Product": "AN- Huile d'olive (MARZAN)",
       "SKU": "MARZAN 01",
       "Price": 0,
-      "_reason": "producteur introuvable"
+      "_reason": "produit non trouv? chez producteur mapp?"
     },
     {
       "CODE  Producteur": " MARZAN ",
@@ -243,7 +227,7 @@
       "Product": "AN- Huile d'olive bio (MARZAN)",
       "SKU": "MARZAN 02",
       "Price": 0,
-      "_reason": "producteur introuvable"
+      "_reason": "produit non trouv? chez producteur mapp?"
     },
     {
       "CODE  Producteur": " MIEL ",
@@ -251,7 +235,6 @@
       "Product": "EP- Miel de châtaignier 500 g",
       "SKU": "MIEL 01",
       "Price": 10,
-      "_mappedProducer": "Maison Vulliez",
       "_reason": "produit non trouv? chez producteur mapp?"
     },
     {
@@ -260,7 +243,6 @@
       "Product": "EP- Miel de lavande 250 g",
       "SKU": "MIEL 03",
       "Price": 5,
-      "_mappedProducer": "Maison Vulliez",
       "_reason": "produit non trouv? chez producteur mapp?"
     },
     {
@@ -269,7 +251,6 @@
       "Product": "EP- Miel de montagne",
       "SKU": "MIEL 02",
       "Price": 0,
-      "_mappedProducer": "Maison Vulliez",
       "_reason": "produit non trouv? chez producteur mapp?"
     },
     {
@@ -278,7 +259,6 @@
       "Product": "EP- Café bio en grains 500 g",
       "SKU": "SAIL 03",
       "Price": 9.71,
-      "_mappedProducer": "Ap Nature",
       "_reason": "produit non trouv? chez producteur mapp?"
     },
     {
@@ -287,7 +267,6 @@
       "Product": "EP- Café bio moulu 250 g",
       "SKU": "SAIL 02",
       "Price": 5.2,
-      "_mappedProducer": "Ap Nature",
       "_reason": "produit non trouv? chez producteur mapp?"
     },
     {
@@ -296,7 +275,6 @@
       "Product": "EP- Tablette de chocolat bio 100 g",
       "SKU": "SAIL 01",
       "Price": 2.93,
-      "_mappedProducer": "Ap Nature",
       "_reason": "produit non trouv? chez producteur mapp?"
     },
     {
@@ -305,7 +283,7 @@
       "Product": "E- Gaufres sucrées à  la vanille x5",
       "SKU": "THOME 01",
       "Price": 7.95,
-      "_reason": "producteur introuvable"
+      "_reason": "produit non trouv? chez producteur mapp?"
     },
     {
       "CODE  Producteur": " VEAU ",
@@ -313,7 +291,6 @@
       "Product": "V- Viande de veau",
       "SKU": "VEAU 01",
       "Price": 80,
-      "_mappedProducer": "GAEC Le coin",
       "_reason": "produit non trouv? chez producteur mapp?"
     }
   ]

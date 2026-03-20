@@ -9,6 +9,7 @@ import {
   getDocs,
   limit,
   query,
+  serverTimestamp,
   setDoc,
   Timestamp,
 } from "firebase/firestore";
@@ -42,6 +43,17 @@ type Producer = {
   referentId?: string | null;
   referentName?: string | null;
   referentPhone?: string | null;
+};
+
+type LedgerEntry = {
+  id: string;
+  type?: string;
+  amount?: number;
+  label?: string;
+  note?: string;
+  orderId?: string;
+  occurredAt?: Timestamp;
+  createdAt?: Timestamp;
 };
 
 function getByPath(obj: Record<string, unknown>, path: string) {
@@ -147,6 +159,14 @@ function formatRole(value: unknown) {
   return displayValue(value);
 }
 
+function entryDate(entry: LedgerEntry) {
+  return entry.occurredAt?.toDate() ?? entry.createdAt?.toDate() ?? new Date(0);
+}
+
+function formatMoney(value: number) {
+  return Number(value || 0).toFixed(2).replace(".", ",");
+}
+
 export default function MembersEditor({
   collectionName,
   title,
@@ -174,6 +194,13 @@ export default function MembersEditor({
   const [filterRole, setFilterRole] = useState<string>("all");
   const [sortKey, setSortKey] = useState<string>("lastName");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const [ledgerByMemberId, setLedgerByMemberId] = useState<Record<string, LedgerEntry[]>>({});
+  const [ledgerLoadingMemberId, setLedgerLoadingMemberId] = useState<string | null>(null);
+  const [ledgerSaving, setLedgerSaving] = useState(false);
+  const [ledgerDirection, setLedgerDirection] = useState<"credit" | "debit">("credit");
+  const [ledgerAmount, setLedgerAmount] = useState("0");
+  const [ledgerLabel, setLedgerLabel] = useState("Ajustement manuel");
+  const [ledgerNote, setLedgerNote] = useState("");
 
   const tableFields = useMemo(() => fields.filter((field) => field.table), [fields]);
   const formFields = useMemo(
@@ -223,9 +250,70 @@ export default function MembersEditor({
     load().catch(() => setLoading(false));
   }, [collectionName]);
 
+  const loadMemberLedger = async (memberId: string) => {
+    try {
+      setLedgerLoadingMemberId(memberId);
+      const ledgerSnap = await getDocs(
+        query(collection(firebaseDb, collectionName, memberId, "ledger"), limit(300)),
+      );
+      const items = ledgerSnap.docs
+        .map((docSnap) => ({
+          id: docSnap.id,
+          ...(docSnap.data() as Omit<LedgerEntry, "id">),
+        }))
+        .sort((a, b) => entryDate(b).getTime() - entryDate(a).getTime());
+      setLedgerByMemberId((prev) => ({ ...prev, [memberId]: items }));
+    } catch (error) {
+      const err = error instanceof Error ? error.message : "Erreur inconnue.";
+      setMessage(err);
+      setLedgerByMemberId((prev) => ({ ...prev, [memberId]: [] }));
+    } finally {
+      setLedgerLoadingMemberId((prev) => (prev === memberId ? null : prev));
+    }
+  };
+
   const openView = (entry: DocEntry) => {
     setViewingEntry(entry);
     setMessage("");
+    setLedgerDirection("credit");
+    setLedgerAmount("0");
+    setLedgerLabel("Ajustement manuel");
+    setLedgerNote("");
+    loadMemberLedger(entry.id).catch(() => undefined);
+  };
+
+  const submitLedgerOperation = async () => {
+    if (!isAdmin || !viewingEntry) return;
+    const rawAmount = Number(String(ledgerAmount).replace(",", "."));
+    if (!Number.isFinite(rawAmount) || rawAmount <= 0) {
+      setMessage("Montant invalide.");
+      return;
+    }
+    const signedAmount = ledgerDirection === "credit" ? rawAmount : -rawAmount;
+    const cleanedLabel = ledgerLabel.trim() || "Ajustement manuel";
+    const cleanedNote = ledgerNote.trim();
+    try {
+      setLedgerSaving(true);
+      setMessage("");
+      await addDoc(collection(firebaseDb, collectionName, viewingEntry.id, "ledger"), {
+        type: ledgerDirection === "credit" ? "manual_credit" : "manual_debit",
+        amount: signedAmount,
+        label: cleanedLabel,
+        note: cleanedNote || null,
+        memberId: viewingEntry.id,
+        createdAt: serverTimestamp(),
+        occurredAt: serverTimestamp(),
+      });
+      setLedgerAmount("0");
+      setLedgerNote("");
+      setMessage("Opération enregistrée.");
+      await loadMemberLedger(viewingEntry.id);
+    } catch (error) {
+      const err = error instanceof Error ? error.message : "Erreur inconnue.";
+      setMessage(err);
+    } finally {
+      setLedgerSaving(false);
+    }
   };
 
   const openEdit = (entry: DocEntry) => {
@@ -386,6 +474,9 @@ export default function MembersEditor({
       setSortDir("asc");
     }
   };
+
+  const viewingLedger = viewingEntry ? (ledgerByMemberId[viewingEntry.id] ?? []) : [];
+  const viewingBalance = viewingLedger.reduce((sum, entry) => sum + Number(entry.amount ?? 0), 0);
 
   return (
     <div className="flex flex-col gap-6">
@@ -572,6 +663,94 @@ export default function MembersEditor({
                 <p className="text-sm text-ink">
                   {formatRole(getByPath(viewingEntry.data, "auth.role") ?? "member")}
                 </p>
+              </div>
+            </div>
+
+            <div className="mt-6 rounded-2xl border border-clay/70 bg-stone/50 p-4">
+              <div className="flex flex-wrap items-end justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">Solde</p>
+                  <p className={`mt-1 text-2xl font-semibold ${viewingBalance >= 0 ? "text-forest" : "text-ember"}`}>
+                    {viewingBalance >= 0 ? "+" : "-"} {formatMoney(Math.abs(viewingBalance))} EUR
+                  </p>
+                </div>
+                {isAdmin ? (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <select
+                      className="rounded-full border border-ink/20 bg-white px-3 py-2 text-sm"
+                      value={ledgerDirection}
+                      onChange={(event) =>
+                        setLedgerDirection(event.target.value === "debit" ? "debit" : "credit")
+                      }
+                    >
+                      <option value="credit">Ajouter</option>
+                      <option value="debit">Retirer</option>
+                    </select>
+                    <input
+                      className="w-32 rounded-full border border-ink/20 bg-white px-3 py-2 text-sm"
+                      value={ledgerAmount}
+                      onChange={(event) => setLedgerAmount(event.target.value)}
+                      placeholder="Montant"
+                    />
+                    <button
+                      className="rounded-full bg-ink px-4 py-2 text-sm font-semibold text-stone disabled:opacity-50"
+                      onClick={() => submitLedgerOperation().catch(() => undefined)}
+                      disabled={ledgerSaving}
+                    >
+                      {ledgerSaving ? "Enregistrement..." : "Valider"}
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+
+              {isAdmin ? (
+                <div className="mt-3 grid gap-2 md:grid-cols-2">
+                  <input
+                    className="rounded-full border border-ink/20 bg-white px-3 py-2 text-sm"
+                    value={ledgerLabel}
+                    onChange={(event) => setLedgerLabel(event.target.value)}
+                    placeholder="Libellé"
+                  />
+                  <input
+                    className="rounded-full border border-ink/20 bg-white px-3 py-2 text-sm"
+                    value={ledgerNote}
+                    onChange={(event) => setLedgerNote(event.target.value)}
+                    placeholder="Note (optionnel)"
+                  />
+                </div>
+              ) : (
+                <p className="mt-2 text-xs text-ink/60">Lecture seule pour ce rôle.</p>
+              )}
+
+              <div className="mt-3 overflow-hidden rounded-xl border border-clay/70 bg-white">
+                <div className="grid grid-cols-[120px_1fr_120px] border-b border-clay/70 bg-stone px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-ink/60">
+                  <span>Date</span>
+                  <span>Mouvement</span>
+                  <span className="text-right">Montant</span>
+                </div>
+                <div className="max-h-56 divide-y divide-clay/60 overflow-y-auto">
+                  {ledgerLoadingMemberId === viewingEntry.id ? (
+                    <p className="px-3 py-3 text-sm text-ink/65">Chargement des mouvements...</p>
+                  ) : viewingLedger.length ? (
+                    viewingLedger.map((entry) => (
+                      <div key={entry.id} className="grid grid-cols-[120px_1fr_120px] items-center px-3 py-2 text-sm">
+                        <span className="text-ink/65">{entryDate(entry).toLocaleDateString("fr-FR")}</span>
+                        <div className="min-w-0">
+                          <p className="truncate font-semibold text-ink">{entry.label ?? "Mouvement"}</p>
+                          {entry.note ? <p className="truncate text-xs text-ink/60">{entry.note}</p> : null}
+                        </div>
+                        <span
+                          className={`text-right font-semibold ${Number(entry.amount ?? 0) >= 0 ? "text-forest" : "text-ember"}`}
+                        >
+                          {Number(entry.amount ?? 0) >= 0 ? "+" : "-"}
+                          {formatMoney(Math.abs(Number(entry.amount ?? 0)))} EUR
+                        </span>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="px-3 py-3 text-sm text-ink/65">Aucun mouvement.</p>
+                  )}
+                </div>
               </div>
             </div>
 

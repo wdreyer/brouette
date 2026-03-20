@@ -157,10 +157,10 @@ function Icon({ kind }: { kind: NavItem["icon"] }) {
 
 const adminGroups: NavGroup[] = [
   {
-    label: "Resume",
+    label: "Résumé",
     defaultOpen: true,
     items: [
-      { href: "/admin", label: "Resume", icon: "home" },
+      { href: "/admin", label: "Résumé", icon: "home" },
       { href: "/admin/vente", label: "Ventes", icon: "sale" },
       { href: "/admin/orders", label: "Commandes", icon: "orders" },
     ],
@@ -171,15 +171,15 @@ const adminGroups: NavGroup[] = [
     items: [
       { href: "/admin/products", label: "Produits", icon: "products" },
       { href: "/admin/producers", label: "Producteurs", icon: "producers" },
-      { href: "/admin/catalogues", label: "Categories", icon: "categories", roles: ["admin"] },
+      { href: "/admin/catalogues", label: "Catégories", icon: "categories", roles: ["admin"] },
       { href: "/admin/calendrier-annuel", label: "Calendrier annuel", icon: "distributions", roles: ["admin"] },
       { href: "/admin/distributionDates", label: "Distributions", icon: "distributions", roles: ["admin"] },
     ],
   },
   {
-    label: "Communaute",
+    label: "Communauté",
     defaultOpen: true,
-    items: [{ href: "/admin/members", label: "Adherents", icon: "members" }],
+    items: [{ href: "/admin/members", label: "Adhérents", icon: "members" }],
   },
   {
     label: "Administration",
@@ -187,7 +187,7 @@ const adminGroups: NavGroup[] = [
       { href: "/admin/invites", label: "Invitations", icon: "invites", roles: ["admin", "referent"] },
       { href: "/admin/messages", label: "Messages", icon: "messages", roles: ["admin", "referent"] },
       { href: "/admin/documents", label: "Documents PDF", icon: "documents", roles: ["admin", "referent"] },
-      { href: "/admin/settings", label: "Parametres", icon: "settings", roles: ["admin"] },
+      { href: "/admin/settings", label: "Paramètres", icon: "settings", roles: ["admin"] },
       { href: "/admin/stats", label: "Stats", icon: "stats", roles: ["admin", "referent"] },
     ],
   },
@@ -212,7 +212,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
 
   return (
     <div className="admin-app mx-auto flex w-full max-w-[1600px] flex-col gap-4 overflow-x-hidden px-4 py-4 md:px-6 md:py-5">
-      <h1 className="px-1 font-serif text-4xl leading-none">Back-Office</h1>
+      <h1 className="px-1 font-serif text-4xl leading-none">Administration</h1>
 
       <div className="grid items-start gap-4 lg:grid-cols-[250px_minmax(0,1fr)]">
         <aside className="h-fit rounded-[10px] border border-clay/90 bg-stone p-3 shadow-sm lg:sticky lg:top-4">

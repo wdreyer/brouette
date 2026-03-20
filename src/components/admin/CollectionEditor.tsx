@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { addDoc, collection, doc, getDocs, limit, query, setDoc, Timestamp } from "firebase/firestore";
+import { addDoc, collection, deleteDoc, doc, getDocs, limit, query, setDoc, Timestamp, where } from "firebase/firestore";
 import { firebaseDb } from "@/lib/firebase/client";
 import { distributionLabel } from "@/lib/distributions";
 
@@ -87,6 +87,7 @@ export default function CollectionEditor({
   const [editDraft, setEditDraft] = useState<Record<string, unknown>>({});
   const [createOpen, setCreateOpen] = useState(false);
   const [createDraft, setCreateDraft] = useState<Record<string, unknown>>({});
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [distributionOptions, setDistributionOptions] = useState<{ id: string; label: string }[]>([]);
 
   const tableFields = useMemo(() => fields.filter((field) => field.table), [fields]);
@@ -167,6 +168,52 @@ export default function CollectionEditor({
     } catch (error) {
       const err = error instanceof Error ? error.message : "Erreur inconnue.";
       setMessage(err);
+    }
+  };
+
+  const deleteEntry = async (entry: DocEntry) => {
+    const label = String(getByPath(entry.data, "name") ?? entry.id);
+    const isCategory = collectionName === "categories";
+    const confirmMessage = isCategory
+      ? `Supprimer la categorie "${label}" ? Les produits relies seront remis sans categorie.`
+      : `Supprimer "${label}" ?`;
+    const confirmDelete =
+      typeof window === "undefined" ? true : window.confirm(confirmMessage);
+    if (!confirmDelete) return;
+
+    try {
+      setDeletingId(entry.id);
+      setMessage("");
+
+      if (isCategory) {
+        const productsSnap = await getDocs(
+          query(collection(firebaseDb, "products"), where("categoryId", "==", entry.id)),
+        );
+        await Promise.all(
+          productsSnap.docs.map((productDoc) =>
+            setDoc(
+              productDoc.ref,
+              {
+                categoryId: null,
+                updatedAt: Timestamp.now(),
+              },
+              { merge: true },
+            ),
+          ),
+        );
+      }
+
+      await deleteDoc(doc(firebaseDb, collectionName, entry.id));
+      if (editingId === entry.id) {
+        setEditingId(null);
+      }
+      setMessage(isCategory ? "Catégorie supprimée." : "Document supprimé.");
+      await load();
+    } catch (error) {
+      const err = error instanceof Error ? error.message : "Erreur inconnue.";
+      setMessage(err);
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -279,6 +326,15 @@ export default function CollectionEditor({
                           >
                             Details
                           </button>
+                          {collectionName === "categories" ? (
+                            <button
+                              className="rounded-full border border-ember/35 px-3 py-1 text-xs font-semibold text-ember disabled:opacity-50"
+                              onClick={() => deleteEntry(entry).catch(() => undefined)}
+                              disabled={deletingId === entry.id}
+                            >
+                              {deletingId === entry.id ? "Suppression..." : "Supprimer"}
+                            </button>
+                          ) : null}
                         </div>
                       </td>
                     </tr>

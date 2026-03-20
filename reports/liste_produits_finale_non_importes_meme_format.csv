@@ -1,0 +1,36 @@
+﻿CODE  Producteur;NOM du producteur;Product;SKU;Price
+ AGE ; L'âge de Faire ;"2- Journal ""L'âge de faire"" Février 2025";AGE 02;1.5
+ AGE ; L'âge de Faire ;"2- Journal ""L'âge de faire"" Mars 2026";AGE 01;1.5
+ ARD ;Miel d'Ardèche;EP- Miel d'Ardèche 1 kg;ARD 02;0
+ ARD ;Miel d'Ardèche;EP- Miel d'Ardèche 500 g;ARD 01;0
+ BELOR ; La Belle Orange ;AN- Nèfles Golden Nugget bio 2;None;None
+ BIOTIFUL ; GAEC Biotiful ;A- Ail bio blanchi 1 kg;BIOTIFUL 02;7.5
+ BIOTIFUL ; GAEC Biotiful ;A- Ail bio brut 1 kg;BIOTIFUL 01;6.5
+ CHAMPI ;GAEL Le Chalet;A- Champignons sauvages séchés;CHAMPI 01;0
+ CHOC ;GAEL Le Chalet;EP- Chocolats 150 g;CHOC 01;9.55
+ CRIOU ; Le Criou ;FV- Faisselles 6 x 120 g;CRIOU 01;3.5
+ CRIOU ; Le Criou ;FV- Fraïcheur du Criou;CRIOU 03;2.2
+ EOL ; Bergerie de l'Eolienne ;FB- Bélotin;EOL 03;7
+ EOL ; Bergerie de l'Eolienne ;FB- Fromage affiné de brebis;EOL 02;2.8
+ EOL ; Bergerie de l'Eolienne ;FB- Fromage de l'Aiguille;EOL 04;10
+ EOL ; Bergerie de l'Eolienne ;FB- Fromage frais de brebis;EOL 01;2.6
+ EOL ; Bergerie de l'Eolienne ;FB- Féta 300 g;EOL 06;8
+ EOL ; Bergerie de l'Eolienne ;V- Demi agneau de lait bio;EOL 05;90
+ FRAMB ;Bergerie de l'Eolienne;EP- Pâtes de fruits;FRAMB 01;4.77
+ GACHET ;Bergerie de l'Eolienne;EP- Miel de montagne 1 kg;GACHET 02;18
+ GACHET ;Bergerie de l'Eolienne;EP- Miel de montagne 500 g;GACHET 01;10
+ GAUF ;Bergerie de l'Eolienne;E- Gaufres salées crousti savoyard x4;GAUF 02;12
+ HUMB ; Pierre Humbert ;V- Côtelettes d'agneau 1 kg;HUMB 03;25
+ HUMB ; Pierre Humbert ;V- Epaule d'agneau;HUMB 02;30
+ HUMB ; Pierre Humbert ;V- Gigot d'agneau;HUMB 01;60
+ HUMB ; Pierre Humbert ;V- Navarin d'agneau 500 g;HUMB 04;6.5
+ MARZAN ;" Moulin ""Li dous Tihòu""  ";AN- Huile d'olive (MARZAN);MARZAN 01;0
+ MARZAN ;" Moulin ""Li dous Tihòu""  ";AN- Huile d'olive bio (MARZAN);MARZAN 02;0
+ MIEL ; Les Ruchers des 7 Monts ;EP- Miel de châtaignier 500 g;MIEL 01;10
+ MIEL ; Les Ruchers des 7 Monts ;EP- Miel de lavande 250 g;MIEL 03;5
+ MIEL ; Les Ruchers des 7 Monts ;EP- Miel de montagne;MIEL 02;0
+ SAIL ; Grain de Sail ;EP- Café bio en grains 500 g;SAIL 03;9.71
+ SAIL ; Grain de Sail ;EP- Café bio moulu 250 g;SAIL 02;5.2
+ SAIL ; Grain de Sail ;EP- Tablette de chocolat bio 100 g;SAIL 01;2.93
+ THOME ; Maison Thomé ;E- Gaufres sucrées à  la vanille x5;THOME 01;7.95
+ VEAU ; Ferme Maneguet  ;V- Viande de veau;VEAU 01;80

@@ -394,7 +394,7 @@ export default function AdminStatsDashboard() {
         <>
           <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
             <article className="rounded-[10px] border border-clay/80 bg-stone p-4">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-ink/60">Adherents actifs</p>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-ink/60">Adhérents actifs</p>
               <p className="mt-2 text-2xl font-semibold text-ink">{formatNumber(summary.activeMembers)}</p>
             </article>
             <article className="rounded-[10px] border border-clay/80 bg-stone p-4">
@@ -454,7 +454,7 @@ export default function AdminStatsDashboard() {
                   <tr>
                     <th className="px-3 py-2 font-semibold">Distribution</th>
                     <th className="px-3 py-2 font-semibold">Commandes</th>
-                    <th className="px-3 py-2 font-semibold">Adherents</th>
+                    <th className="px-3 py-2 font-semibold">Adhérents</th>
                     <th className="px-3 py-2 font-semibold">Articles</th>
                     <th className="px-3 py-2 font-semibold">CA</th>
                   </tr>
@@ -512,4 +512,3 @@ export default function AdminStatsDashboard() {
     </div>
   );
 }
-

@@ -11,6 +11,7 @@ import {
   query,
   setDoc,
   Timestamp,
+  where,
 } from "firebase/firestore";
 import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
 import { firebaseDb, firebaseStorage } from "@/lib/firebase/client";
@@ -139,6 +140,7 @@ export default function ProductsEditor({
   const [organicFilter, setOrganicFilter] = useState<"all" | "bio" | "conv">("all");
   const [sortBy, setSortBy] = useState<"name" | "producer" | "category">("name");
   const [savingCategoryId, setSavingCategoryId] = useState<string | null>(null);
+  const [deletingProductId, setDeletingProductId] = useState<string | null>(null);
   const [uploadingEditImage, setUploadingEditImage] = useState(false);
   const [uploadingCreateImage, setUploadingCreateImage] = useState(false);
 
@@ -464,6 +466,60 @@ export default function ProductsEditor({
     }
   };
 
+  const deleteProduct = async (entry: DocEntry) => {
+    const name = String(getByPath(entry.data, "name") ?? "ce produit");
+    const confirmDelete =
+      typeof window === "undefined"
+        ? true
+        : window.confirm(
+            `Supprimer "${name}" ? Cette action supprime aussi ses variantes et ses offres de distribution.`,
+          );
+    if (!confirmDelete) return;
+
+    try {
+      setDeletingProductId(entry.id);
+      setMessage("");
+
+      const [variantsSnap, distributionsSnap] = await Promise.all([
+        getDocs(collection(firebaseDb, "products", entry.id, "variants")),
+        getDocs(collection(firebaseDb, "distributionDates")),
+      ]);
+
+      const deleteTasks: Promise<unknown>[] = [];
+      variantsSnap.docs.forEach((variantDoc) => {
+        deleteTasks.push(deleteDoc(variantDoc.ref));
+      });
+
+      for (const distDoc of distributionsSnap.docs) {
+        const offerSnap = await getDocs(
+          query(
+            collection(firebaseDb, "distributionDates", distDoc.id, "offerItems"),
+            where("productId", "==", entry.id),
+          ),
+        );
+        offerSnap.docs.forEach((offerDoc) => {
+          deleteTasks.push(deleteDoc(offerDoc.ref));
+        });
+      }
+
+      if (deleteTasks.length) {
+        await Promise.all(deleteTasks);
+      }
+
+      await deleteDoc(doc(firebaseDb, collectionName, entry.id));
+      if (editingId === entry.id) {
+        setEditingId(null);
+      }
+      setMessage("Produit supprimé.");
+      await load();
+    } catch (error) {
+      const err = error instanceof Error ? error.message : "Erreur inconnue.";
+      setMessage(err);
+    } finally {
+      setDeletingProductId(null);
+    }
+  };
+
   const updateRowCategory = async (productId: string, categoryId: string) => {
     try {
       setSavingCategoryId(productId);
@@ -482,7 +538,7 @@ export default function ProductsEditor({
             : entry,
         ),
       );
-      setMessage("Categorie mise a jour.");
+      setMessage("Catégorie mise à jour.");
     } catch (error) {
       const err = error instanceof Error ? error.message : "Erreur inconnue.";
       setMessage(err);
@@ -561,7 +617,7 @@ export default function ProductsEditor({
           >
             <option value="name">Tri: Nom</option>
             <option value="producer">Tri: Producteur</option>
-            <option value="category">Tri: Categorie</option>
+            <option value="category">Tri: Catégorie</option>
           </select>
           <button
             className="rounded-full border border-ink/20 px-4 py-2 text-sm font-semibold"
@@ -936,15 +992,72 @@ export default function ProductsEditor({
                         <span className="block truncate">{shortText(getByPath(entry.data, "description"))}</span>
                       </td>
                       <td className="px-4 py-3">
-                        <button
-                          className="rounded-full border border-ink/20 px-4 py-2 text-xs font-semibold text-ink"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            openEdit(entry);
-                          }}
-                        >
-                          Ouvrir la fiche
-                        </button>
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            title="Ouvrir la fiche"
+                            aria-label="Ouvrir la fiche"
+                            className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-ink/20 text-ink transition hover:border-forest/60 hover:text-forest"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              openEdit(entry);
+                            }}
+                          >
+                            <svg
+                              viewBox="0 0 24 24"
+                              fill="none"
+                              stroke="currentColor"
+                              strokeWidth="1.8"
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              className="h-4 w-4"
+                            >
+                              <path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6Z" />
+                              <circle cx="12" cy="12" r="3" />
+                            </svg>
+                          </button>
+                          <button
+                            type="button"
+                            title="Supprimer"
+                            aria-label="Supprimer"
+                            className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-ember/35 text-ember transition hover:bg-ember/10 disabled:opacity-50"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              deleteProduct(entry).catch(() => undefined);
+                            }}
+                            disabled={deletingProductId === entry.id}
+                          >
+                            {deletingProductId === entry.id ? (
+                              <svg
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="1.8"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                className="h-4 w-4 animate-spin"
+                              >
+                                <path d="M21 12a9 9 0 1 1-4.2-7.6" />
+                              </svg>
+                            ) : (
+                              <svg
+                                viewBox="0 0 24 24"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="1.8"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                className="h-4 w-4"
+                              >
+                                <path d="M3 6h18" />
+                                <path d="M8 6V4h8v2" />
+                                <path d="M19 6l-1 14H6L5 6" />
+                                <path d="M10 11v6" />
+                                <path d="M14 11v6" />
+                              </svg>
+                            )}
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   );

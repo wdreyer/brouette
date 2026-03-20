@@ -548,7 +548,7 @@ export default function AdminDashboard({
     load().catch(() => setLoading(false));
   }, [effectiveMemberId]);
 
-  const roleLabel = effectiveRole === "admin" ? "Admin" : effectiveRole === "referent" ? "Referent" : "Membre";
+  const roleLabel = effectiveRole === "admin" ? "Admin" : effectiveRole === "referent" ? "Référent" : "Membre";
   const fullName = `${viewer?.firstName ?? ""} ${viewer?.lastName ?? ""}`.trim();
   const activeDistribution = openDistribution ?? nextDistribution;
   const saleDates = useMemo(
@@ -598,7 +598,7 @@ export default function AdminDashboard({
     <div className="flex flex-col gap-4">
       <section className="rounded-[10px] border border-clay/90 bg-clay/25 p-4">
         <p className="text-sm text-ink/75">Bienvenue {fullName || "Utilisateur"}.</p>
-        <p className="mt-1 text-sm font-semibold text-ink">Role : {roleLabel}</p>
+        <p className="mt-1 text-sm font-semibold text-ink">Rôle : {roleLabel}</p>
       </section>
 
       {effectiveRole === "referent" ? (
@@ -641,7 +641,7 @@ export default function AdminDashboard({
 
       <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <article className="rounded-[10px] border border-clay/90 bg-stone p-4">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-ink/60">Adherents actifs</p>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-ink/60">Adhérents actifs</p>
           <p className="mt-2 text-2xl font-semibold text-ink">{formatNumber(seasonSummary.activeMembersCurrent)}</p>
           <p className="mt-2 text-xs text-ink/65">Saison {seasonSummary.label}</p>
         </article>
@@ -810,7 +810,7 @@ export default function AdminDashboard({
             </p>
             <div className="mt-4 grid gap-3 md:grid-cols-3">
               <article className="rounded-[10px] border border-clay/90 bg-stone p-4">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-ink/60">Adherents actifs</p>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-ink/60">Adhérents actifs</p>
                 <p className="mt-2 text-xl font-semibold text-ink">{formatNumber(seasonSummary.activeMembersCurrent)}</p>
                 <div className="mt-2 flex items-center gap-2">
                   <span className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${activeMembersDelta.toneClass}`}>
@@ -868,7 +868,7 @@ export default function AdminDashboard({
 
           <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
             <article className="rounded-[10px] border border-clay/90 bg-stone p-4">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-ink/60">Adherents saison</p>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-ink/60">Adhérents saison</p>
               <p className="mt-2 text-2xl font-semibold text-ink">{formatNumber(seasonSummary.membersCurrent)}</p>
               <div className="mt-2 flex items-center gap-2">
                 <span className={`rounded-full border px-2 py-0.5 text-xs font-semibold ${membersDelta.toneClass}`}>

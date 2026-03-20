@@ -22,7 +22,7 @@ function buildTestAccounts(): TestAccount[] {
   return [
     {
       key: "referent",
-      label: "Referent",
+      label: "Référent",
       email: process.env.NEXT_PUBLIC_TEST_AUTH_REFERENT_EMAIL ?? "referent.test@brouette.local",
       password: withPassword(process.env.NEXT_PUBLIC_TEST_AUTH_REFERENT_PASSWORD),
     },
@@ -34,19 +34,19 @@ function buildTestAccounts(): TestAccount[] {
     },
     {
       key: "member1",
-      label: "Adherent 1",
+      label: "Adhérent 1",
       email: process.env.NEXT_PUBLIC_TEST_AUTH_MEMBER1_EMAIL ?? "adherent1.test@brouette.local",
       password: withPassword(process.env.NEXT_PUBLIC_TEST_AUTH_MEMBER1_PASSWORD),
     },
     {
       key: "member2",
-      label: "Adherent 2",
+      label: "Adhérent 2",
       email: process.env.NEXT_PUBLIC_TEST_AUTH_MEMBER2_EMAIL ?? "adherent2.test@brouette.local",
       password: withPassword(process.env.NEXT_PUBLIC_TEST_AUTH_MEMBER2_PASSWORD),
     },
     {
       key: "member3",
-      label: "Adherent 3",
+      label: "Adhérent 3",
       email: process.env.NEXT_PUBLIC_TEST_AUTH_MEMBER3_EMAIL ?? "adherent3.test@brouette.local",
       password: withPassword(process.env.NEXT_PUBLIC_TEST_AUTH_MEMBER3_PASSWORD),
     },
@@ -65,7 +65,7 @@ export default function HeaderBar() {
   const selectedTestAccount = testAccounts.find((account) => account.key === testKey) ?? testAccounts[0];
 
   const roleBadgeLabel =
-    effectiveRole === "admin" ? "Role : Admin" : effectiveRole === "referent" ? "Role : Referent" : null;
+    effectiveRole === "admin" ? "Rôle : Admin" : effectiveRole === "referent" ? "Rôle : Référent" : null;
 
   const loginAsTest = async () => {
     setTestError("");
@@ -166,7 +166,7 @@ export default function HeaderBar() {
               className="rounded border border-ink/25 bg-white px-4 py-2 text-xs font-semibold text-ink"
               onClick={() => signOut(firebaseAuth)}
             >
-              Se deconnecter
+              Se déconnecter
             </button>
           ) : null}
 

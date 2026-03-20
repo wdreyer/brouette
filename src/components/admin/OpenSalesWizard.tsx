@@ -852,7 +852,7 @@ export default function OpenSalesWizard() {
             Commandes: <span className="font-semibold">{saleOverview.orderCount}</span>
           </div>
           <div className="rounded-sm border border-forest/30 bg-forest/10 px-3 py-2 text-sm">
-            Adherents: <span className="font-semibold">{saleOverview.memberCount}</span>
+            Adhérents: <span className="font-semibold">{saleOverview.memberCount}</span>
           </div>
           <div className="rounded-sm border border-forest/30 bg-forest/10 px-3 py-2 text-sm">
             CA: <span className="font-semibold">{money(saleOverview.revenue)} EUR</span>
@@ -982,7 +982,7 @@ export default function OpenSalesWizard() {
           <table className="min-w-full text-left text-sm">
             <thead className="border-b border-ink/20 bg-ink text-xs uppercase tracking-[0.18em] text-stone">
               <tr>
-                <th className="px-3 py-2">Referent</th>
+                <th className="px-3 py-2">Référent</th>
                 <th className="px-3 py-2">Producteur</th>
                 <th className="px-3 py-2">Produits</th>
                 <th className="px-3 py-2">Validation</th>
