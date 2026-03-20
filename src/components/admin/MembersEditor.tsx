@@ -30,6 +30,7 @@ type EditorProps = {
   title: string;
   description?: string;
   fields: FieldConfig[];
+  viewMode?: "all" | "adherents" | "coopMembers";
 };
 
 type DocEntry = {
@@ -172,6 +173,7 @@ export default function MembersEditor({
   title,
   description,
   fields,
+  viewMode = "all",
 }: EditorProps) {
   const { role } = useAuth();
   const canEditMembers = role === "admin" || role === "referent";
@@ -194,6 +196,7 @@ export default function MembersEditor({
   const [filterRole, setFilterRole] = useState<string>("all");
   const [sortKey, setSortKey] = useState<string>("lastName");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const [balanceByMemberId, setBalanceByMemberId] = useState<Record<string, number>>({});
   const [ledgerByMemberId, setLedgerByMemberId] = useState<Record<string, LedgerEntry[]>>({});
   const [ledgerLoadingMemberId, setLedgerLoadingMemberId] = useState<string | null>(null);
   const [ledgerSaving, setLedgerSaving] = useState(false);
@@ -227,6 +230,24 @@ export default function MembersEditor({
     return values.length ? values : [""];
   };
 
+  const loadBalances = async (entries: DocEntry[]) => {
+    const sums = await Promise.all(
+      entries.map(async (entry) => {
+        try {
+          const ledgerSnap = await getDocs(collection(firebaseDb, "members", entry.id, "ledger"));
+          const total = ledgerSnap.docs.reduce(
+            (sum, docSnap) => sum + Number(docSnap.get("amount") ?? 0),
+            0,
+          );
+          return [entry.id, total] as const;
+        } catch {
+          return [entry.id, 0] as const;
+        }
+      }),
+    );
+    setBalanceByMemberId(Object.fromEntries(sums));
+  };
+
   const load = async () => {
     setLoading(true);
     const [membersSnap, producersSnap] = await Promise.all([
@@ -243,12 +264,42 @@ export default function MembersEditor({
     }));
     setDocs(items);
     setProducers(producerItems);
+    await loadBalances(items);
     setLoading(false);
   };
 
   useEffect(() => {
     load().catch(() => setLoading(false));
   }, [collectionName]);
+
+  useEffect(() => {
+    if (viewMode === "adherents") {
+      setFilterRole("member");
+      return;
+    }
+    if (viewMode === "coopMembers" && filterRole === "member") {
+      setFilterRole("all");
+    }
+  }, [viewMode, filterRole]);
+
+  const roleFilterOptions = useMemo(() => {
+    if (viewMode === "adherents") {
+      return [{ value: "member", label: "Membre" }];
+    }
+    if (viewMode === "coopMembers") {
+      return [
+        { value: "all", label: "Admins + Référents" },
+        { value: "referent", label: "Référent" },
+        { value: "admin", label: "Admin" },
+      ];
+    }
+    return [
+      { value: "all", label: "Tous les rôles" },
+      { value: "member", label: "Membre" },
+      { value: "referent", label: "Référent" },
+      { value: "admin", label: "Admin" },
+    ];
+  }, [viewMode]);
 
   const loadMemberLedger = async (memberId: string) => {
     try {
@@ -263,10 +314,13 @@ export default function MembersEditor({
         }))
         .sort((a, b) => entryDate(b).getTime() - entryDate(a).getTime());
       setLedgerByMemberId((prev) => ({ ...prev, [memberId]: items }));
+      const total = items.reduce((sum, entry) => sum + Number(entry.amount ?? 0), 0);
+      setBalanceByMemberId((prev) => ({ ...prev, [memberId]: total }));
     } catch (error) {
       const err = error instanceof Error ? error.message : "Erreur inconnue.";
       setMessage(err);
       setLedgerByMemberId((prev) => ({ ...prev, [memberId]: [] }));
+      setBalanceByMemberId((prev) => ({ ...prev, [memberId]: 0 }));
     } finally {
       setLedgerLoadingMemberId((prev) => (prev === memberId ? null : prev));
     }
@@ -432,8 +486,10 @@ export default function MembersEditor({
     const term = filter.trim().toLowerCase();
     return docs.filter((entry) => {
       const status = String(getByPath(entry.data, "membershipStatus") ?? "");
-      const role = String(getByPath(entry.data, "auth.role") ?? "");
+      const role = String(getByPath(entry.data, "auth.role") ?? "member") || "member";
       if (filterStatus !== "all" && status !== filterStatus) return false;
+      if (viewMode === "adherents" && role !== "member") return false;
+      if (viewMode === "coopMembers" && role !== "admin" && role !== "referent") return false;
       if (filterRole !== "all" && role !== filterRole) return false;
       if (!term) return true;
       const haystack = [
@@ -450,7 +506,7 @@ export default function MembersEditor({
         .join(" ");
       return haystack.includes(term);
     });
-  }, [docs, filter, filterRole, filterStatus]);
+  }, [docs, filter, filterRole, filterStatus, viewMode]);
 
   const sortedDocs = useMemo(() => {
     const items = [...filteredDocs];
@@ -506,17 +562,18 @@ export default function MembersEditor({
           value={filterRole}
           onChange={(event) => setFilterRole(event.target.value)}
         >
-          <option value="all">Tous les rôles</option>
-          <option value="member">Membre</option>
-          <option value="referent">Référent</option>
-          <option value="admin">Admin</option>
+          {roleFilterOptions.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
         </select>
         <button
           className="rounded-full border border-ink/20 px-4 py-2 text-sm font-semibold"
           onClick={() => {
             setFilter("");
             setFilterStatus("all");
-            setFilterRole("all");
+            setFilterRole(viewMode === "adherents" ? "member" : "all");
           }}
         >
           Réinitialiser
@@ -552,6 +609,7 @@ export default function MembersEditor({
                       {sortKey === field.path ? (sortDir === "asc" ? " ↑" : " ↓") : ""}
                     </th>
                   ))}
+                  <th className="px-3 py-1.5 text-xs font-semibold text-ink">Solde</th>
                   <th className="px-3 py-1.5 text-xs font-semibold text-ink">Producteurs</th>
                 </tr>
               </thead>
@@ -578,6 +636,19 @@ export default function MembersEditor({
                             : displayValue(getByPath(entry.data, field.path))}
                       </td>
                     ))}
+                    <td className="px-3 py-1.5 text-xs">
+                      {(() => {
+                        const balance = Number(balanceByMemberId[entry.id] ?? 0);
+                        if (Math.abs(balance) < 0.000001) {
+                          return <span className="text-ink/55">-</span>;
+                        }
+                        return (
+                          <span className={balance < 0 ? "font-semibold text-ember" : "font-semibold text-forest"}>
+                            {formatMoney(balance)} EUR
+                          </span>
+                        );
+                      })()}
+                    </td>
                     <td className="px-3 py-1.5 text-xs text-ink/70">
                       {producers.filter((producer) => producer.referentId === entry.id).length}
                     </td>
@@ -803,9 +874,9 @@ export default function MembersEditor({
 
       {editingId ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-6">
-          <div className="flex max-h-[88vh] w-full max-w-6xl flex-col rounded-3xl border border-clay/70 bg-white p-6 shadow-card">
+          <div className="flex max-h-[88vh] w-full max-w-3xl flex-col rounded-3xl border border-clay/70 bg-white p-6 shadow-card">
             <h3 className="font-serif text-2xl">Éditer adhérent</h3>
-            <div className="mt-4 grid flex-1 gap-6 overflow-y-auto pr-1 xl:grid-cols-[1.1fr_1fr]">
+            <div className="mt-4 flex-1 overflow-y-auto pr-1">
               <div className="grid gap-4 md:grid-cols-2">
                 {formFields.map((field) => {
                   const value = getByPath(editDraft, field.path);

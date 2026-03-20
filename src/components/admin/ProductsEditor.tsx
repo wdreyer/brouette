@@ -137,8 +137,10 @@ export default function ProductsEditor({
   const [filter, setFilter] = useState("");
   const [producerFilter, setProducerFilter] = useState("all");
   const [categoryFilter, setCategoryFilter] = useState("all");
+  const [saleFilter, setSaleFilter] = useState<"all" | "on_sale">("all");
   const [organicFilter, setOrganicFilter] = useState<"all" | "bio" | "conv">("all");
   const [sortBy, setSortBy] = useState<"name" | "producer" | "category">("name");
+  const [openSaleProductIds, setOpenSaleProductIds] = useState<string[]>([]);
   const [savingCategoryId, setSavingCategoryId] = useState<string | null>(null);
   const [deletingProductId, setDeletingProductId] = useState<string | null>(null);
   const [uploadingEditImage, setUploadingEditImage] = useState(false);
@@ -148,10 +150,11 @@ export default function ProductsEditor({
 
   const load = async () => {
     setLoading(true);
-    const [productsSnap, producersSnap, categoriesSnap] = await Promise.all([
+    const [productsSnap, producersSnap, categoriesSnap, openDistSnap] = await Promise.all([
       getDocs(collection(firebaseDb, collectionName)),
       getDocs(collection(firebaseDb, "producers")),
       getDocs(collection(firebaseDb, "categories")),
+      getDocs(query(collection(firebaseDb, "distributionDates"), where("status", "==", "open"), limit(1))),
     ]);
     const items = productsSnap.docs.map((docSnap) => ({
       id: docSnap.id,
@@ -170,6 +173,20 @@ export default function ProductsEditor({
         ...(docSnap.data() as Omit<Category, "id">),
       })),
     );
+    if (!openDistSnap.empty) {
+      const openDistId = openDistSnap.docs[0].id;
+      const offerSnap = await getDocs(collection(firebaseDb, "distributionDates", openDistId, "offerItems"));
+      const productIds = Array.from(
+        new Set(
+          offerSnap.docs
+            .map((docSnap) => String((docSnap.data() as { productId?: string }).productId ?? ""))
+            .filter(Boolean),
+        ),
+      );
+      setOpenSaleProductIds(productIds);
+    } else {
+      setOpenSaleProductIds([]);
+    }
     setLoading(false);
   };
 
@@ -221,6 +238,8 @@ export default function ProductsEditor({
     return map;
   }, [categoryOptions]);
 
+  const openSaleProductIdSet = useMemo(() => new Set(openSaleProductIds), [openSaleProductIds]);
+
   const docsMeta = useMemo(
     () =>
       docs.map((entry) => {
@@ -230,6 +249,7 @@ export default function ProductsEditor({
         const producerLabel = producerLabelById.get(producerId) ?? producerId;
         const categoryLabel = categoryLabelById.get(categoryId) ?? categoryId;
         const isOrganic = Boolean(getByPath(entry.data, "isOrganic"));
+        const isOnSale = openSaleProductIdSet.has(entry.id);
         const searchable = [
           entry.id,
           name,
@@ -247,10 +267,16 @@ export default function ProductsEditor({
           producerLabel,
           categoryLabel,
           isOrganic,
+          isOnSale,
           searchable,
         };
       }),
-    [docs, producerLabelById, categoryLabelById],
+    [docs, producerLabelById, categoryLabelById, openSaleProductIdSet],
+  );
+
+  const onSaleDocsCount = useMemo(
+    () => docsMeta.filter((item) => item.isOnSale).length,
+    [docsMeta],
   );
 
   const filteredDocs = useMemo(() => {
@@ -260,6 +286,7 @@ export default function ProductsEditor({
       if (categoryFilter !== "all") {
         if (item.categoryId !== categoryFilter) return false;
       }
+      if (saleFilter === "on_sale" && !item.isOnSale) return false;
       if (organicFilter === "bio" && !item.isOrganic) return false;
       if (organicFilter === "conv" && item.isOrganic) return false;
       if (!term) return true;
@@ -277,33 +304,35 @@ export default function ProductsEditor({
       return a.name.localeCompare(b.name, "fr");
     });
     return filtered.map((item) => item.entry);
-  }, [docsMeta, filter, producerFilter, categoryFilter, organicFilter, sortBy]);
+  }, [docsMeta, filter, producerFilter, categoryFilter, saleFilter, organicFilter, sortBy]);
 
   const producerCounts = useMemo(() => {
     const term = filter.trim().toLowerCase();
     const counts = new Map<string, number>();
     docsMeta.forEach((item) => {
       if (categoryFilter !== "all" && item.categoryId !== categoryFilter) return;
+      if (saleFilter === "on_sale" && !item.isOnSale) return;
       if (organicFilter === "bio" && !item.isOrganic) return;
       if (organicFilter === "conv" && item.isOrganic) return;
       if (term && !item.searchable.includes(term)) return;
       counts.set(item.producerId, (counts.get(item.producerId) ?? 0) + 1);
     });
     return counts;
-  }, [docsMeta, filter, categoryFilter, organicFilter]);
+  }, [docsMeta, filter, categoryFilter, saleFilter, organicFilter]);
 
   const categoryCounts = useMemo(() => {
     const term = filter.trim().toLowerCase();
     const counts = new Map<string, number>();
     docsMeta.forEach((item) => {
       if (producerFilter !== "all" && item.producerId !== producerFilter) return;
+      if (saleFilter === "on_sale" && !item.isOnSale) return;
       if (organicFilter === "bio" && !item.isOrganic) return;
       if (organicFilter === "conv" && item.isOrganic) return;
       if (term && !item.searchable.includes(term)) return;
       counts.set(item.categoryId, (counts.get(item.categoryId) ?? 0) + 1);
     });
     return counts;
-  }, [docsMeta, filter, producerFilter, organicFilter]);
+  }, [docsMeta, filter, producerFilter, saleFilter, organicFilter]);
 
   const producerTotalInScope = useMemo(
     () => Array.from(producerCounts.values()).reduce((sum, value) => sum + value, 0),
@@ -612,6 +641,14 @@ export default function ProductsEditor({
           </select>
           <select
             className="rounded-full border border-ink/20 bg-white px-3 py-2 text-sm"
+            value={saleFilter}
+            onChange={(event) => setSaleFilter(event.target.value as "all" | "on_sale")}
+          >
+            <option value="all">Tous les produits</option>
+            <option value="on_sale">Produits en vente actuellement ({onSaleDocsCount})</option>
+          </select>
+          <select
+            className="rounded-full border border-ink/20 bg-white px-3 py-2 text-sm"
             value={sortBy}
             onChange={(event) => setSortBy(event.target.value as "name" | "producer" | "category")}
           >
@@ -625,6 +662,7 @@ export default function ProductsEditor({
               setFilter("");
               setProducerFilter("all");
               setCategoryFilter("all");
+              setSaleFilter("all");
               setOrganicFilter("all");
               setSortBy("name");
             }}
@@ -992,7 +1030,7 @@ export default function ProductsEditor({
                         <span className="block truncate">{shortText(getByPath(entry.data, "description"))}</span>
                       </td>
                       <td className="px-4 py-3">
-                        <div className="flex flex-wrap gap-2">
+                        <div className="inline-flex items-center gap-2 whitespace-nowrap">
                           <button
                             type="button"
                             title="Ouvrir la fiche"

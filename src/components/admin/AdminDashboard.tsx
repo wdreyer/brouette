@@ -736,7 +736,7 @@ export default function AdminDashboard({
                   <p className="mt-1 line-clamp-2 text-sm font-semibold text-ink">{row.title}</p>
                   {row.producerName ? <p className="mt-1 text-xs text-ink/65">{row.producerName}</p> : null}
                   <div className="mt-2 flex items-center justify-between text-xs font-semibold text-ink/80">
-                    <span>{formatNumber(row.quantity)} commandes</span>
+                    <span>{formatNumber(row.quantity)} quantités</span>
                     <span>{formatMoney(row.revenue)} EUR</span>
                   </div>
                 </div>

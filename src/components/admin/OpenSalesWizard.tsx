@@ -50,6 +50,7 @@ type Product = {
   description: string;
   imageUrl: string;
   isOrganic: boolean;
+  saleLimit?: number | null;
   variants: Variant[];
 };
 
@@ -106,6 +107,11 @@ const formatLongDate = (value?: Date | null) =>
   value
     ? value.toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })
     : "-";
+const distributionDateLabels = (distribution?: Distribution | null) =>
+  (distribution?.dates ?? [])
+    .slice(0, 3)
+    .map((date) => formatDate(toDate(date)))
+    .filter((label) => label !== "-");
 const money = (value: number) => value.toFixed(2).replace(".", ",");
 const isPlanned = (status?: string) =>
   !isOpenStatus(status) && !FINISHED.has(String(status ?? "").toLowerCase());
@@ -178,6 +184,18 @@ export default function OpenSalesWizard() {
     [targetDistribution],
   );
   const saleDateKeys = useMemo(() => saleDates.map((d) => d.key), [saleDates]);
+  const openDistributionDates = useMemo(
+    () => distributionDateLabels(openDistribution),
+    [openDistribution],
+  );
+  const nextDistributionDates = useMemo(
+    () => distributionDateLabels(nextPlannedDistribution),
+    [nextPlannedDistribution],
+  );
+  const validationDistributionDates = useMemo(
+    () => distributionDateLabels(targetDistribution),
+    [targetDistribution],
+  );
 
   const currentProducerId = flowProducerIds[flowIndex] ?? "";
   const currentProducer = useMemo(
@@ -392,6 +410,7 @@ export default function OpenSalesWizard() {
         description?: string;
         imageUrl?: string;
         isOrganic?: boolean;
+        saleLimit?: number | null;
       };
       const producerId = String(data.producerId ?? "");
       if (!producerId) return;
@@ -403,6 +422,7 @@ export default function OpenSalesWizard() {
         description: String(data.description ?? ""),
         imageUrl: String(data.imageUrl ?? ""),
         isOrganic: Boolean(data.isOrganic),
+        saleLimit: data.saleLimit ?? null,
         variants: variantsByProduct[d.id] ?? [],
       });
     });
@@ -531,6 +551,26 @@ export default function OpenSalesWizard() {
 
   const validatedCount = rows.filter((row) => row.validatedByReferent).length;
   const pendingCount = Math.max(rows.length - validatedCount, 0);
+  const targetPotentialProductsCount = useMemo(() => {
+    const productIds = new Set<string>();
+    rows.forEach((row) => {
+      (productsByProducer[row.producerId] ?? []).forEach((product) => {
+        productIds.add(product.id);
+      });
+    });
+    return productIds.size;
+  }, [rows, productsByProducer]);
+  const targetValidatedProductsCount = useMemo(() => {
+    const productIds = new Set<string>();
+    rows
+      .filter((row) => row.validatedByReferent)
+      .forEach((row) => {
+        (productsByProducer[row.producerId] ?? []).forEach((product) => {
+          productIds.add(product.id);
+        });
+      });
+    return productIds.size;
+  }, [rows, productsByProducer]);
   const canOpen =
     canManageLifecycle &&
     !openDistribution &&
@@ -575,9 +615,6 @@ export default function OpenSalesWizard() {
     () => plannedDistributions,
     [plannedDistributions],
   );
-  const nextMetrics = nextPlannedDistribution
-    ? distributionMetrics[nextPlannedDistribution.id]
-    : null;
 
   const openFlow = (producerIds: string[], startAt = 0) => {
     if (!targetDistribution?.id) {
@@ -751,31 +788,103 @@ export default function OpenSalesWizard() {
     if (currentRow) await setValidation(currentRow, true);
   };
 
+  const rebuildOffersForValidatedProducers = async (
+    distributionId: string,
+    distributionDateKeys: string[],
+  ) => {
+    const offerItemsRef = collection(firebaseDb, "distributionDates", distributionId, "offerItems");
+    const existingOfferSnap = await getDocs(offerItemsRef);
+    let batch = writeBatch(firebaseDb);
+    let operationCount = 0;
+    let offersCreated = 0;
+    const producersWithOffers = new Set<string>();
+
+    const flushBatch = async (force = false) => {
+      if (!force && operationCount < 380) return;
+      if (operationCount === 0) return;
+      await batch.commit();
+      batch = writeBatch(firebaseDb);
+      operationCount = 0;
+    };
+
+    existingOfferSnap.docs.forEach((offerDoc) => {
+      batch.delete(offerDoc.ref);
+      operationCount += 1;
+    });
+    await flushBatch();
+
+    rows
+      .filter((row) => row.validatedByReferent)
+      .forEach((row) => {
+        const producerId = row.producerId;
+        (productsByProducer[producerId] ?? []).forEach((product) => {
+          const limitTotal = Number(product.saleLimit ?? 0);
+          product.variants.forEach((variant) => {
+            const sourceDates = Array.isArray(variant.activeDates) ? variant.activeDates : [];
+            const activeDates = (
+              sourceDates.length > 0 ? sourceDates : distributionDateKeys
+            ).filter((key) => distributionDateKeys.includes(key));
+            Array.from(new Set(activeDates)).forEach((saleDateKey) => {
+              const offerRef = doc(offerItemsRef);
+              batch.set(offerRef, {
+                producerId,
+                productId: product.id,
+                variantId: variant.id,
+                saleDateKey,
+                title: product.name,
+                variantLabel: variant.label,
+                imageUrl: product.imageUrl || null,
+                isOrganic: product.isOrganic,
+                priceApplied: Number(variant.price ?? 0),
+                limitTotal: Number.isFinite(limitTotal) && limitTotal > 0 ? limitTotal : 0,
+                active: true,
+              });
+              offersCreated += 1;
+              producersWithOffers.add(producerId);
+              operationCount += 1;
+            });
+          });
+        });
+      });
+
+    await flushBatch(true);
+    return { offersCreated, producersWithOffers: producersWithOffers.size };
+  };
+
   const openSale = async () => {
     if (!targetDistribution || !canOpen) return;
     setSaving(true);
-    const batch = writeBatch(firebaseDb);
-    const firstDate = toDate(targetDistribution.dates?.[0]);
-    let closeAt: Timestamp | null = null;
-    if (firstDate) {
-      const closeDate = new Date(firstDate);
-      closeDate.setDate(closeDate.getDate() - 10);
-      closeDate.setHours(22, 0, 0, 0);
-      closeAt = Timestamp.fromDate(closeDate);
-    }
-    distributions.forEach((distribution) => {
-      if (isOpenStatus(distribution.status) && distribution.id !== targetDistribution.id) {
-        batch.update(doc(firebaseDb, "distributionDates", distribution.id), { status: "finished" });
+    setMessage("");
+    try {
+      const offerSync = await rebuildOffersForValidatedProducers(targetDistribution.id, saleDateKeys);
+
+      const batch = writeBatch(firebaseDb);
+      const firstDate = toDate(targetDistribution.dates?.[0]);
+      let closeAt: Timestamp | null = null;
+      if (firstDate) {
+        const closeDate = new Date(firstDate);
+        closeDate.setDate(closeDate.getDate() - 10);
+        closeDate.setHours(22, 0, 0, 0);
+        closeAt = Timestamp.fromDate(closeDate);
       }
-    });
-    batch.update(doc(firebaseDb, "distributionDates", targetDistribution.id), {
-      status: "open",
-      openedAt: Timestamp.now(),
-      closeAt,
-    });
-    await batch.commit();
-    await load();
-    setSaving(false);
+      distributions.forEach((distribution) => {
+        if (isOpenStatus(distribution.status) && distribution.id !== targetDistribution.id) {
+          batch.update(doc(firebaseDb, "distributionDates", distribution.id), { status: "finished" });
+        }
+      });
+      batch.update(doc(firebaseDb, "distributionDates", targetDistribution.id), {
+        status: "open",
+        openedAt: Timestamp.now(),
+        closeAt,
+      });
+      await batch.commit();
+      await load();
+      setMessage(
+        `Vente ouverte. ${offerSync.offersCreated} offres publiees pour ${offerSync.producersWithOffers} producteurs.`,
+      );
+    } finally {
+      setSaving(false);
+    }
   };
 
   const closeSale = async () => {
@@ -818,6 +927,22 @@ export default function OpenSalesWizard() {
                 ? `Ouverte le ${formatLongDate(toDate(openDistribution.openedAt))}${toDate(openDistribution.closeAt) ? ` · fermeture auto le ${formatLongDate(toDate(openDistribution.closeAt))} a 22h` : ""}.`
                 : "La boutique est actuellement fermee."}
             </p>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              {openDistributionDates.length ? (
+                openDistributionDates.map((label, index) => (
+                  <span
+                    key={`open-date-${index}`}
+                    className="rounded-full border border-forest/30 bg-forest/10 px-3 py-1 text-xs font-semibold text-forest"
+                  >
+                    📅 Date {index + 1}: {label}
+                  </span>
+                ))
+              ) : (
+                <span className="rounded-full border border-ink/20 bg-ink/5 px-3 py-1 text-xs text-ink/70">
+                  📅 Dates de distribution non renseignées
+                </span>
+              )}
+            </div>
           </div>
           <div className="flex gap-2">
             {canManageLifecycle && openDistribution ? (
@@ -879,6 +1004,18 @@ export default function OpenSalesWizard() {
                 ? `${distributionLabel(nextPlannedDistribution)}`
                 : "Aucune prochaine vente planifiee."}
             </p>
+            {nextPlannedDistribution ? (
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                {nextDistributionDates.map((label, index) => (
+                  <span
+                    key={`next-date-${index}`}
+                    className="rounded-full border border-honey/45 bg-honey/20 px-3 py-1 text-xs font-semibold text-ink/85"
+                  >
+                    📅 Date {index + 1}: {label}
+                  </span>
+                ))}
+              </div>
+            ) : null}
             <p className="mt-1 text-xs text-ink/60">
               Tu peux preparer et pre-valider cette prochaine vente. Les effets boutique deviennent visibles uniquement quand elle est ouverte.
             </p>
@@ -902,27 +1039,38 @@ export default function OpenSalesWizard() {
         </div>
 
         {nextPlannedDistribution ? (
-          <div className="mt-3 grid gap-2 md:grid-cols-4">
+          <div className="mt-3 grid gap-2 md:grid-cols-5">
             <div className="rounded-sm border border-clay/70 bg-clay/10 px-3 py-2 text-sm">
-              Dates:{" "}
-              <span className="font-semibold">
-                {(nextPlannedDistribution.dates ?? [])
-                  .slice(0, 3)
-                  .map((d) => formatDate(toDate(d)))
-                  .join(" · ")}
-              </span>
+              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-ink/65">
+                📅 Dates distribution
+              </p>
+              <div className="mt-1 flex flex-wrap gap-1.5">
+                {nextDistributionDates.length ? (
+                  nextDistributionDates.map((label, index) => (
+                    <span key={`next-dates-card-${index}`} className="rounded-full bg-white/85 px-2 py-0.5 text-xs font-semibold text-ink/80">
+                      {index + 1}. {label}
+                    </span>
+                  ))
+                ) : (
+                  <span className="text-xs text-ink/65">Dates non renseignées</span>
+                )}
+              </div>
             </div>
             <div className="rounded-sm border border-clay/70 bg-clay/10 px-3 py-2 text-sm">
               Producteurs actifs:{" "}
-              <span className="font-semibold">{nextMetrics?.producersActive ?? rows.length}</span>
+              <span className="font-semibold">{rows.length}</span>
             </div>
             <div className="rounded-sm border border-clay/70 bg-clay/10 px-3 py-2 text-sm">
               Producteurs valides:{" "}
-              <span className="font-semibold">{nextMetrics?.producersValidated ?? validatedCount}</span>
+              <span className="font-semibold">{validatedCount}</span>
             </div>
             <div className="rounded-sm border border-clay/70 bg-clay/10 px-3 py-2 text-sm">
-              Produits prevus:{" "}
-              <span className="font-semibold">{nextMetrics?.productsCount ?? 0}</span>
+              Produits valides:{" "}
+              <span className="font-semibold">{targetValidatedProductsCount}</span>
+            </div>
+            <div className="rounded-sm border border-clay/70 bg-clay/10 px-3 py-2 text-sm">
+              Produits potentiels:{" "}
+              <span className="font-semibold">{targetPotentialProductsCount}</span>
             </div>
           </div>
         ) : null}
@@ -936,6 +1084,28 @@ export default function OpenSalesWizard() {
             <p className="mt-1 text-sm text-ink/70">
               Seuls les producteurs avec produits apparaissent dans le tableau.
             </p>
+            <p className="mt-2 text-sm font-semibold text-ink/85">
+              Validation pour:{" "}
+              <span className="text-ink">
+                {targetDistribution ? distributionLabel(targetDistribution) : "Aucune distribution ciblee"}
+              </span>
+            </p>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              {validationDistributionDates.length ? (
+                validationDistributionDates.map((label, index) => (
+                  <span
+                    key={`validation-date-${index}`}
+                    className="rounded-full border border-clay/70 bg-stone px-3 py-1 text-xs font-semibold text-ink/80"
+                  >
+                    📅 Date {index + 1}: {label}
+                  </span>
+                ))
+              ) : (
+                <span className="rounded-full border border-ink/20 bg-ink/5 px-3 py-1 text-xs text-ink/70">
+                  📅 Dates non renseignees
+                </span>
+              )}
+            </div>
             {saleLocked ? (
               <p className="mt-1 text-xs text-ember">
                 Cette distribution est ouverte : validations et editions verrouillees.
@@ -1092,10 +1262,7 @@ export default function OpenSalesWizard() {
           <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
             {upcomingPlannedDistributions.map((distribution) => {
               const metrics = distributionMetrics[distribution.id];
-              const dates = (distribution.dates ?? [])
-                .slice(0, 3)
-                .map((d) => formatDate(toDate(d)))
-                .join(" · ");
+              const dateLabels = distributionDateLabels(distribution);
               return (
                 <article key={distribution.id} className="rounded-sm border border-clay/70 bg-stone p-3">
                   <div className="flex items-center justify-between gap-2">
@@ -1104,7 +1271,17 @@ export default function OpenSalesWizard() {
                       Planifiee
                     </span>
                   </div>
-                  <p className="mt-1 text-xs text-ink/65">{dates || "-"}</p>
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {dateLabels.length ? (
+                      dateLabels.map((label, index) => (
+                        <span key={`${distribution.id}-date-${index}`} className="rounded-full border border-clay/60 bg-white/85 px-2 py-0.5 text-[11px] font-semibold text-ink/80">
+                          📅 {index + 1}: {label}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="text-xs text-ink/65">📅 Dates non renseignées</span>
+                    )}
+                  </div>
                   <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
                     <div className="rounded-sm border border-clay/70 bg-white px-2 py-1">
                       Producteurs: <span className="font-semibold">{metrics?.producersActive ?? 0}</span>

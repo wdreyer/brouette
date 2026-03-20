@@ -32,6 +32,38 @@ const COLLECTIONS: Record<
       { label: "Rôle", path: "auth.role", type: "text", table: true },
     ],
   },
+  adherents: {
+    title: "Adhérents",
+    description: "Adhérents (rôle membre) avec suivi du solde.",
+    fields: [
+      { label: "Prénom", path: "firstName", type: "text", table: true },
+      { label: "Nom", path: "lastName", type: "text", table: true },
+      { label: "Email", path: "email", type: "text", table: true },
+      { label: "Adresse", path: "address.street", type: "text" },
+      { label: "Code postal", path: "address.postalCode", type: "text" },
+      { label: "Ville", path: "address.city", type: "text" },
+      { label: "Statut", path: "membershipStatus", type: "text", table: true },
+      { label: "Adhésion", path: "membershipPaymentStatus", type: "text", table: true },
+      { label: "Date adhésion", path: "membershipJoinedAt", type: "date", table: true },
+      { label: "Rôle", path: "auth.role", type: "text", table: true },
+    ],
+  },
+  "membres-coop": {
+    title: "Membres coop",
+    description: "Membres coop (admins et référents) avec suivi du solde.",
+    fields: [
+      { label: "Prénom", path: "firstName", type: "text", table: true },
+      { label: "Nom", path: "lastName", type: "text", table: true },
+      { label: "Email", path: "email", type: "text", table: true },
+      { label: "Adresse", path: "address.street", type: "text" },
+      { label: "Code postal", path: "address.postalCode", type: "text" },
+      { label: "Ville", path: "address.city", type: "text" },
+      { label: "Statut", path: "membershipStatus", type: "text", table: true },
+      { label: "Adhésion", path: "membershipPaymentStatus", type: "text", table: true },
+      { label: "Date adhésion", path: "membershipJoinedAt", type: "date", table: true },
+      { label: "Rôle", path: "auth.role", type: "text", table: true },
+    ],
+  },
   producers: {
     title: "Producteurs",
     description: "Coordonnées et statut dans la coop.",
@@ -141,6 +173,8 @@ const COLLECTIONS: Record<
 
 const COLLECTION_ROLES: Record<string, Array<"admin" | "referent">> = {
   members: ["admin", "referent"],
+  adherents: ["admin", "referent"],
+  "membres-coop": ["admin", "referent"],
   producers: ["admin", "referent"],
   products: ["admin", "referent"],
   orders: ["admin", "referent"],
@@ -182,13 +216,20 @@ export default function AdminCollectionPage() {
     );
   }
 
-  if (key === "members") {
+  if (key === "members" || key === "adherents" || key === "membres-coop") {
     return (
       <MembersEditor
-        collectionName={key}
+        collectionName="members"
         title={config.title}
         description={config.description}
         fields={config.fields}
+        viewMode={
+          key === "adherents"
+            ? "adherents"
+            : key === "membres-coop"
+              ? "coopMembers"
+              : "all"
+        }
       />
     );
   }

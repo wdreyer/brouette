@@ -179,7 +179,10 @@ const adminGroups: NavGroup[] = [
   {
     label: "Communauté",
     defaultOpen: true,
-    items: [{ href: "/admin/members", label: "Adhérents", icon: "members" }],
+    items: [
+      { href: "/admin/adherents", label: "Adhérents", icon: "members" },
+      { href: "/admin/membres-coop", label: "Membres coop", icon: "members" },
+    ],
   },
   {
     label: "Administration",

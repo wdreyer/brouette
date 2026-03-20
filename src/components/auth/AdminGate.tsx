@@ -11,6 +11,8 @@ const REFERENT_ALLOWED_PREFIXES = [
   "/admin/products",
   "/admin/producers",
   "/admin/members",
+  "/admin/adherents",
+  "/admin/membres-coop",
   "/admin/invites",
   "/admin/invite",
   "/admin/invitations",

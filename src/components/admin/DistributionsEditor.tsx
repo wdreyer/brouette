@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Timestamp, collection, doc, getDoc, getDocs, setDoc, writeBatch } from "firebase/firestore";
+import { useAuth } from "@/components/auth/AuthProvider";
 import { firebaseDb } from "@/lib/firebase/client";
 import { distributionLabel } from "@/lib/distributions";
 
@@ -63,8 +64,15 @@ function formatShortDateKey(key: string) {
   return formatDate(fromDateKey(key));
 }
 
+function statusSelectValue(status?: string): "planned" | "open" | "finished" {
+  const value = String(status ?? "").toLowerCase().trim();
+  if (value === "open" || value === "ouverte" || value === "ouvertes") return "open";
+  if (value === "finished" || value === "fermee" || value === "ferme" || value === "closed") return "finished";
+  return "planned";
+}
+
 function statusLabel(status?: string) {
-  const value = String(status ?? "").toLowerCase();
+  const value = statusSelectValue(status);
   if (value === "open") return "Ouverte";
   if (value === "finished") return "Finie";
   return "Planifiee";
@@ -81,9 +89,12 @@ function isActiveProducer(status?: string | null) {
 }
 
 export default function DistributionsEditor({ title, description }: EditorProps) {
+  const { effectiveRole } = useAuth();
+  const isAdmin = effectiveRole === "admin";
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
   const [adding, setAdding] = useState(false);
+  const [updatingStatusId, setUpdatingStatusId] = useState<string | null>(null);
 
   const [rows, setRows] = useState<
     Array<{ distribution: DistributionDoc; checkedProducers: number; totalProducers: number }>
@@ -312,6 +323,42 @@ export default function DistributionsEditor({ title, description }: EditorProps)
     }
   };
 
+  const updateDistributionStatus = async (
+    distributionId: string,
+    nextStatus: "planned" | "open" | "finished",
+  ) => {
+    if (!isAdmin) return;
+    try {
+      setUpdatingStatusId(distributionId);
+      setMessage("");
+      const payload: Record<string, unknown> = {
+        status: nextStatus,
+        updatedAt: Timestamp.now(),
+      };
+      if (nextStatus === "open") {
+        payload.openedAt = Timestamp.now();
+      } else if (nextStatus === "finished") {
+        payload.closedAt = Timestamp.now();
+      } else {
+        payload.openedAt = null;
+        payload.closedAt = null;
+      }
+      await setDoc(doc(firebaseDb, "distributionDates", distributionId), payload, { merge: true });
+      setRows((prev) =>
+        prev.map((row) =>
+          row.distribution.id === distributionId
+            ? { ...row, distribution: { ...row.distribution, status: nextStatus } }
+            : row,
+        ),
+      );
+      setMessage("Statut de la distribution mis a jour.");
+    } catch {
+      setMessage("Impossible de mettre a jour le statut.");
+    } finally {
+      setUpdatingStatusId(null);
+    }
+  };
+
   const empty = useMemo(() => !loading && rows.length === 0, [loading, rows.length]);
 
   return (
@@ -321,7 +368,7 @@ export default function DistributionsEditor({ title, description }: EditorProps)
           <div>
             <h2 className="font-serif text-3xl">{title}</h2>
             <p className="mt-2 text-sm text-ink/70">
-              {description ?? "Liste des distributions sur l'annee a venir."}
+              {description ?? "Liste des distributions sur l annee a venir."}
             </p>
           </div>
           <button
@@ -338,7 +385,7 @@ export default function DistributionsEditor({ title, description }: EditorProps)
         {loading ? (
           <p className="text-sm text-ink/70">Chargement...</p>
         ) : empty ? (
-          <p className="text-sm text-ink/70">Aucune distribution sur l'annee a venir.</p>
+          <p className="text-sm text-ink/70">Aucune distribution sur l annee a venir.</p>
         ) : (
           <div className="overflow-auto border border-ink/15 bg-white">
             <table className="min-w-full text-left text-sm">
@@ -360,7 +407,27 @@ export default function DistributionsEditor({ title, description }: EditorProps)
                     <td className="px-3 py-2 text-xs text-ink/70">{formatDate(toDate(row.distribution.dates?.[0]))}</td>
                     <td className="px-3 py-2 text-xs text-ink/70">{formatDate(toDate(row.distribution.dates?.[1]))}</td>
                     <td className="px-3 py-2 text-xs text-ink/70">{formatDate(toDate(row.distribution.dates?.[2]))}</td>
-                    <td className="px-3 py-2 text-xs text-ink/70">{statusLabel(row.distribution.status)}</td>
+                    <td className="px-3 py-2 text-xs text-ink/70">
+                      {isAdmin ? (
+                        <select
+                          className="min-w-[130px] rounded-md border border-ink/20 bg-white px-2 py-1 text-xs"
+                          value={statusSelectValue(row.distribution.status)}
+                          onChange={(event) =>
+                            updateDistributionStatus(
+                              row.distribution.id,
+                              event.target.value as "planned" | "open" | "finished",
+                            ).catch(() => undefined)
+                          }
+                          disabled={updatingStatusId === row.distribution.id}
+                        >
+                          <option value="planned">Planifiee</option>
+                          <option value="open">Ouverte</option>
+                          <option value="finished">Finie</option>
+                        </select>
+                      ) : (
+                        statusLabel(row.distribution.status)
+                      )}
+                    </td>
                     <td className="px-3 py-2 text-xs text-ink/70">
                       {row.checkedProducers} / {row.totalProducers}
                     </td>
