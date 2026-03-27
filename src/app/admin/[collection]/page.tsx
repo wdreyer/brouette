@@ -11,6 +11,7 @@ import ProducersEditor from "@/components/admin/ProducersEditor";
 import InvitesEditor from "@/components/admin/InvitesEditor";
 import OrdersEditor from "@/components/admin/OrdersEditor";
 import MessagesEditor from "@/components/admin/MessagesEditor";
+import SettingsEditor from "@/components/admin/SettingsEditor";
 
 const COLLECTIONS: Record<
   string,
@@ -34,7 +35,7 @@ const COLLECTIONS: Record<
   },
   adherents: {
     title: "Adhérents",
-    description: "Adhérents (rôle membre) avec suivi du solde.",
+    description: "Adhérents (rôle membre)",
     fields: [
       { label: "Prénom", path: "firstName", type: "text", table: true },
       { label: "Nom", path: "lastName", type: "text", table: true },
@@ -50,7 +51,7 @@ const COLLECTIONS: Record<
   },
   "membres-coop": {
     title: "Membres coop",
-    description: "Membres coop (admins et référents) avec suivi du solde.",
+    description: "Membres coop (admins et référents)",
     fields: [
       { label: "Prénom", path: "firstName", type: "text", table: true },
       { label: "Nom", path: "lastName", type: "text", table: true },
@@ -66,9 +67,10 @@ const COLLECTIONS: Record<
   },
   producers: {
     title: "Producteurs",
-    description: "Coordonnées et statut dans la coop.",
+    description: "Coordonnees et informations producteur.",
     fields: [
       { label: "Nom", path: "name", type: "text", table: true },
+      { label: "Photo URL", path: "imageUrl", type: "text" },
       { label: "Référent", path: "referentName", type: "text", table: true },
       { label: "Téléphone référent", path: "referentPhone", type: "text" },
       { label: "Contact prénom", path: "contact.firstName", type: "text" },
@@ -78,9 +80,7 @@ const COLLECTIONS: Record<
       { label: "Adresse", path: "address.street", type: "text" },
       { label: "Code postal", path: "address.postalCode", type: "text" },
       { label: "Ville", path: "address.city", type: "text" },
-      { label: "Statut coop", path: "coopStatus", type: "text", table: true },
       { label: "Type de produit", path: "productType", type: "text" },
-      { label: "Frequence", path: "frequency", type: "text" },
       { label: "Notes", path: "notes", type: "text" },
     ],
   },
@@ -290,6 +290,15 @@ export default function AdminCollectionPage() {
     return <MessagesEditor />;
   }
 
+  if (key === "settings") {
+    return (
+      <SettingsEditor
+        title={config.title}
+        description={config.description}
+      />
+    );
+  }
+
   return (
     <CollectionEditor
       collectionName={key}
@@ -299,3 +308,4 @@ export default function AdminCollectionPage() {
     />
   );
 }
+

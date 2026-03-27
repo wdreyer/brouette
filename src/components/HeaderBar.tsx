@@ -152,6 +152,15 @@ export default function HeaderBar() {
             </Link>
           ) : null}
 
+          {!isAdmin && user ? (
+            <Link
+              className="rounded border border-ink/25 bg-white px-4 py-2 text-xs font-semibold text-ink"
+              href="/calendrier"
+            >
+              Calendrier
+            </Link>
+          ) : null}
+
           {user ? (
             <Link
               className="rounded border border-ink/25 bg-white px-4 py-2 text-xs font-semibold text-ink"

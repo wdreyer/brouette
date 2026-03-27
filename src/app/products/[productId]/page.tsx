@@ -17,6 +17,9 @@ type Product = {
   description?: string;
   imageUrl?: string;
   isOrganic?: boolean;
+  isSoldByWeight?: boolean;
+  estimatedPriceMin?: number | null;
+  estimatedPriceMax?: number | null;
   tags?: string[];
   categoryId?: string;
 };
@@ -81,6 +84,19 @@ function sanitizeDescriptionForMarkdown(text: string) {
     .split("\n")
     .map((line) => line.replace(/^\s{4,}/, " "))
     .join("\n");
+}
+
+function formatEstimatedRange(min?: number | null, max?: number | null) {
+  const hasMin = typeof min === "number" && min >= 0;
+  const hasMax = typeof max === "number" && max >= 0;
+  if (!hasMin && !hasMax) return "Prix final au retrait";
+  if (hasMin && hasMax) {
+    return min === max
+      ? `Estimatif: ${min.toFixed(2)} EUR`
+      : `Estimatif: ${min.toFixed(2)} EUR - ${max.toFixed(2)} EUR`;
+  }
+  if (hasMin) return `Estimatif: a partir de ${min!.toFixed(2)} EUR`;
+  return `Estimatif: jusqu'a ${max!.toFixed(2)} EUR`;
 }
 
 function sortProducts(
@@ -339,7 +355,7 @@ export default function ProductPage() {
       if (!activeKeys.includes(key)) return;
       const qty = qtyByDate[key] ?? 0;
       if (qty <= 0) return;
-      const unitPrice = variantPriceMap[variant.id] ?? variant.price;
+      const unitPrice = product.isSoldByWeight ? 0 : variantPriceMap[variant.id] ?? variant.price;
       addToCart({
         id: `${product.id}_${variant.id}_${key}`,
         productId: product.id,
@@ -352,6 +368,9 @@ export default function ProductPage() {
         imageUrl: product.imageUrl,
         saleDateKey: key,
         saleDateLabel: formatDate(date.date),
+        isSoldByWeight: Boolean(product.isSoldByWeight),
+        estimatedPriceMin: product.isSoldByWeight ? product.estimatedPriceMin ?? null : null,
+        estimatedPriceMax: product.isSoldByWeight ? product.estimatedPriceMax ?? null : null,
       });
     });
 
@@ -502,6 +521,11 @@ export default function ProductPage() {
                   {category.name}
                 </span>
               ) : null}
+              {product.isSoldByWeight ? (
+                <span className="max-w-full truncate rounded-full border border-ink/20 bg-stone px-3 py-1 text-xs font-semibold text-ink/70">
+                  Produit au poids
+                </span>
+              ) : null}
               {product.tags?.map((tag) => (
                 <span
                   key={tag}
@@ -563,6 +587,14 @@ export default function ProductPage() {
                 </div>
               </div>
             </div>
+            {product.isSoldByWeight ? (
+              <div className="rounded-lg border border-ink/15 bg-stone px-4 py-3 text-sm text-ink/70">
+                <p className="font-semibold text-ink">Produit au poids</p>
+                <p className="text-xs">
+                  Prix final fixe apres pesee au retrait. {formatEstimatedRange(product.estimatedPriceMin, product.estimatedPriceMax)}
+                </p>
+              </div>
+            ) : null}
           </div>
         </section>
       </div>
@@ -610,8 +642,10 @@ export default function ProductPage() {
                     </p>
                     <p className="text-xs text-ink/60">Variante</p>
                   </div>
-                  <div className="text-sm font-semibold">
-                    {(variantPriceMap[variant.id] ?? variant.price).toFixed(2)} EUR
+                  <div className={`text-sm font-semibold ${product.isSoldByWeight ? "text-ink/60" : "text-ink"}`}>
+                    {product.isSoldByWeight
+                      ? "0,00 EUR"
+                      : `${(variantPriceMap[variant.id] ?? variant.price).toFixed(2)} EUR`}
                   </div>
                   {openDates.map((date) => {
                     const qty = quantities[variant.id]?.[date.key] ?? 0;

@@ -33,7 +33,6 @@ type DistributionDoc = {
 type ProducerDoc = {
   id: string;
   name?: string;
-  coopStatus?: string | null;
   referentId?: string | null;
   referentName?: string | null;
 };
@@ -84,10 +83,6 @@ function plusDays(date: Date, days: number) {
   return next;
 }
 
-function isActiveProducer(status?: string | null) {
-  return !["inactive", "inactif", "off"].includes(String(status ?? "").toLowerCase().trim());
-}
-
 export default function DistributionsEditor({ title, description }: EditorProps) {
   const { effectiveRole } = useAuth();
   const isAdmin = effectiveRole === "admin";
@@ -122,7 +117,6 @@ export default function DistributionsEditor({ title, description }: EditorProps)
 
     const producerRows = producerSnap.docs
       .map((docSnap) => ({ id: docSnap.id, ...(docSnap.data() as Omit<ProducerDoc, "id">) }))
-      .filter((producer) => isActiveProducer(producer.coopStatus))
       .sort((a, b) => String(a.name ?? "").localeCompare(String(b.name ?? ""), "fr"));
     setProducers(producerRows);
 

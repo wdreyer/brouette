@@ -263,14 +263,42 @@ export default function OrdersEditor() {
     [orderItems, openedOrderId],
   );
   const openedGroupedItems = useMemo(() => {
-    const groups: Record<string, OrderItem[]> = {};
+    const byDate = new Map<string, { dateLabel: string; byProducer: Map<string, OrderItem[]> }>();
     openedItems.forEach((item) => {
-      const key = item.saleDateLabel ?? item.saleDateKey ?? "Date";
-      groups[key] = groups[key] ?? [];
-      groups[key].push(item);
+      const dateKey = item.saleDateKey ?? "no-date";
+      const dateLabel = item.saleDateLabel ?? item.saleDateKey ?? "Date";
+      if (!byDate.has(dateKey)) {
+        byDate.set(dateKey, { dateLabel, byProducer: new Map<string, OrderItem[]>() });
+      }
+      const dateGroup = byDate.get(dateKey)!;
+      const producerId = item.producerId ?? "unknown";
+      const producerItems = dateGroup.byProducer.get(producerId) ?? [];
+      producerItems.push(item);
+      dateGroup.byProducer.set(producerId, producerItems);
     });
-    return groups;
-  }, [openedItems]);
+
+    return Array.from(byDate.entries())
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([dateKey, dateGroup]) => {
+        const producersGroups = Array.from(dateGroup.byProducer.entries())
+          .map(([producerId, items]) => {
+            const producerLabel =
+              producerId === "unknown"
+                ? "Producteur"
+                : producers[producerId]?.name ?? producerId;
+            const total = items.reduce((sum, item) => sum + Number(item.lineTotal ?? 0), 0);
+            return { producerId, producerLabel, items, total };
+          })
+          .sort((a, b) => a.producerLabel.localeCompare(b.producerLabel, "fr", { sensitivity: "base" }));
+
+        return {
+          dateKey,
+          dateLabel: dateGroup.dateLabel,
+          producersGroups,
+          total: producersGroups.reduce((sum, producerGroup) => sum + producerGroup.total, 0),
+        };
+      });
+  }, [openedItems, producers]);
 
   const deleteOrderEverywhere = async (order: Order) => {
     if (!isAdmin) return;
@@ -541,35 +569,48 @@ export default function OrdersEditor() {
             </div>
             <div className="max-h-[56vh] overflow-auto">
               <div className="space-y-3 px-4 py-4">
-                {Object.entries(openedGroupedItems).map(([label, items]) => (
-                  <div key={label} className="rounded-lg border border-clay/70 bg-stone p-3">
+                {openedGroupedItems.map((dateGroup) => (
+                  <div key={dateGroup.dateKey} className="rounded-lg border border-clay/70 bg-stone p-3">
                     <div className="flex items-center justify-between gap-3">
-                      <p className="text-xs font-semibold text-ink/70">{label}</p>
+                      <p className="text-xs font-semibold text-ink/70">{dateGroup.dateLabel}</p>
                       <p className="text-xs font-semibold text-ink">
-                        Sous-total:{" "}
-                        {formatMoney(items.reduce((sum, item) => sum + (item.lineTotal ?? 0), 0))} EUR
+                        Sous-total: {formatMoney(dateGroup.total)} EUR
                       </p>
                     </div>
                     <div className="mt-2 space-y-2">
-                      {items.map((item) => (
+                      {dateGroup.producersGroups.map((producerGroup) => (
                         <div
-                          key={item.id}
-                          className="flex items-start justify-between gap-3 rounded-md border border-clay/60 bg-white px-3 py-2 text-sm"
+                          key={`${dateGroup.dateKey}-${producerGroup.producerId}`}
+                          className="rounded-md border border-clay/60 bg-white px-3 py-2"
                         >
-                          <div className="min-w-0">
-                            <p className="font-semibold text-ink">{item.label ?? "-"}</p>
-                            <p className="text-xs text-ink/60">
-                              {item.variantLabel ? `${item.variantLabel} · ` : ""}
-                              {item.producerId ? producers[item.producerId]?.name ?? item.producerId : "Producteur"}
+                          <div className="mb-2 flex items-center justify-between gap-3">
+                            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-ink/60">
+                              {producerGroup.producerLabel}
+                            </p>
+                            <p className="text-xs font-semibold text-ink">
+                              {formatMoney(producerGroup.total)} EUR
                             </p>
                           </div>
-                          <div className="shrink-0 text-right">
-                            <p className="text-xs text-ink/60">
-                              {item.quantity ?? 0} × {formatMoney(item.unitPrice ?? 0)} EUR
-                            </p>
-                            <p className="font-semibold text-ink">
-                              {formatMoney(item.lineTotal ?? 0)} EUR
-                            </p>
+                          <div className="space-y-2">
+                            {producerGroup.items.map((item) => (
+                              <div
+                                key={item.id}
+                                className="flex items-start justify-between gap-3 rounded-md border border-clay/40 bg-white px-3 py-2 text-sm"
+                              >
+                                <div className="min-w-0">
+                                  <p className="font-semibold text-ink">{item.label ?? "-"}</p>
+                                  <p className="text-xs text-ink/60">{item.variantLabel ?? "-"}</p>
+                                </div>
+                                <div className="shrink-0 text-right">
+                                  <p className="text-xs text-ink/60">
+                                    {item.quantity ?? 0} × {formatMoney(item.unitPrice ?? 0)} EUR
+                                  </p>
+                                  <p className="font-semibold text-ink">
+                                    {formatMoney(item.lineTotal ?? 0)} EUR
+                                  </p>
+                                </div>
+                              </div>
+                            ))}
                           </div>
                         </div>
                       ))}

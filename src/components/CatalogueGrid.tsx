@@ -13,6 +13,9 @@ type Product = {
   description?: string;
   imageUrl?: string;
   isOrganic?: boolean;
+  isSoldByWeight?: boolean;
+  estimatedPriceMin?: number | null;
+  estimatedPriceMax?: number | null;
   status?: string;
   tags?: string[];
   categoryId?: string;
@@ -58,6 +61,19 @@ function descriptionExcerpt(value?: string, maxLength = 96) {
     .trim();
   if (plain.length <= maxLength) return plain;
   return `${plain.slice(0, maxLength).trimEnd()}...`;
+}
+
+function formatEstimatedRange(min?: number | null, max?: number | null) {
+  const hasMin = typeof min === "number" && min >= 0;
+  const hasMax = typeof max === "number" && max >= 0;
+  if (!hasMin && !hasMax) return "Prix final au retrait";
+  if (hasMin && hasMax) {
+    return min === max
+      ? `Estimatif: ${min.toFixed(2)} EUR`
+      : `Estimatif: ${min.toFixed(2)} EUR - ${max.toFixed(2)} EUR`;
+  }
+  if (hasMin) return `Estimatif: a partir de ${min!.toFixed(2)} EUR`;
+  return `Estimatif: jusqu'a ${max!.toFixed(2)} EUR`;
 }
 
 export default function CatalogueGrid({ hideWhenClosed = false }: { hideWhenClosed?: boolean }) {
@@ -482,12 +498,21 @@ export default function CatalogueGrid({ hideWhenClosed = false }: { hideWhenClos
                       : "Quantités limitées"}
                   </span>
                 ) : null}
+                {product.isSoldByWeight ? (
+                  <span className="max-w-full break-all rounded-full border border-ink/15 bg-stone px-2 py-0.5 text-[11px] font-semibold text-ink/70">
+                    Produit au poids
+                  </span>
+                ) : null}
               </div>
             </div>
             <p className="text-xs text-ink/70">
               {descriptionExcerpt(product.description) || "Description disponible sur la fiche produit."}
             </p>
-            {priceMap[product.id] ? (
+            {product.isSoldByWeight ? (
+              <p className="text-xs font-semibold text-ink/60">
+                Produit au poids - {formatEstimatedRange(product.estimatedPriceMin, product.estimatedPriceMax)}
+              </p>
+            ) : priceMap[product.id] ? (
               <p className="text-xs font-semibold text-ink/70">
                 {priceMap[product.id].min === priceMap[product.id].max
                   ? `${priceMap[product.id].min.toFixed(2)} EUR`

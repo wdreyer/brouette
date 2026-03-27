@@ -5,6 +5,7 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { addDoc, collection, deleteDoc, doc, getDoc, getDocs, setDoc } from "firebase/firestore";
 import { firebaseDb } from "@/lib/firebase/client";
 import { isDistributionOpenNow } from "@/lib/distributions";
+import { useAuth } from "@/components/auth/AuthProvider";
 
 type ProductDoc = {
   producerId?: string;
@@ -12,6 +13,10 @@ type ProductDoc = {
   description?: string;
   imageUrl?: string;
   isOrganic?: boolean;
+  isSoldByWeight?: boolean;
+  estimatedPriceMin?: number | null;
+  estimatedPriceMax?: number | null;
+  saleLimit?: number | null;
 };
 
 type FireDate = { toDate?: () => Date };
@@ -28,10 +33,17 @@ const newId = () =>
     ? crypto.randomUUID()
     : `tmp_${Date.now()}_${Math.random().toString(16).slice(2)}`;
 
+const parseNullableNumber = (value: string) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) return null;
+  return parsed;
+};
+
 export default function AdminSaleProductDetailPage() {
   const params = useParams();
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { effectiveRole } = useAuth();
 
   const productId = String(params?.productId ?? "");
   const distributionId = searchParams.get("distributionId") ?? "";
@@ -48,10 +60,16 @@ export default function AdminSaleProductDetailPage() {
     description: "",
     imageUrl: "",
     isOrganic: false,
+    isSoldByWeight: false,
+    estimatedPriceMin: "",
+    estimatedPriceMax: "",
+    limitTotal: "",
     producerId: producerId,
   });
   const [variants, setVariants] = useState<VariantDraft[]>([]);
   const [existingVariantIds, setExistingVariantIds] = useState<string[]>([]);
+  const canEditOpenSale = effectiveRole === "admin";
+  const editingLocked = distributionLocked && !canEditOpenSale;
   const backToManager = producerIds
     ? `/admin/vente/gerer?distributionId=${encodeURIComponent(distributionId)}&producerIds=${encodeURIComponent(producerIds)}&idx=${encodeURIComponent(idx)}`
     : "/admin/vente";
@@ -90,6 +108,19 @@ export default function AdminSaleProductDetailPage() {
         description: String(data.description ?? ""),
         imageUrl: String(data.imageUrl ?? ""),
         isOrganic: Boolean(data.isOrganic),
+        isSoldByWeight: Boolean(data.isSoldByWeight),
+        estimatedPriceMin:
+          typeof data.estimatedPriceMin === "number" && data.estimatedPriceMin >= 0
+            ? String(data.estimatedPriceMin)
+            : "",
+        estimatedPriceMax:
+          typeof data.estimatedPriceMax === "number" && data.estimatedPriceMax >= 0
+            ? String(data.estimatedPriceMax)
+            : "",
+        limitTotal:
+          typeof data.saleLimit === "number" && data.saleLimit > 0
+            ? String(data.saleLimit)
+            : "",
         producerId: String(data.producerId ?? producerId ?? ""),
       });
 
@@ -114,12 +145,16 @@ export default function AdminSaleProductDetailPage() {
 
   const save = async () => {
     if (!productId) return;
-    if (distributionLocked) {
-      setMessage("Cette distribution est ouverte : modifications verrouillees.");
+    if (editingLocked) {
+      setMessage("Cette distribution est ouverte : modifications reservees aux admins.");
       return;
     }
     setSaving(true);
     setMessage("");
+    const isSoldByWeight = Boolean(product.isSoldByWeight);
+    const estimatedPriceMin = isSoldByWeight ? parseNullableNumber(product.estimatedPriceMin) : null;
+    const estimatedPriceMax = isSoldByWeight ? parseNullableNumber(product.estimatedPriceMax) : null;
+    const parsedLimit = Number(product.limitTotal || 0);
 
     await setDoc(
       doc(firebaseDb, "products", productId),
@@ -128,6 +163,10 @@ export default function AdminSaleProductDetailPage() {
         description: product.description.trim(),
         imageUrl: product.imageUrl.trim(),
         isOrganic: Boolean(product.isOrganic),
+        isSoldByWeight,
+        estimatedPriceMin,
+        estimatedPriceMax,
+        saleLimit: Number.isFinite(parsedLimit) && parsedLimit > 0 ? parsedLimit : null,
         producerId: product.producerId || producerId,
       },
       { merge: true },
@@ -137,7 +176,7 @@ export default function AdminSaleProductDetailPage() {
     for (const variant of variants) {
       const payload = {
         label: variant.label.trim() || "Variante",
-        price: Number(variant.price || 0),
+        price: isSoldByWeight ? 0 : Number(variant.price || 0),
       };
       if (variant.id) {
         keptIds.add(variant.id);
@@ -178,8 +217,10 @@ export default function AdminSaleProductDetailPage() {
       </section>
 
       <section className="border border-ink/20 bg-white p-5">
-        {distributionLocked ? (
-          <p className="mb-3 text-sm font-semibold text-ember">Cette distribution est ouverte : edition verrouillee.</p>
+        {editingLocked ? (
+          <p className="mb-3 text-sm font-semibold text-ember">Cette distribution est ouverte : edition reservee aux admins.</p>
+        ) : distributionLocked ? (
+          <p className="mb-3 text-sm font-semibold text-moss">Vente ouverte : modifications autorisees (admin).</p>
         ) : null}
         <div className="grid gap-3 md:grid-cols-2">
           <label className="text-xs font-semibold uppercase tracking-[0.12em] text-ink/65">
@@ -199,6 +240,52 @@ export default function AdminSaleProductDetailPage() {
           <input type="checkbox" checked={product.isOrganic} onChange={(e) => setProduct((p) => ({ ...p, isOrganic: e.target.checked }))} />
           Produit bio
         </label>
+        <label className="mt-3 flex items-center gap-2 text-sm text-ink/80">
+          <input
+            type="checkbox"
+            checked={product.isSoldByWeight}
+            onChange={(e) =>
+              setProduct((p) => ({ ...p, isSoldByWeight: e.target.checked }))
+            }
+          />
+          Produit au poids (prix final après pesée)
+        </label>
+        {product.isSoldByWeight ? (
+          <div className="mt-3 grid gap-3 md:grid-cols-2">
+            <label className="text-xs font-semibold uppercase tracking-[0.12em] text-ink/65">
+              Prix estimatif min
+              <input
+                className="mt-1 w-full border border-ink/25 px-3 py-2 text-sm"
+                type="number"
+                min={0}
+                step="0.01"
+                value={product.estimatedPriceMin}
+                onChange={(e) => setProduct((p) => ({ ...p, estimatedPriceMin: e.target.value }))}
+              />
+            </label>
+            <label className="text-xs font-semibold uppercase tracking-[0.12em] text-ink/65">
+              Prix estimatif max
+              <input
+                className="mt-1 w-full border border-ink/25 px-3 py-2 text-sm"
+                type="number"
+                min={0}
+                step="0.01"
+                value={product.estimatedPriceMax}
+                onChange={(e) => setProduct((p) => ({ ...p, estimatedPriceMax: e.target.value }))}
+              />
+            </label>
+          </div>
+        ) : null}
+        <label className="mt-3 block text-xs font-semibold uppercase tracking-[0.12em] text-ink/65">
+          Stock limité (optionnel)
+          <input
+            className="mt-1 w-full border border-ink/25 px-3 py-2 text-sm"
+            type="number"
+            min={0}
+            value={product.limitTotal}
+            onChange={(e) => setProduct((p) => ({ ...p, limitTotal: e.target.value }))}
+          />
+        </label>
       </section>
 
       <section className="border border-ink/20 bg-white p-5">
@@ -216,7 +303,7 @@ export default function AdminSaleProductDetailPage() {
               {variants.map((variant, index) => (
                 <tr key={variant.tempId} className="border-b border-ink/10">
                   <td className="px-2 py-2"><input className="w-full border border-ink/25 px-2 py-1" value={variant.label} onChange={(e) => setVariants((prev) => prev.map((v, i) => i === index ? { ...v, label: e.target.value } : v))} /></td>
-                  <td className="px-2 py-2"><input className="w-full border border-ink/25 px-2 py-1" type="number" step="0.01" value={String(variant.price)} onChange={(e) => setVariants((prev) => prev.map((v, i) => i === index ? { ...v, price: Number(e.target.value || 0) } : v))} /></td>
+                  <td className="px-2 py-2"><input className="w-full border border-ink/25 px-2 py-1 disabled:bg-stone/60 disabled:text-ink/55" type="number" step="0.01" value={String(product.isSoldByWeight ? 0 : variant.price)} disabled={product.isSoldByWeight} onChange={(e) => setVariants((prev) => prev.map((v, i) => i === index ? { ...v, price: Number(e.target.value || 0) } : v))} /></td>
                   <td className="px-2 py-2 text-right"><button className="rounded-md border border-ink/25 px-3 py-1 text-xs font-semibold" onClick={() => setVariants((prev) => prev.filter((_, i) => i !== index))}>Retirer</button></td>
                 </tr>
               ))}
@@ -228,7 +315,7 @@ export default function AdminSaleProductDetailPage() {
 
       <div className="flex items-center justify-between">
         {message ? <p className="text-sm text-ink/70">{message}</p> : <span />}
-        <button className="rounded-md bg-forest px-4 py-2 text-sm font-semibold text-white disabled:opacity-50" onClick={save} disabled={saving || distributionLocked}>
+        <button className="rounded-md bg-forest px-4 py-2 text-sm font-semibold text-white disabled:opacity-50" onClick={save} disabled={saving || editingLocked}>
           Enregistrer
         </button>
       </div>

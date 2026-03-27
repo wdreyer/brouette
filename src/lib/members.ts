@@ -22,9 +22,24 @@ type MemberMatch = {
 type EmailMatchType = "primary" | "secondary" | "unknown";
 
 function normalizeRole(value: unknown): MemberRole {
-  if (value === "admin") return "admin";
-  if (value === "referent") return "referent";
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (normalized === "admin" || normalized === "administrateur" || normalized === "administrator") {
+    return "admin";
+  }
+  if (normalized === "referent" || normalized === "référent" || normalized === "referent(e)") {
+    return "referent";
+  }
   return "member";
+}
+
+function roleRank(role: MemberRole) {
+  if (role === "admin") return 2;
+  if (role === "referent") return 1;
+  return 0;
+}
+
+function pickHighestRole(...roles: MemberRole[]) {
+  return roles.reduce<MemberRole>((best, role) => (roleRank(role) > roleRank(best) ? role : best), "member");
 }
 
 function normalizeEmail(value: unknown) {
@@ -124,10 +139,21 @@ export async function findMemberByUser(db: Firestore, user: User) {
         const memberSnap = await getDoc(doc(db, "members", memberId));
         if (memberSnap.exists()) {
           const data = memberSnap.data() as Record<string, unknown>;
+          const roleFromMember = normalizeRole((data.auth as { role?: string } | undefined)?.role);
+          const roleFromAccess = normalizeRole(access.role);
+          const role = pickHighestRole(roleFromAccess, roleFromMember);
+          if (role !== roleFromAccess) {
+            await upsertMemberAccess(db, {
+              uid: user.uid,
+              memberId: memberSnap.id,
+              role,
+              email: user.email ?? null,
+            });
+          }
           return {
             id: memberSnap.id,
             data,
-            role: normalizeRole(access.role ?? (data.auth as { role?: string } | undefined)?.role),
+            role,
           } satisfies MemberMatch;
         }
       }

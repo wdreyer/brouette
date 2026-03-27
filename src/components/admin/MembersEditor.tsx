@@ -18,6 +18,7 @@ import {
 } from "firebase/firestore";
 import { firebaseDb } from "@/lib/firebase/client";
 import { useAuth } from "@/components/auth/AuthProvider";
+import { readBalanceTrackingEnabled } from "@/lib/balanceTracking";
 
 type FieldType = "text" | "number" | "boolean" | "date" | "datetime";
 
@@ -200,6 +201,7 @@ export default function MembersEditor({
   const [sortKey, setSortKey] = useState<string>("lastName");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [deletingMember, setDeletingMember] = useState(false);
+  const [balanceTrackingEnabled, setBalanceTrackingEnabled] = useState(true);
   const [balanceByMemberId, setBalanceByMemberId] = useState<Record<string, number>>({});
   const [ledgerByMemberId, setLedgerByMemberId] = useState<Record<string, LedgerEntry[]>>({});
   const [ledgerLoadingMemberId, setLedgerLoadingMemberId] = useState<string | null>(null);
@@ -254,9 +256,10 @@ export default function MembersEditor({
 
   const load = async () => {
     setLoading(true);
-    const [membersSnap, producersSnap] = await Promise.all([
+    const [membersSnap, producersSnap, nextBalanceTrackingEnabled] = await Promise.all([
       getDocs(query(collection(firebaseDb, collectionName), limit(50))),
       getDocs(collection(firebaseDb, "producers")),
+      readBalanceTrackingEnabled(firebaseDb),
     ]);
     const items = membersSnap.docs.map((docSnap) => ({
       id: docSnap.id,
@@ -268,7 +271,12 @@ export default function MembersEditor({
     }));
     setDocs(items);
     setProducers(producerItems);
-    await loadBalances(items);
+    setBalanceTrackingEnabled(nextBalanceTrackingEnabled);
+    if (nextBalanceTrackingEnabled) {
+      await loadBalances(items);
+    } else {
+      setBalanceByMemberId({});
+    }
     setLoading(false);
   };
 
@@ -337,10 +345,15 @@ export default function MembersEditor({
     setLedgerAmount("0");
     setLedgerLabel("Ajustement manuel");
     setLedgerNote("");
-    loadMemberLedger(entry.id).catch(() => undefined);
+    if (balanceTrackingEnabled) {
+      loadMemberLedger(entry.id).catch(() => undefined);
+    } else {
+      setLedgerByMemberId((prev) => ({ ...prev, [entry.id]: [] }));
+    }
   };
 
   const submitLedgerOperation = async () => {
+    if (!balanceTrackingEnabled) return;
     if (!isAdmin || !viewingEntry) return;
     const rawAmount = Number(String(ledgerAmount).replace(",", "."));
     if (!Number.isFinite(rawAmount) || rawAmount <= 0) {
@@ -751,7 +764,9 @@ export default function MembersEditor({
                       {sortKey === field.path ? (sortDir === "asc" ? " ↑" : " ↓") : ""}
                     </th>
                   ))}
-                  <th className="px-3 py-1.5 text-xs font-semibold text-ink">Solde</th>
+                  {balanceTrackingEnabled ? (
+                    <th className="px-3 py-1.5 text-xs font-semibold text-ink">Solde</th>
+                  ) : null}
                   <th className="px-3 py-1.5 text-xs font-semibold text-ink">Producteurs</th>
                 </tr>
               </thead>
@@ -778,19 +793,21 @@ export default function MembersEditor({
                             : displayValue(getByPath(entry.data, field.path))}
                       </td>
                     ))}
-                    <td className="px-3 py-1.5 text-xs">
-                      {(() => {
-                        const balance = Number(balanceByMemberId[entry.id] ?? 0);
-                        if (Math.abs(balance) < 0.000001) {
-                          return <span className="text-ink/55">-</span>;
-                        }
-                        return (
-                          <span className={balance < 0 ? "font-semibold text-ember" : "font-semibold text-forest"}>
-                            {formatMoney(balance)} EUR
-                          </span>
-                        );
-                      })()}
-                    </td>
+                    {balanceTrackingEnabled ? (
+                      <td className="px-3 py-1.5 text-xs">
+                        {(() => {
+                          const balance = Number(balanceByMemberId[entry.id] ?? 0);
+                          if (Math.abs(balance) < 0.000001) {
+                            return <span className="text-ink/55">-</span>;
+                          }
+                          return (
+                            <span className={balance < 0 ? "font-semibold text-ember" : "font-semibold text-forest"}>
+                              {formatMoney(balance)} EUR
+                            </span>
+                          );
+                        })()}
+                      </td>
+                    ) : null}
                     <td className="px-3 py-1.5 text-xs text-ink/70">
                       {producers.filter((producer) => producer.referentId === entry.id).length}
                     </td>
@@ -878,94 +895,95 @@ export default function MembersEditor({
                 </p>
               </div>
             </div>
-
-            <div className="mt-6 rounded-2xl border border-clay/70 bg-stone/50 p-4">
-              <div className="flex flex-wrap items-end justify-between gap-3">
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">Solde</p>
-                  <p className={`mt-1 text-2xl font-semibold ${viewingBalance >= 0 ? "text-forest" : "text-ember"}`}>
-                    {viewingBalance >= 0 ? "+" : "-"} {formatMoney(Math.abs(viewingBalance))} EUR
-                  </p>
-                </div>
-                {isAdmin ? (
-                  <div className="flex flex-wrap items-center gap-2">
-                    <select
-                      className="rounded-full border border-ink/20 bg-white px-3 py-2 text-sm"
-                      value={ledgerDirection}
-                      onChange={(event) =>
-                        setLedgerDirection(event.target.value === "debit" ? "debit" : "credit")
-                      }
-                    >
-                      <option value="credit">Ajouter</option>
-                      <option value="debit">Retirer</option>
-                    </select>
-                    <input
-                      className="w-32 rounded-full border border-ink/20 bg-white px-3 py-2 text-sm"
-                      value={ledgerAmount}
-                      onChange={(event) => setLedgerAmount(event.target.value)}
-                      placeholder="Montant"
-                    />
-                    <button
-                      className="rounded-full bg-ink px-4 py-2 text-sm font-semibold text-stone disabled:opacity-50"
-                      onClick={() => submitLedgerOperation().catch(() => undefined)}
-                      disabled={ledgerSaving}
-                    >
-                      {ledgerSaving ? "Enregistrement..." : "Valider"}
-                    </button>
+            {balanceTrackingEnabled ? (
+              <div className="mt-6 rounded-2xl border border-clay/70 bg-stone/50 p-4">
+                <div className="flex flex-wrap items-end justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">Solde</p>
+                    <p className={`mt-1 text-2xl font-semibold ${viewingBalance >= 0 ? "text-forest" : "text-ember"}`}>
+                      {viewingBalance >= 0 ? "+" : "-"} {formatMoney(Math.abs(viewingBalance))} EUR
+                    </p>
                   </div>
-                ) : null}
-              </div>
-
-              {isAdmin ? (
-                <div className="mt-3 grid gap-2 md:grid-cols-2">
-                  <input
-                    className="rounded-full border border-ink/20 bg-white px-3 py-2 text-sm"
-                    value={ledgerLabel}
-                    onChange={(event) => setLedgerLabel(event.target.value)}
-                    placeholder="Libellé"
-                  />
-                  <input
-                    className="rounded-full border border-ink/20 bg-white px-3 py-2 text-sm"
-                    value={ledgerNote}
-                    onChange={(event) => setLedgerNote(event.target.value)}
-                    placeholder="Note (optionnel)"
-                  />
+                  {isAdmin ? (
+                    <div className="flex flex-wrap items-center gap-2">
+                      <select
+                        className="rounded-full border border-ink/20 bg-white px-3 py-2 text-sm"
+                        value={ledgerDirection}
+                        onChange={(event) =>
+                          setLedgerDirection(event.target.value === "debit" ? "debit" : "credit")
+                        }
+                      >
+                        <option value="credit">Ajouter</option>
+                        <option value="debit">Retirer</option>
+                      </select>
+                      <input
+                        className="w-32 rounded-full border border-ink/20 bg-white px-3 py-2 text-sm"
+                        value={ledgerAmount}
+                        onChange={(event) => setLedgerAmount(event.target.value)}
+                        placeholder="Montant"
+                      />
+                      <button
+                        className="rounded-full bg-ink px-4 py-2 text-sm font-semibold text-stone disabled:opacity-50"
+                        onClick={() => submitLedgerOperation().catch(() => undefined)}
+                        disabled={ledgerSaving}
+                      >
+                        {ledgerSaving ? "Enregistrement..." : "Valider"}
+                      </button>
+                    </div>
+                  ) : null}
                 </div>
-              ) : (
-                <p className="mt-2 text-xs text-ink/60">Lecture seule pour ce rôle.</p>
-              )}
 
-              <div className="mt-3 overflow-hidden rounded-xl border border-clay/70 bg-white">
-                <div className="grid grid-cols-[120px_1fr_120px] border-b border-clay/70 bg-stone px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-ink/60">
-                  <span>Date</span>
-                  <span>Mouvement</span>
-                  <span className="text-right">Montant</span>
-                </div>
-                <div className="max-h-56 divide-y divide-clay/60 overflow-y-auto">
-                  {ledgerLoadingMemberId === viewingEntry.id ? (
-                    <p className="px-3 py-3 text-sm text-ink/65">Chargement des mouvements...</p>
-                  ) : viewingLedger.length ? (
-                    viewingLedger.map((entry) => (
-                      <div key={entry.id} className="grid grid-cols-[120px_1fr_120px] items-center px-3 py-2 text-sm">
-                        <span className="text-ink/65">{entryDate(entry).toLocaleDateString("fr-FR")}</span>
-                        <div className="min-w-0">
-                          <p className="truncate font-semibold text-ink">{entry.label ?? "Mouvement"}</p>
-                          {entry.note ? <p className="truncate text-xs text-ink/60">{entry.note}</p> : null}
+                {isAdmin ? (
+                  <div className="mt-3 grid gap-2 md:grid-cols-2">
+                    <input
+                      className="rounded-full border border-ink/20 bg-white px-3 py-2 text-sm"
+                      value={ledgerLabel}
+                      onChange={(event) => setLedgerLabel(event.target.value)}
+                      placeholder="Libellé"
+                    />
+                    <input
+                      className="rounded-full border border-ink/20 bg-white px-3 py-2 text-sm"
+                      value={ledgerNote}
+                      onChange={(event) => setLedgerNote(event.target.value)}
+                      placeholder="Note (optionnel)"
+                    />
+                  </div>
+                ) : (
+                  <p className="mt-2 text-xs text-ink/60">Lecture seule pour ce rôle.</p>
+                )}
+
+                <div className="mt-3 overflow-hidden rounded-xl border border-clay/70 bg-white">
+                  <div className="grid grid-cols-[120px_1fr_120px] border-b border-clay/70 bg-stone px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-ink/60">
+                    <span>Date</span>
+                    <span>Mouvement</span>
+                    <span className="text-right">Montant</span>
+                  </div>
+                  <div className="max-h-56 divide-y divide-clay/60 overflow-y-auto">
+                    {ledgerLoadingMemberId === viewingEntry.id ? (
+                      <p className="px-3 py-3 text-sm text-ink/65">Chargement des mouvements...</p>
+                    ) : viewingLedger.length ? (
+                      viewingLedger.map((entry) => (
+                        <div key={entry.id} className="grid grid-cols-[120px_1fr_120px] items-center px-3 py-2 text-sm">
+                          <span className="text-ink/65">{entryDate(entry).toLocaleDateString("fr-FR")}</span>
+                          <div className="min-w-0">
+                            <p className="truncate font-semibold text-ink">{entry.label ?? "Mouvement"}</p>
+                            {entry.note ? <p className="truncate text-xs text-ink/60">{entry.note}</p> : null}
+                          </div>
+                          <span
+                            className={`text-right font-semibold ${Number(entry.amount ?? 0) >= 0 ? "text-forest" : "text-ember"}`}
+                          >
+                            {Number(entry.amount ?? 0) >= 0 ? "+" : "-"}
+                            {formatMoney(Math.abs(Number(entry.amount ?? 0)))} EUR
+                          </span>
                         </div>
-                        <span
-                          className={`text-right font-semibold ${Number(entry.amount ?? 0) >= 0 ? "text-forest" : "text-ember"}`}
-                        >
-                          {Number(entry.amount ?? 0) >= 0 ? "+" : "-"}
-                          {formatMoney(Math.abs(Number(entry.amount ?? 0)))} EUR
-                        </span>
-                      </div>
-                    ))
-                  ) : (
-                    <p className="px-3 py-3 text-sm text-ink/65">Aucun mouvement.</p>
-                  )}
+                      ))
+                    ) : (
+                      <p className="px-3 py-3 text-sm text-ink/65">Aucun mouvement.</p>
+                    )}
+                  </div>
                 </div>
               </div>
-            </div>
+            ) : null}
 
             {String(getByPath(viewingEntry.data, "auth.role") ?? "") === "referent" ? (
               <div className="mt-6">
@@ -1415,3 +1433,4 @@ export default function MembersEditor({
     </div>
   );
 }
+

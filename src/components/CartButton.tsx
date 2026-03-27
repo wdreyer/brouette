@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import CartDrawer from "@/components/CartDrawer";
 import { getCart, subscribeCart } from "@/lib/cart";
+import { reconcileCartWithOpenSale } from "@/lib/cartReconcile";
 
 export default function CartButton() {
   const [open, setOpen] = useState(false);
@@ -10,7 +11,10 @@ export default function CartButton() {
   const [ping, setPing] = useState(false);
 
   useEffect(() => {
-    const update = () => {
+    let cancelled = false;
+    const update = async () => {
+      await reconcileCartWithOpenSale().catch(() => undefined);
+      if (cancelled) return;
       const items = getCart();
       const total = items.reduce((sum, item) => sum + item.quantity, 0);
       setCount(total);
@@ -18,9 +22,26 @@ export default function CartButton() {
       setTimeout(() => setPing(false), 600);
     };
 
-    update();
-    const unsubscribe = subscribeCart(update);
-    return () => unsubscribe();
+    update().catch(() => undefined);
+    const unsubscribe = subscribeCart(() => {
+      update().catch(() => undefined);
+    });
+    const onFocus = () => {
+      update().catch(() => undefined);
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") {
+        update().catch(() => undefined);
+      }
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      cancelled = true;
+      unsubscribe();
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
   }, []);
 
   return (

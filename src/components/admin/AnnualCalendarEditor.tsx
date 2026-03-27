@@ -16,7 +16,6 @@ type DistributionDoc = {
 type ProducerDoc = {
   id: string;
   name?: string;
-  coopStatus?: string | null;
 };
 
 type ProductDoc = {
@@ -53,10 +52,6 @@ function formatDateLabel(value: Date) {
   return value.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" });
 }
 
-function isProducerActive(status?: string | null) {
-  return !["inactive", "inactif", "off"].includes(String(status ?? "").toLowerCase().trim());
-}
-
 export default function AnnualCalendarEditor() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -91,7 +86,6 @@ export default function AnnualCalendarEditor() {
 
     const nextProducers = producerSnap.docs
       .map((docSnap) => ({ id: docSnap.id, ...(docSnap.data() as Omit<ProducerDoc, "id">) }))
-      .filter((producer) => isProducerActive(producer.coopStatus))
       .sort((a, b) => String(a.name ?? "").localeCompare(String(b.name ?? ""), "fr"));
 
     const counts: Record<string, number> = {};

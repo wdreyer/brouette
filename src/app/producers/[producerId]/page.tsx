@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { collection, doc, getDoc, getDocs, query, where } from "firebase/firestore";
 import { firebaseDb } from "@/lib/firebase/client";
@@ -8,10 +8,14 @@ import { firebaseDb } from "@/lib/firebase/client";
 type Producer = {
   id: string;
   name?: string;
+  imageUrl?: string;
   email?: string;
   phone?: string;
-  coopStatus?: string;
   notes?: string;
+  contact?: {
+    firstName?: string;
+    lastName?: string;
+  };
 };
 
 type Product = {
@@ -77,12 +81,34 @@ export default function ProducerPage() {
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 px-6 py-10">
       <section className="rounded-xl border border-clay/70 bg-white/95 p-6 shadow-card">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.32em] text-ink/60">Producteur</p>
-        <h1 className="mt-2 font-serif text-4xl">{producer.name ?? "Producteur"}</h1>
+        <div className="flex flex-wrap items-start gap-4">
+          <div className="h-20 w-20 overflow-hidden rounded-full border border-clay/70 bg-stone">
+            {producer.imageUrl ? (
+              <img
+                src={producer.imageUrl}
+                alt={producer.name ?? "Producteur"}
+                className="h-full w-full object-cover"
+              />
+            ) : (
+              <div className="flex h-full w-full items-center justify-center text-[11px] uppercase tracking-[0.2em] text-ink/45">
+                Sans image
+              </div>
+            )}
+          </div>
+          <div className="min-w-[260px] flex-1">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.32em] text-ink/60">Producteur</p>
+            <h1 className="mt-2 font-serif text-4xl">{producer.name ?? "Producteur"}</h1>
+          </div>
+        </div>
+
         <div className="mt-3 flex flex-wrap gap-3 text-sm text-ink/70">
+          {producer.contact?.firstName || producer.contact?.lastName ? (
+            <span>
+              Contact nom & prénom: {[producer.contact?.lastName, producer.contact?.firstName].filter(Boolean).join(" ")}
+            </span>
+          ) : null}
           {producer.email ? <span>{producer.email}</span> : null}
           {producer.phone ? <span>{producer.phone}</span> : null}
-          {producer.coopStatus ? <span>Statut: {producer.coopStatus}</span> : null}
         </div>
         {producer.notes ? <p className="mt-3 text-sm text-ink/70">{producer.notes}</p> : null}
       </section>
@@ -96,7 +122,7 @@ export default function ProducerPage() {
         </div>
         {products.length === 0 ? (
           <div className="rounded-xl border border-clay/70 bg-white/90 p-6 shadow-card">
-            <p className="text-sm text-ink/70">Aucun produit actif pour le moment.</p>
+            <p className="text-sm text-ink/70">Aucun produit pour le moment.</p>
           </div>
         ) : (
           <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">

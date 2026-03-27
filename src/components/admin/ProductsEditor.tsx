@@ -115,6 +115,13 @@ function safeFileName(name: string) {
   return name.replace(/[^a-zA-Z0-9._-]/g, "_");
 }
 
+function parseNullableNumber(value: unknown) {
+  if (value === undefined || value === null || value === "") return null;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) return null;
+  return parsed;
+}
+
 export default function ProductsEditor({
   collectionName,
   title,
@@ -345,7 +352,12 @@ export default function ProductsEditor({
 
   const openEdit = async (entry: DocEntry) => {
     setEditingId(entry.id);
-    setEditDraft(entry.data);
+    setEditDraft({
+      ...entry.data,
+      isSoldByWeight: Boolean(entry.data.isSoldByWeight),
+      estimatedPriceMin: parseNullableNumber(entry.data.estimatedPriceMin),
+      estimatedPriceMax: parseNullableNumber(entry.data.estimatedPriceMax),
+    });
     const tags = (entry.data.tags as string[] | undefined) ?? [];
     setEditTags(tags.join(", "));
 
@@ -412,6 +424,14 @@ export default function ProductsEditor({
     try {
       const payload = { ...editDraft };
       payload.tags = parseTags(editTags);
+      const isSoldByWeight = Boolean(payload.isSoldByWeight);
+      payload.isSoldByWeight = isSoldByWeight;
+      payload.estimatedPriceMin = isSoldByWeight
+        ? parseNullableNumber(payload.estimatedPriceMin)
+        : null;
+      payload.estimatedPriceMax = isSoldByWeight
+        ? parseNullableNumber(payload.estimatedPriceMax)
+        : null;
       await setDoc(doc(firebaseDb, collectionName, editingId), payload, { merge: true });
 
       for (const variantId of removedVariantIds) {
@@ -483,6 +503,14 @@ export default function ProductsEditor({
     try {
       const payload = { ...createDraft };
       payload.tags = parseTags(createTags);
+      const isSoldByWeight = Boolean(payload.isSoldByWeight);
+      payload.isSoldByWeight = isSoldByWeight;
+      payload.estimatedPriceMin = isSoldByWeight
+        ? parseNullableNumber(payload.estimatedPriceMin)
+        : null;
+      payload.estimatedPriceMax = isSoldByWeight
+        ? parseNullableNumber(payload.estimatedPriceMax)
+        : null;
       await addDoc(collection(firebaseDb, collectionName), payload);
       setCreateDraft({});
       setCreateTags("");
@@ -593,7 +621,16 @@ export default function ProductsEditor({
           </div>
           <button
             className="rounded-full bg-ink px-5 py-2 text-sm font-semibold text-stone"
-            onClick={() => setCreateOpen(true)}
+            onClick={() => {
+              setCreateDraft({
+                isOrganic: false,
+                isSoldByWeight: false,
+                estimatedPriceMin: null,
+                estimatedPriceMax: null,
+              });
+              setCreateTags("");
+              setCreateOpen(true);
+            }}
           >
             Nouveau produit
           </button>
@@ -741,6 +778,11 @@ export default function ProductsEditor({
                     <span className="rounded-full bg-white px-3 py-1">
                       {String(getByPath(editDraft, "isOrganic") ?? false) === "true" ? "Bio" : "Conventionnel"}
                     </span>
+                    {Boolean(getByPath(editDraft, "isSoldByWeight")) ? (
+                      <span className="rounded-full bg-white px-3 py-1 text-ink/85">
+                        Produit au poids
+                      </span>
+                    ) : null}
                   </div>
                 </div>
 
@@ -861,6 +903,60 @@ export default function ProductsEditor({
                       onChange={(event) => setEditTags(event.target.value)}
                     />
                   </label>
+                  <div className="md:col-span-2 rounded-xl border border-clay/70 bg-stone/40 p-4">
+                    <label className="flex items-center gap-2 text-sm font-semibold text-ink">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(getByPath(editDraft, "isSoldByWeight"))}
+                        onChange={(event) => {
+                          const next = { ...editDraft };
+                          setByPath(next, "isSoldByWeight", event.target.checked);
+                          if (!event.target.checked) {
+                            setByPath(next, "estimatedPriceMin", null);
+                            setByPath(next, "estimatedPriceMax", null);
+                          }
+                          setEditDraft(next);
+                        }}
+                      />
+                      Produit au poids (prix final apres pesee)
+                    </label>
+                    {Boolean(getByPath(editDraft, "isSoldByWeight")) ? (
+                      <div className="mt-3 grid gap-3 md:grid-cols-2">
+                        <label className="flex flex-col gap-1 text-xs font-semibold uppercase tracking-[0.12em] text-ink/65">
+                          Prix estime min
+                          <input
+                            className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm normal-case tracking-normal"
+                            type="number"
+                            min={0}
+                            step="0.01"
+                            value={String(toInputValue(getByPath(editDraft, "estimatedPriceMin"), "number"))}
+                            onChange={(event) => {
+                              const next = { ...editDraft };
+                              setByPath(next, "estimatedPriceMin", event.target.value);
+                              setEditDraft(next);
+                            }}
+                            placeholder="Ex: 12.00"
+                          />
+                        </label>
+                        <label className="flex flex-col gap-1 text-xs font-semibold uppercase tracking-[0.12em] text-ink/65">
+                          Prix estime max
+                          <input
+                            className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm normal-case tracking-normal"
+                            type="number"
+                            min={0}
+                            step="0.01"
+                            value={String(toInputValue(getByPath(editDraft, "estimatedPriceMax"), "number"))}
+                            onChange={(event) => {
+                              const next = { ...editDraft };
+                              setByPath(next, "estimatedPriceMax", event.target.value);
+                              setEditDraft(next);
+                            }}
+                            placeholder="Ex: 18.00"
+                          />
+                        </label>
+                      </div>
+                    ) : null}
+                  </div>
                 </div>
               </div>
 
@@ -1230,6 +1326,60 @@ export default function ProductsEditor({
                   onChange={(event) => setCreateTags(event.target.value)}
                 />
               </label>
+              <div className="md:col-span-2 rounded-xl border border-clay/70 bg-stone/40 p-4">
+                <label className="flex items-center gap-2 text-sm font-semibold text-ink">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(getByPath(createDraft, "isSoldByWeight"))}
+                    onChange={(event) => {
+                      const next = { ...createDraft };
+                      setByPath(next, "isSoldByWeight", event.target.checked);
+                      if (!event.target.checked) {
+                        setByPath(next, "estimatedPriceMin", null);
+                        setByPath(next, "estimatedPriceMax", null);
+                      }
+                      setCreateDraft(next);
+                    }}
+                  />
+                  Produit au poids (prix final apres pesee)
+                </label>
+                {Boolean(getByPath(createDraft, "isSoldByWeight")) ? (
+                  <div className="mt-3 grid gap-3 md:grid-cols-2">
+                    <label className="flex flex-col gap-1 text-xs font-semibold uppercase tracking-[0.12em] text-ink/65">
+                      Prix estime min
+                      <input
+                        className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm normal-case tracking-normal"
+                        type="number"
+                        min={0}
+                        step="0.01"
+                        value={String(toInputValue(getByPath(createDraft, "estimatedPriceMin"), "number"))}
+                        onChange={(event) => {
+                          const next = { ...createDraft };
+                          setByPath(next, "estimatedPriceMin", event.target.value);
+                          setCreateDraft(next);
+                        }}
+                        placeholder="Ex: 12.00"
+                      />
+                    </label>
+                    <label className="flex flex-col gap-1 text-xs font-semibold uppercase tracking-[0.12em] text-ink/65">
+                      Prix estime max
+                      <input
+                        className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm normal-case tracking-normal"
+                        type="number"
+                        min={0}
+                        step="0.01"
+                        value={String(toInputValue(getByPath(createDraft, "estimatedPriceMax"), "number"))}
+                        onChange={(event) => {
+                          const next = { ...createDraft };
+                          setByPath(next, "estimatedPriceMax", event.target.value);
+                          setCreateDraft(next);
+                        }}
+                        placeholder="Ex: 18.00"
+                      />
+                    </label>
+                  </div>
+                ) : null}
+              </div>
             </div>
 
             <div className="mt-6 flex items-center gap-3">

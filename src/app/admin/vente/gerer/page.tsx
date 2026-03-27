@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Timestamp,
@@ -14,6 +14,7 @@ import {
 } from "firebase/firestore";
 import { firebaseDb } from "@/lib/firebase/client";
 import { isDistributionOpenNow } from "@/lib/distributions";
+import { useAuth } from "@/components/auth/AuthProvider";
 
 type FireDate = { toDate?: () => Date };
 
@@ -38,6 +39,9 @@ type ProductDraft = {
   description: string;
   imageUrl: string;
   isOrganic: boolean;
+  isSoldByWeight: boolean;
+  estimatedPriceMin: string;
+  estimatedPriceMax: string;
   limitTotal: string;
   variants: VariantDraft[];
   existingVariantIds: string[];
@@ -48,6 +52,9 @@ type AddProductDraft = {
   description: string;
   imageUrl: string;
   isOrganic: boolean;
+  isSoldByWeight: boolean;
+  estimatedPriceMin: string;
+  estimatedPriceMax: string;
   limitTotal: string;
   variantLabel: string;
   variantPrice: string;
@@ -59,6 +66,25 @@ const newId = () =>
     ? crypto.randomUUID()
     : `tmp_${Date.now()}_${Math.random().toString(16).slice(2)}`;
 
+function parseNullableNumber(value: string) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 0) return null;
+  return parsed;
+}
+
+function formatEstimatedRange(minValue: string, maxValue: string) {
+  const min = parseNullableNumber(minValue);
+  const max = parseNullableNumber(maxValue);
+  if (min === null && max === null) return "Prix final au retrait";
+  if (min !== null && max !== null) {
+    return min === max
+      ? `Estimatif: ${min.toFixed(2)} EUR`
+      : `Estimatif: ${min.toFixed(2)} - ${max.toFixed(2)} EUR`;
+  }
+  if (min !== null) return `Estimatif a partir de ${min.toFixed(2)} EUR`;
+  return `Estimatif jusqu'a ${max!.toFixed(2)} EUR`;
+}
+
 function createDraftProductWithDates(activeDateKeys: string[]): ProductDraft {
   return {
     id: newId(),
@@ -66,6 +92,9 @@ function createDraftProductWithDates(activeDateKeys: string[]): ProductDraft {
     description: "",
     imageUrl: "",
     isOrganic: false,
+    isSoldByWeight: false,
+    estimatedPriceMin: "",
+    estimatedPriceMax: "",
     limitTotal: "",
     variants: [
       {
@@ -82,6 +111,7 @@ function createDraftProductWithDates(activeDateKeys: string[]): ProductDraft {
 export default function AdminSaleProducerManagerPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { effectiveRole } = useAuth();
 
   const distributionId = searchParams.get("distributionId") ?? "";
   const producerIds = useMemo(
@@ -103,22 +133,52 @@ export default function AdminSaleProducerManagerPage() {
   const [saleDates, setSaleDates] = useState<{ key: string; label: string }[]>([]);
   const [allowedDateKeys, setAllowedDateKeys] = useState<string[]>([]);
   const [draftProducts, setDraftProducts] = useState<ProductDraft[]>([]);
+  const [editingProductIndex, setEditingProductIndex] = useState<number | null>(null);
   const [showAddProductModal, setShowAddProductModal] = useState(false);
   const [addDraft, setAddDraft] = useState<AddProductDraft>({
     name: "",
     description: "",
     imageUrl: "",
     isOrganic: false,
+    isSoldByWeight: false,
+    estimatedPriceMin: "",
+    estimatedPriceMax: "",
     limitTotal: "",
     variantLabel: "",
     variantPrice: "",
   });
+  const [draftsByProducer, setDraftsByProducer] = useState<Record<string, ProductDraft[]>>({});
+  const [editableDateKeysByProducer, setEditableDateKeysByProducer] = useState<Record<string, string[]>>({});
+  const [dirtyProducerIds, setDirtyProducerIds] = useState<string[]>([]);
+
+  const draftsByProducerRef = useRef(draftsByProducer);
+  const editableDateKeysByProducerRef = useRef(editableDateKeysByProducer);
+  const dirtyProducerIdsRef = useRef(dirtyProducerIds);
 
   const saleDateKeys = useMemo(() => saleDates.map((date) => date.key), [saleDates]);
+  const isReferent = effectiveRole === "referent";
+  const canEditOpenSale = effectiveRole === "admin";
+  const editingLocked = distributionLocked && !canEditOpenSale;
+  const backToSalesPath = isReferent
+    ? "/admin/vente/prochaine"
+    : distributionLocked
+      ? "/admin/vente/en-cours"
+      : "/admin/vente/prochaine";
+  const backToSalesLabel = isReferent
+    ? "Retour prochaine vente"
+    : distributionLocked
+      ? "Retour vente en cours"
+      : "Retour prochaine vente";
   const editableDateKeys = useMemo(
     () => (allowedDateKeys.length ? allowedDateKeys : saleDateKeys),
     [allowedDateKeys, saleDateKeys],
   );
+  const editingProduct =
+    editingProductIndex !== null ? (draftProducts[editingProductIndex] ?? null) : null;
+  const hasManyProducers = producerIds.length > 1;
+  const isFirstProducer = currentIndex === 0;
+  const isLastProducer = currentIndex >= producerIds.length - 1;
+  const dirtyCount = dirtyProducerIds.length;
 
   const createDraftVariant = (): VariantDraft => ({
     tempId: newId(),
@@ -126,6 +186,46 @@ export default function AdminSaleProducerManagerPage() {
     price: 0,
     activeDates: [...editableDateKeys],
   });
+
+  const markProducerDirty = useCallback((producerId: string) => {
+    if (!producerId) return;
+    setDirtyProducerIds((prev) => (prev.includes(producerId) ? prev : [...prev, producerId]));
+  }, []);
+
+  const goToIndex = useCallback(
+    (nextIndex: number) => {
+      if (!distributionId || !producerIds.length) return;
+      const safeIndex = Math.max(0, Math.min(nextIndex, producerIds.length - 1));
+      const params = new URLSearchParams(searchParams.toString());
+      if (currentProducerId) {
+        setDraftsByProducer((prev) => ({ ...prev, [currentProducerId]: draftProducts }));
+      }
+      params.set("distributionId", distributionId);
+      params.set("producerIds", producerIds.join(","));
+      params.set("idx", String(safeIndex));
+      setEditingProductIndex(null);
+      setMessage("");
+      router.push(`/admin/vente/gerer?${params.toString()}`);
+    },
+    [currentProducerId, distributionId, draftProducts, producerIds, router, searchParams],
+  );
+
+  useEffect(() => {
+    draftsByProducerRef.current = draftsByProducer;
+  }, [draftsByProducer]);
+
+  useEffect(() => {
+    editableDateKeysByProducerRef.current = editableDateKeysByProducer;
+  }, [editableDateKeysByProducer]);
+
+  useEffect(() => {
+    dirtyProducerIdsRef.current = dirtyProducerIds;
+  }, [dirtyProducerIds]);
+
+  useEffect(() => {
+    if (!currentProducerId) return;
+    setDraftsByProducer((prev) => ({ ...prev, [currentProducerId]: draftProducts }));
+  }, [currentProducerId, draftProducts]);
 
   useEffect(() => {
     if (!currentProducerId) return;
@@ -186,6 +286,10 @@ export default function AdminSaleProducerManagerPage() {
       const nextEditableDateKeys = allowedFromCalendar.length
         ? allowedFromCalendar
         : loadedSaleDateKeys;
+      setEditableDateKeysByProducer((prev) => ({
+        ...prev,
+        [currentProducerId]: nextEditableDateKeys,
+      }));
 
       const offersByVariant = new Map<string, string[]>();
       if (distributionId) {
@@ -254,6 +358,9 @@ export default function AdminSaleProducerManagerPage() {
           description?: string;
           imageUrl?: string;
           isOrganic?: boolean;
+          isSoldByWeight?: boolean;
+          estimatedPriceMin?: number;
+          estimatedPriceMax?: number;
           saleLimit?: number;
         };
         const variants = variantsByProduct.get(productDoc.id) ?? [];
@@ -263,6 +370,15 @@ export default function AdminSaleProducerManagerPage() {
           description: String(productData.description ?? ""),
           imageUrl: String(productData.imageUrl ?? ""),
           isOrganic: Boolean(productData.isOrganic),
+          isSoldByWeight: Boolean(productData.isSoldByWeight),
+          estimatedPriceMin:
+            typeof productData.estimatedPriceMin === "number" && productData.estimatedPriceMin >= 0
+              ? String(productData.estimatedPriceMin)
+              : "",
+          estimatedPriceMax:
+            typeof productData.estimatedPriceMax === "number" && productData.estimatedPriceMax >= 0
+              ? String(productData.estimatedPriceMax)
+              : "",
           limitTotal:
             typeof productData.saleLimit === "number" && productData.saleLimit > 0
               ? String(productData.saleLimit)
@@ -271,18 +387,31 @@ export default function AdminSaleProducerManagerPage() {
           existingVariantIds: variants.map((variant) => variant.id!).filter(Boolean),
         });
       }
-      setDraftProducts(nextDrafts.length ? nextDrafts : [createDraftProductWithDates(nextEditableDateKeys)]);
+      const loadedDrafts = nextDrafts.length ? nextDrafts : [createDraftProductWithDates(nextEditableDateKeys)];
+      const cachedDrafts = draftsByProducerRef.current[currentProducerId];
+      const shouldUseCached =
+        dirtyProducerIdsRef.current.includes(currentProducerId) && Array.isArray(cachedDrafts);
+      setDraftProducts(shouldUseCached ? cachedDrafts : loadedDrafts);
       setLoading(false);
     };
 
     load().catch(() => setLoading(false));
   }, [currentProducerId, distributionId]);
 
+  useEffect(() => {
+    if (editingProductIndex === null) return;
+    if (!draftProducts[editingProductIndex]) {
+      setEditingProductIndex(null);
+    }
+  }, [draftProducts, editingProductIndex]);
+
   const updateDraftProduct = (index: number, patch: Partial<ProductDraft>) => {
+    markProducerDirty(currentProducerId);
     setDraftProducts((prev) => prev.map((item, i) => (i === index ? { ...item, ...patch } : item)));
   };
 
   const updateDraftVariant = (productIndex: number, variantIndex: number, patch: Partial<VariantDraft>) => {
+    markProducerDirty(currentProducerId);
     setDraftProducts((prev) =>
       prev.map((item, i) => {
         if (i !== productIndex) return item;
@@ -295,6 +424,7 @@ export default function AdminSaleProducerManagerPage() {
   };
 
   const applyAllDates = (selected: boolean) => {
+    markProducerDirty(currentProducerId);
     setDraftProducts((prev) =>
       prev.map((product) => ({
         ...product,
@@ -307,6 +437,9 @@ export default function AdminSaleProducerManagerPage() {
   };
 
   const getProductPriceLabel = (product: ProductDraft) => {
+    if (product.isSoldByWeight) {
+      return formatEstimatedRange(product.estimatedPriceMin, product.estimatedPriceMax);
+    }
     const prices = product.variants.map((variant) => Number(variant.price || 0));
     if (!prices.length) return "-";
     const min = Math.min(...prices);
@@ -326,6 +459,7 @@ export default function AdminSaleProducerManagerPage() {
 
   const toggleProductDate = (productIndex: number, targetDateKey: string) => {
     if (!editableDateKeys.includes(targetDateKey)) return;
+    markProducerDirty(currentProducerId);
     setDraftProducts((prev) =>
       prev.map((product, idx) => {
         if (idx !== productIndex) return product;
@@ -347,6 +481,9 @@ export default function AdminSaleProducerManagerPage() {
       description: "",
       imageUrl: "",
       isOrganic: false,
+      isSoldByWeight: false,
+      estimatedPriceMin: "",
+      estimatedPriceMax: "",
       limitTotal: "",
       variantLabel: "",
       variantPrice: "",
@@ -356,6 +493,8 @@ export default function AdminSaleProducerManagerPage() {
 
   const addProductFromModal = () => {
     const price = Number(addDraft.variantPrice || 0);
+    const isSoldByWeight = Boolean(addDraft.isSoldByWeight);
+    markProducerDirty(currentProducerId);
     setDraftProducts((prev) => [
       ...prev,
       {
@@ -364,13 +503,16 @@ export default function AdminSaleProducerManagerPage() {
         description: addDraft.description.trim(),
         imageUrl: addDraft.imageUrl.trim(),
         isOrganic: Boolean(addDraft.isOrganic),
+        isSoldByWeight,
+        estimatedPriceMin: isSoldByWeight ? addDraft.estimatedPriceMin.trim() : "",
+        estimatedPriceMax: isSoldByWeight ? addDraft.estimatedPriceMax.trim() : "",
         limitTotal: addDraft.limitTotal.trim(),
         variants: [
           {
             id: undefined,
             tempId: newId(),
             label: addDraft.variantLabel.trim() || "Variante",
-            price: Number.isFinite(price) ? price : 0,
+            price: isSoldByWeight ? 0 : Number.isFinite(price) ? price : 0,
             activeDates: [...editableDateKeys],
           },
         ],
@@ -380,138 +522,206 @@ export default function AdminSaleProducerManagerPage() {
     setShowAddProductModal(false);
   };
 
+  const saveProducerDraft = useCallback(
+    async (producerId: string, producerDrafts: ProductDraft[], producerEditableDateKeys: string[]) => {
+      const savedProducts: Array<{
+        id: string;
+        name: string;
+        imageUrl: string;
+        isOrganic: boolean;
+        isSoldByWeight: boolean;
+        limitTotal: number;
+        variants: Array<{ id: string; label: string; price: number; activeDates: string[] }>;
+      }> = [];
+
+      const batchOps: Array<(batch: ReturnType<typeof writeBatch>) => void> = [];
+      const now = Timestamp.now();
+      const selectedDateKeys = producerEditableDateKeys.length ? producerEditableDateKeys : saleDateKeys;
+
+      for (const product of producerDrafts) {
+        const parsedLimit = Number(product.limitTotal || 0);
+        const isSoldByWeight = Boolean(product.isSoldByWeight);
+        const estimatedPriceMin = isSoldByWeight ? parseNullableNumber(product.estimatedPriceMin) : null;
+        const estimatedPriceMax = isSoldByWeight ? parseNullableNumber(product.estimatedPriceMax) : null;
+        const productId = product.id.startsWith("tmp_")
+          ? doc(collection(firebaseDb, "products")).id
+          : product.id;
+        const payload = {
+          producerId,
+          name: product.name.trim() || "Produit",
+          description: product.description.trim(),
+          imageUrl: product.imageUrl.trim(),
+          isOrganic: Boolean(product.isOrganic),
+          isSoldByWeight,
+          estimatedPriceMin,
+          estimatedPriceMax,
+          saleLimit: Number.isFinite(parsedLimit) && parsedLimit > 0 ? parsedLimit : null,
+          updatedAt: now,
+        };
+        const productRef = doc(firebaseDb, "products", productId);
+        batchOps.push((batch) => batch.set(productRef, payload, { merge: true }));
+
+        const keptVariantIds = new Set<string>();
+        const savedVariants: Array<{ id: string; label: string; price: number; activeDates: string[] }> = [];
+        for (const variant of product.variants) {
+          const variantId = variant.id ?? doc(collection(firebaseDb, "products", productId, "variants")).id;
+          const selectedActiveDates = Array.from(
+            new Set(variant.activeDates.filter((key) => selectedDateKeys.includes(key))),
+          );
+          const variantPayload = {
+            label: variant.label.trim() || "Variante",
+            price: isSoldByWeight ? 0 : Number(variant.price || 0),
+          };
+          keptVariantIds.add(variantId);
+          const variantRef = doc(firebaseDb, "products", productId, "variants", variantId);
+          batchOps.push((batch) => batch.set(variantRef, variantPayload, { merge: true }));
+          savedVariants.push({ id: variantId, ...variantPayload, activeDates: selectedActiveDates });
+        }
+
+        for (const existingId of product.existingVariantIds) {
+          if (!keptVariantIds.has(existingId)) {
+            const existingVariantRef = doc(firebaseDb, "products", productId, "variants", existingId);
+            batchOps.push((batch) => batch.delete(existingVariantRef));
+          }
+        }
+
+        savedProducts.push({
+          id: productId,
+          name: payload.name,
+          imageUrl: payload.imageUrl,
+          isOrganic: payload.isOrganic,
+          isSoldByWeight: payload.isSoldByWeight,
+          limitTotal: Number.isFinite(parsedLimit) && parsedLimit > 0 ? parsedLimit : 0,
+          variants: savedVariants,
+        });
+      }
+
+      if (distributionId) {
+        const producerRef = doc(firebaseDb, "distributionDates", distributionId, "producers", producerId);
+        const offerItemsRef = collection(firebaseDb, "distributionDates", distributionId, "offerItems");
+
+        const existingOfferSnap = await getDocs(query(offerItemsRef, where("producerId", "==", producerId)));
+        existingOfferSnap.docs.forEach((offerDoc) => {
+          batchOps.push((batch) => batch.delete(offerDoc.ref));
+        });
+
+        savedProducts.forEach((product) => {
+          product.variants.forEach((variant) => {
+            variant.activeDates.forEach((saleDateKey) => {
+              const offerRef = doc(offerItemsRef);
+              batchOps.push((batch) =>
+                batch.set(offerRef, {
+                  producerId,
+                  productId: product.id,
+                  variantId: variant.id,
+                  saleDateKey,
+                  title: product.name,
+                  variantLabel: variant.label,
+                  imageUrl: product.imageUrl || null,
+                  isOrganic: product.isOrganic,
+                  priceApplied: product.isSoldByWeight ? 0 : variant.price,
+                  isSoldByWeight: product.isSoldByWeight,
+                  limitTotal: product.limitTotal,
+                  active: true,
+                }),
+              );
+            });
+          });
+        });
+
+        const producerSnap = await getDoc(doc(firebaseDb, "producers", producerId));
+        const producerData = producerSnap.exists()
+          ? (producerSnap.data() as { referentId?: string | null; referentName?: string | null })
+          : {};
+
+        batchOps.push((batch) =>
+          batch.set(
+            producerRef,
+            {
+              producerId,
+              referentId: producerData.referentId ?? null,
+              referentName: producerData.referentName ?? null,
+              active: true,
+              validatedByReferent: true,
+              validatedAt: now,
+            },
+            { merge: true },
+          ),
+        );
+      }
+
+      const MAX_BATCH_OPS = 380;
+      for (let index = 0; index < batchOps.length; index += MAX_BATCH_OPS) {
+        const batch = writeBatch(firebaseDb);
+        const chunk = batchOps.slice(index, index + MAX_BATCH_OPS);
+        chunk.forEach((apply) => apply(batch));
+        await batch.commit();
+      }
+    },
+    [distributionId, saleDateKeys],
+  );
+
+  const validateProducerWithoutChanges = useCallback(
+    async (producerId: string) => {
+      if (!distributionId) return;
+      const now = Timestamp.now();
+      const producerSnap = await getDoc(doc(firebaseDb, "producers", producerId));
+      const producerData = producerSnap.exists()
+        ? (producerSnap.data() as { referentId?: string | null; referentName?: string | null })
+        : {};
+      const producerRef = doc(firebaseDb, "distributionDates", distributionId, "producers", producerId);
+      const batch = writeBatch(firebaseDb);
+      batch.set(
+        producerRef,
+        {
+          producerId,
+          referentId: producerData.referentId ?? null,
+          referentName: producerData.referentName ?? null,
+          active: true,
+          validatedByReferent: true,
+          validatedAt: now,
+        },
+        { merge: true },
+      );
+      await batch.commit();
+    },
+    [distributionId],
+  );
+
   const saveDraft = async () => {
     if (!currentProducerId) return;
-    if (distributionLocked) {
-      setMessage("Cette distribution est ouverte : modifications verrouillees.");
+    if (editingLocked) {
+      setMessage("Cette distribution est ouverte : modifications reservees aux admins.");
       return;
     }
     setSaving(true);
     setMessage("");
+    try {
+      const targetProducerIds = hasManyProducers ? producerIds : [currentProducerId];
 
-    const savedProducts: Array<{
-      id: string;
-      name: string;
-      imageUrl: string;
-      isOrganic: boolean;
-      limitTotal: number;
-      variants: Array<{ id: string; label: string; price: number; activeDates: string[] }>;
-    }> = [];
-
-    const batchOps: Array<(batch: ReturnType<typeof writeBatch>) => void> = [];
-    const now = Timestamp.now();
-
-    for (const product of draftProducts) {
-      const parsedLimit = Number(product.limitTotal || 0);
-      const productId = product.id.startsWith("tmp_")
-        ? doc(collection(firebaseDb, "products")).id
-        : product.id;
-      const payload = {
-        producerId: currentProducerId,
-        name: product.name.trim() || "Produit",
-        description: product.description.trim(),
-        imageUrl: product.imageUrl.trim(),
-        isOrganic: Boolean(product.isOrganic),
-        saleLimit: Number.isFinite(parsedLimit) && parsedLimit > 0 ? parsedLimit : null,
-        updatedAt: now,
-      };
-      const productRef = doc(firebaseDb, "products", productId);
-      batchOps.push((batch) => batch.set(productRef, payload, { merge: true }));
-
-      const keptVariantIds = new Set<string>();
-      const savedVariants: Array<{ id: string; label: string; price: number; activeDates: string[] }> = [];
-      for (const variant of product.variants) {
-        const variantId = variant.id ?? doc(collection(firebaseDb, "products", productId, "variants")).id;
-        const selectedActiveDates = Array.from(
-          new Set(variant.activeDates.filter((key) => editableDateKeys.includes(key))),
-        );
-        const variantPayload = {
-          label: variant.label.trim() || "Variante",
-          price: Number(variant.price || 0),
-        };
-        keptVariantIds.add(variantId);
-        const variantRef = doc(firebaseDb, "products", productId, "variants", variantId);
-        batchOps.push((batch) => batch.set(variantRef, variantPayload, { merge: true }));
-        savedVariants.push({ id: variantId, ...variantPayload, activeDates: selectedActiveDates });
-      }
-
-      for (const existingId of product.existingVariantIds) {
-        if (!keptVariantIds.has(existingId)) {
-          const existingVariantRef = doc(firebaseDb, "products", productId, "variants", existingId);
-          batchOps.push((batch) => batch.delete(existingVariantRef));
+      for (const producerId of targetProducerIds) {
+        const drafts =
+          draftsByProducerRef.current[producerId] ??
+          (producerId === currentProducerId ? draftProducts : []);
+        const producerDateKeys =
+          editableDateKeysByProducerRef.current[producerId] ?? saleDateKeys;
+        if (dirtyProducerIds.includes(producerId) && drafts.length > 0) {
+          await saveProducerDraft(producerId, drafts, producerDateKeys);
+        } else {
+          await validateProducerWithoutChanges(producerId);
         }
       }
 
-      savedProducts.push({
-        id: productId,
-        name: payload.name,
-        imageUrl: payload.imageUrl,
-        isOrganic: payload.isOrganic,
-        limitTotal: Number.isFinite(parsedLimit) && parsedLimit > 0 ? parsedLimit : 0,
-        variants: savedVariants,
-      });
-    }
-
-    if (distributionId) {
-      const producerRef = doc(firebaseDb, "distributionDates", distributionId, "producers", currentProducerId);
-      const offerItemsRef = collection(firebaseDb, "distributionDates", distributionId, "offerItems");
-
-      const existingOfferSnap = await getDocs(query(offerItemsRef, where("producerId", "==", currentProducerId)));
-      existingOfferSnap.docs.forEach((offerDoc) => {
-        batchOps.push((batch) => batch.delete(offerDoc.ref));
-      });
-
-      savedProducts.forEach((product) => {
-        product.variants.forEach((variant) => {
-          variant.activeDates.forEach((saleDateKey) => {
-            const offerRef = doc(offerItemsRef);
-            batchOps.push((batch) =>
-              batch.set(offerRef, {
-              producerId: currentProducerId,
-              productId: product.id,
-              variantId: variant.id,
-              saleDateKey,
-              title: product.name,
-              variantLabel: variant.label,
-              imageUrl: product.imageUrl || null,
-              isOrganic: product.isOrganic,
-              priceApplied: variant.price,
-              limitTotal: product.limitTotal,
-              active: true,
-              }),
-            );
-          });
-        });
-      });
-
-      batchOps.push((batch) =>
-        batch.set(
-          producerRef,
-          {
-            producerId: currentProducerId,
-            referentId: producer?.referentId ?? null,
-            referentName: producer?.referentName ?? null,
-            active: true,
-            validatedByReferent: true,
-            validatedAt: now,
-          },
-          { merge: true },
-        ),
+      setDirtyProducerIds((prev) => prev.filter((id) => !targetProducerIds.includes(id)));
+      setMessage(
+        targetProducerIds.length > 1
+          ? `${targetProducerIds.length} producteurs enregistres et valides.`
+          : "Producteur enregistre et valide.",
       );
+      router.push(distributionLocked ? "/admin/vente/en-cours" : "/admin/vente/prochaine");
+    } finally {
+      setSaving(false);
     }
-
-    const MAX_BATCH_OPS = 380;
-    for (let index = 0; index < batchOps.length; index += MAX_BATCH_OPS) {
-      const batch = writeBatch(firebaseDb);
-      const chunk = batchOps.slice(index, index + MAX_BATCH_OPS);
-      chunk.forEach((apply) => apply(batch));
-      await batch.commit();
-    }
-
-    setSaving(false);
-    setMessage("Producteur enregistre.");
-
-    router.push("/admin/vente");
   };
 
   if (loading) return <div className="p-6 text-sm text-ink/70">Chargement...</div>;
@@ -524,23 +734,47 @@ export default function AdminSaleProducerManagerPage() {
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-ink/60">Gestion producteur</p>
             <h1 className="mt-1 font-serif text-3xl">{producer?.name ?? "Producteur"}</h1>
             {producerIds.length > 1 ? (
-              <p className="mt-1 text-sm text-ink/70">Producteur {currentIndex + 1}/{producerIds.length}</p>
+              <p className="mt-1 text-sm text-ink/70">
+                Producteur {currentIndex + 1}/{producerIds.length} - {dirtyCount} modifie(s)
+              </p>
             ) : null}
           </div>
-          <button className="rounded-md border border-ink/30 px-4 py-2 text-sm font-semibold" onClick={() => router.push("/admin/vente")}>
-            Retour vente
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            {hasManyProducers ? (
+              <>
+                <button
+                  className="rounded-md border border-ink/30 px-3 py-2 text-sm font-semibold disabled:opacity-40"
+                  onClick={() => goToIndex(currentIndex - 1)}
+                  disabled={isFirstProducer}
+                >
+                  Precedent
+                </button>
+                <button
+                  className="rounded-md border border-ink/30 px-3 py-2 text-sm font-semibold disabled:opacity-40"
+                  onClick={() => goToIndex(currentIndex + 1)}
+                  disabled={isLastProducer}
+                >
+                  Suivant
+                </button>
+              </>
+            ) : null}
+            <button className="rounded-md border border-ink/30 px-4 py-2 text-sm font-semibold" onClick={() => router.push(backToSalesPath)}>
+              {backToSalesLabel}
+            </button>
+          </div>
         </div>
       </section>
 
       <section className="border border-ink/20 bg-stone/90 p-5">
         <div className="mb-4 flex flex-wrap gap-2">
-          <button className="rounded-md border border-ink/25 px-3 py-1.5 text-sm font-semibold disabled:opacity-50" onClick={() => applyAllDates(true)} disabled={saving || distributionLocked}>Tout selectionner</button>
-          <button className="rounded-md border border-ink/25 px-3 py-1.5 text-sm font-semibold disabled:opacity-50" onClick={() => applyAllDates(false)} disabled={saving || distributionLocked}>Tout deselectionner</button>
-          <button className="rounded-md border border-ink/25 px-3 py-1.5 text-sm font-semibold disabled:opacity-50" onClick={openAddModal} disabled={saving || distributionLocked}>Ajouter un produit</button>
+          <button className="rounded-md border border-ink/25 px-3 py-1.5 text-sm font-semibold disabled:opacity-50" onClick={() => applyAllDates(true)} disabled={saving || editingLocked}>Tout selectionner</button>
+          <button className="rounded-md border border-ink/25 px-3 py-1.5 text-sm font-semibold disabled:opacity-50" onClick={() => applyAllDates(false)} disabled={saving || editingLocked}>Tout deselectionner</button>
+          <button className="rounded-md border border-ink/25 px-3 py-1.5 text-sm font-semibold disabled:opacity-50" onClick={openAddModal} disabled={saving || editingLocked}>Ajouter un produit</button>
         </div>
-        {distributionLocked ? (
-          <p className="mb-3 text-sm font-semibold text-ember">Cette distribution est ouverte : edition verrouillee.</p>
+        {editingLocked ? (
+          <p className="mb-3 text-sm font-semibold text-ember">Cette distribution est ouverte : edition reservee aux admins.</p>
+        ) : distributionLocked ? (
+          <p className="mb-3 text-sm font-semibold text-moss">Vente ouverte : modifications autorisees (admin).</p>
         ) : null}
 
         <div className="overflow-x-auto border border-ink/20">
@@ -582,7 +816,12 @@ export default function AdminSaleProducerManagerPage() {
                       </div>
                     </td>
                     <td className="px-2 py-2 align-top text-sm font-semibold text-ink">
-                      {product.variants.length === 1 ? (
+                      {product.isSoldByWeight ? (
+                        <div className="rounded-md border border-ink/20 bg-ink/5 px-2 py-1 text-xs font-semibold text-ink/70">
+                          <p>0,00 EUR</p>
+                          <p className="font-normal">{formatEstimatedRange(product.estimatedPriceMin, product.estimatedPriceMax)}</p>
+                        </div>
+                      ) : product.variants.length === 1 ? (
                         <input
                           className="w-24 rounded-md border border-ink/25 px-2 py-1 text-sm font-semibold"
                           type="number"
@@ -635,25 +874,13 @@ export default function AdminSaleProducerManagerPage() {
                     ))}
                     <td className="px-2 py-2 align-top text-right">
                       <div className="flex items-center justify-end gap-2">
-                        {!product.id.startsWith("tmp_") ? (
-                          <button
-                            className="rounded-md border border-ink/25 px-2 py-1 text-[11px] font-semibold"
-                            onClick={() => {
-                              const idsParam = encodeURIComponent(producerIds.join(","));
-                              router.push(`/admin/vente/produit/${product.id}?distributionId=${encodeURIComponent(distributionId)}&producerId=${encodeURIComponent(currentProducerId)}&producerIds=${idsParam}&idx=${currentIndex}`);
-                            }}
-                          >
-                            Details
-                          </button>
-                        ) : null}
-                        <input
-                          className="w-20 rounded-md border border-ink/25 px-2 py-1 text-xs"
-                          placeholder="Stock"
-                          type="number"
-                          min={0}
-                          value={product.limitTotal}
-                          onChange={(e) => updateDraftProduct(productIndex, { limitTotal: e.target.value })}
-                        />
+                        <button
+                          className="rounded-md border border-ink/25 px-2 py-1 text-[11px] font-semibold disabled:opacity-50"
+                          onClick={() => setEditingProductIndex(productIndex)}
+                          disabled={saving}
+                        >
+                          Editer
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -664,7 +891,7 @@ export default function AdminSaleProducerManagerPage() {
                         <input className="w-full rounded-md border border-ink/25 px-2 py-1 text-sm" value={variant.label} onChange={(e) => updateDraftVariant(productIndex, variantIndex, { label: e.target.value })} />
                       </td>
                       <td className="px-2 py-2">
-                        <input className="w-24 rounded-md border border-ink/25 px-2 py-1 text-sm" type="number" step="0.01" value={String(variant.price)} onChange={(e) => updateDraftVariant(productIndex, variantIndex, { price: Number(e.target.value || 0) })} />
+                        <input className="w-24 rounded-md border border-ink/25 px-2 py-1 text-sm disabled:bg-stone/60 disabled:text-ink/50" type="number" step="0.01" value={String(product.isSoldByWeight ? 0 : variant.price)} disabled={product.isSoldByWeight} onChange={(e) => updateDraftVariant(productIndex, variantIndex, { price: Number(e.target.value || 0) })} />
                       </td>
                       {saleDates.map((date) => (
                         <td key={`${variant.tempId}-${date.key}`} className="px-2 py-2 text-center">
@@ -697,6 +924,274 @@ export default function AdminSaleProducerManagerPage() {
         </div>
       </section>
 
+      {editingProduct ? (
+        <div
+          className="fixed inset-0 z-50 bg-ink/40"
+          onClick={() => setEditingProductIndex(null)}
+        >
+          <aside
+            className="absolute inset-y-0 right-0 w-full max-w-[1040px] overflow-x-hidden overflow-y-auto border-l border-clay/70 bg-white p-6 shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-ink/60">
+                  Edition produit
+                </p>
+                <h3 className="mt-1 font-serif text-3xl text-ink">
+                  {editingProduct.name || "Produit"}
+                </h3>
+              </div>
+              <div className="flex items-center gap-2">
+                {!editingProduct.id.startsWith("tmp_") ? (
+                  <a
+                    href={`/products/${editingProduct.id}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="rounded-md border border-ink/25 px-3 py-2 text-xs font-semibold text-ink"
+                  >
+                    Voir la fiche
+                  </a>
+                ) : null}
+                <button
+                  className="rounded-md border border-ink/25 px-3 py-2 text-xs font-semibold text-ink"
+                  onClick={() => setEditingProductIndex(null)}
+                >
+                  Fermer
+                </button>
+              </div>
+            </div>
+
+            <div className="mt-4 grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
+              <div className="grid gap-3">
+                <label className="flex flex-col gap-2 text-sm font-semibold text-ink/70">
+                  Nom produit
+                  <input
+                    className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
+                    value={editingProduct.name}
+                    disabled={editingLocked}
+                    onChange={(event) =>
+                      updateDraftProduct(editingProductIndex!, { name: event.target.value })
+                    }
+                  />
+                </label>
+                <label className="flex flex-col gap-2 text-sm font-semibold text-ink/70">
+                  Description
+                  <textarea
+                    className="min-h-[120px] rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
+                    value={editingProduct.description}
+                    disabled={editingLocked}
+                    onChange={(event) =>
+                      updateDraftProduct(editingProductIndex!, { description: event.target.value })
+                    }
+                  />
+                </label>
+                <label className="flex flex-col gap-2 text-sm font-semibold text-ink/70">
+                  Image URL
+                  <input
+                    className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
+                    value={editingProduct.imageUrl}
+                    disabled={editingLocked}
+                    onChange={(event) =>
+                      updateDraftProduct(editingProductIndex!, { imageUrl: event.target.value })
+                    }
+                  />
+                </label>
+
+                <div className="rounded-xl border border-clay/70 bg-stone/40 p-4">
+                  <label className="flex items-center gap-2 text-sm font-semibold text-ink">
+                    <input
+                      type="checkbox"
+                      checked={editingProduct.isOrganic}
+                      disabled={editingLocked}
+                      onChange={(event) =>
+                        updateDraftProduct(editingProductIndex!, { isOrganic: event.target.checked })
+                      }
+                    />
+                    Produit bio
+                  </label>
+                  <label className="mt-3 flex items-center gap-2 text-sm font-semibold text-ink">
+                    <input
+                      type="checkbox"
+                      checked={editingProduct.isSoldByWeight}
+                      disabled={editingLocked}
+                      onChange={(event) =>
+                        updateDraftProduct(editingProductIndex!, {
+                          isSoldByWeight: event.target.checked,
+                          variants: event.target.checked
+                            ? editingProduct.variants.map((variant) => ({ ...variant, price: 0 }))
+                            : editingProduct.variants,
+                        })
+                      }
+                    />
+                    Produit au poids (prix final apres pesee)
+                  </label>
+
+                  {editingProduct.isSoldByWeight ? (
+                    <div className="mt-3 grid gap-3 md:grid-cols-2">
+                      <label className="flex flex-col gap-1 text-xs font-semibold uppercase tracking-[0.12em] text-ink/65">
+                        Prix estime min
+                        <input
+                          className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm normal-case tracking-normal"
+                          type="number"
+                          min={0}
+                          step="0.01"
+                          value={editingProduct.estimatedPriceMin}
+                          disabled={editingLocked}
+                          onChange={(event) =>
+                            updateDraftProduct(editingProductIndex!, { estimatedPriceMin: event.target.value })
+                          }
+                        />
+                      </label>
+                      <label className="flex flex-col gap-1 text-xs font-semibold uppercase tracking-[0.12em] text-ink/65">
+                        Prix estime max
+                        <input
+                          className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm normal-case tracking-normal"
+                          type="number"
+                          min={0}
+                          step="0.01"
+                          value={editingProduct.estimatedPriceMax}
+                          disabled={editingLocked}
+                          onChange={(event) =>
+                            updateDraftProduct(editingProductIndex!, { estimatedPriceMax: event.target.value })
+                          }
+                        />
+                      </label>
+                    </div>
+                  ) : null}
+
+                  <label className="mt-3 flex flex-col gap-1 text-xs font-semibold uppercase tracking-[0.12em] text-ink/65">
+                    Stock limite (optionnel)
+                    <input
+                      className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm normal-case tracking-normal"
+                      type="number"
+                      min={0}
+                      value={editingProduct.limitTotal}
+                      disabled={editingLocked}
+                      onChange={(event) =>
+                        updateDraftProduct(editingProductIndex!, { limitTotal: event.target.value })
+                      }
+                    />
+                  </label>
+                </div>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-sm font-semibold text-ink/70">Variantes</p>
+                  <button
+                    className="rounded-full border border-ink/20 px-3 py-1 text-xs font-semibold disabled:opacity-50"
+                    onClick={() =>
+                      updateDraftProduct(editingProductIndex!, {
+                        variants: [...editingProduct.variants, createDraftVariant()],
+                      })
+                    }
+                    disabled={editingLocked}
+                  >
+                    Ajouter une option
+                  </button>
+                </div>
+                <div className="mt-3 overflow-x-auto rounded-2xl border border-clay/70 bg-white">
+                  <table className="min-w-[560px] w-full text-sm">
+                    <thead className="border-b border-clay/70 bg-stone/70 text-[11px] uppercase tracking-[0.2em] text-ink/60">
+                      <tr>
+                        <th className="px-3 py-2 text-left">Variante</th>
+                        <th className="px-3 py-2 text-left">Prix</th>
+                        <th className="px-3 py-2 text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {editingProduct.variants.map((variant, variantIndex) => (
+                        <tr key={variant.tempId} className="border-b border-clay/50">
+                          <td className="px-3 py-2">
+                            <input
+                              className="w-full rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
+                              value={variant.label}
+                              disabled={editingLocked}
+                              onChange={(event) =>
+                                updateDraftVariant(editingProductIndex!, variantIndex, { label: event.target.value })
+                              }
+                            />
+                          </td>
+                          <td className="px-3 py-2">
+                            <input
+                              className="w-full rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm disabled:bg-stone/60 disabled:text-ink/50"
+                              type="number"
+                              min={0}
+                              step="0.01"
+                              value={String(editingProduct.isSoldByWeight ? 0 : variant.price)}
+                              disabled={editingLocked || editingProduct.isSoldByWeight}
+                              onChange={(event) =>
+                                updateDraftVariant(editingProductIndex!, variantIndex, { price: Number(event.target.value || 0) })
+                              }
+                            />
+                          </td>
+                          <td className="px-3 py-2 text-right">
+                            <button
+                              className="rounded-md border border-ink/25 px-3 py-1 text-xs font-semibold disabled:opacity-50"
+                              disabled={editingLocked || editingProduct.variants.length <= 1}
+                              onClick={() =>
+                                updateDraftProduct(editingProductIndex!, {
+                                  variants: editingProduct.variants.filter((_, idx) => idx !== variantIndex),
+                                })
+                              }
+                            >
+                              Retirer
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="mt-4 overflow-x-auto rounded-2xl border border-clay/70 bg-white">
+                  <table className="min-w-[560px] w-full text-xs">
+                    <thead className="border-b border-clay/70 bg-stone/70 uppercase tracking-[0.15em] text-ink/60">
+                      <tr>
+                        <th className="px-3 py-2 text-left">Disponibilite</th>
+                        {saleDates.map((date) => (
+                          <th key={`drawer-date-${date.key}`} className="px-2 py-2 text-center">
+                            {date.label}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {editingProduct.variants.map((variant, variantIndex) => (
+                        <tr key={`drawer-row-${variant.tempId}`} className="border-b border-clay/40">
+                          <td className="px-3 py-2 font-semibold text-ink/75">
+                            {variant.label || `Variante ${variantIndex + 1}`}
+                          </td>
+                          {saleDates.map((date) => (
+                            <td key={`drawer-cell-${variant.tempId}-${date.key}`} className="px-2 py-2 text-center">
+                              <input
+                                type="checkbox"
+                                checked={variant.activeDates.includes(date.key)}
+                                disabled={editingLocked || !editableDateKeys.includes(date.key)}
+                                onChange={() =>
+                                  updateDraftVariant(editingProductIndex!, variantIndex, {
+                                    activeDates: variant.activeDates.includes(date.key)
+                                      ? variant.activeDates.filter((key) => key !== date.key)
+                                      : editableDateKeys.includes(date.key)
+                                        ? [...variant.activeDates, date.key]
+                                        : [...variant.activeDates],
+                                  })
+                                }
+                              />
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </aside>
+        </div>
+      ) : null}
+
       {showAddProductModal ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 p-4">
           <div className="w-full max-w-2xl border border-ink/20 bg-stone/95 p-5">
@@ -724,7 +1219,7 @@ export default function AdminSaleProducerManagerPage() {
                 </label>
                 <label className="text-xs font-semibold uppercase tracking-[0.12em] text-ink/65">
                   Prix initial
-                  <input className="mt-1 w-full border border-ink/25 px-3 py-2 text-sm" type="number" step="0.01" value={addDraft.variantPrice} onChange={(e) => setAddDraft((prev) => ({ ...prev, variantPrice: e.target.value }))} />
+                  <input className="mt-1 w-full border border-ink/25 px-3 py-2 text-sm disabled:bg-stone/60 disabled:text-ink/55" type="number" step="0.01" value={addDraft.isSoldByWeight ? "0" : addDraft.variantPrice} disabled={addDraft.isSoldByWeight} onChange={(e) => setAddDraft((prev) => ({ ...prev, variantPrice: e.target.value }))} />
                 </label>
                 <label className="text-xs font-semibold uppercase tracking-[0.12em] text-ink/65">
                   Stock limite (optionnel)
@@ -735,6 +1230,46 @@ export default function AdminSaleProducerManagerPage() {
                 <input type="checkbox" checked={addDraft.isOrganic} onChange={(e) => setAddDraft((prev) => ({ ...prev, isOrganic: e.target.checked }))} />
                 Produit bio
               </label>
+              <label className="flex items-center gap-2 text-sm text-ink/80">
+                <input
+                  type="checkbox"
+                  checked={addDraft.isSoldByWeight}
+                  onChange={(e) =>
+                    setAddDraft((prev) => ({
+                      ...prev,
+                      isSoldByWeight: e.target.checked,
+                      variantPrice: e.target.checked ? "0" : prev.variantPrice,
+                    }))
+                  }
+                />
+                Produit au poids (prix final apres pesee)
+              </label>
+              {addDraft.isSoldByWeight ? (
+                <div className="grid gap-3 md:grid-cols-2">
+                  <label className="text-xs font-semibold uppercase tracking-[0.12em] text-ink/65">
+                    Prix estimatif min
+                    <input
+                      className="mt-1 w-full border border-ink/25 px-3 py-2 text-sm"
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      value={addDraft.estimatedPriceMin}
+                      onChange={(e) => setAddDraft((prev) => ({ ...prev, estimatedPriceMin: e.target.value }))}
+                    />
+                  </label>
+                  <label className="text-xs font-semibold uppercase tracking-[0.12em] text-ink/65">
+                    Prix estimatif max
+                    <input
+                      className="mt-1 w-full border border-ink/25 px-3 py-2 text-sm"
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      value={addDraft.estimatedPriceMax}
+                      onChange={(e) => setAddDraft((prev) => ({ ...prev, estimatedPriceMax: e.target.value }))}
+                    />
+                  </label>
+                </div>
+              ) : null}
             </div>
             <div className="mt-4 flex justify-end">
               <button className="rounded-md bg-forest px-4 py-2 text-sm font-semibold text-white" onClick={addProductFromModal}>Ajouter ce produit</button>
@@ -743,12 +1278,44 @@ export default function AdminSaleProducerManagerPage() {
         </div>
       ) : null}
 
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-ink/70">{message}</p>
-        <button className="rounded-md bg-forest px-4 py-2 text-sm font-semibold text-white disabled:opacity-50" onClick={saveDraft} disabled={saving || distributionLocked}>
-          Enregistrer
-        </button>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="text-sm text-ink/70">
+          <p>{message}</p>
+          {hasManyProducers && !isLastProducer ? (
+            <p className="text-xs text-ink/60">Passe au dernier producteur pour enregistrer le lot.</p>
+          ) : null}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {hasManyProducers ? (
+            <>
+              <button
+                className="rounded-md border border-ink/25 px-4 py-2 text-sm font-semibold disabled:opacity-50"
+                onClick={() => goToIndex(currentIndex - 1)}
+                disabled={saving || isFirstProducer}
+              >
+                Precedent
+              </button>
+              <button
+                className="rounded-md border border-ink/25 px-4 py-2 text-sm font-semibold disabled:opacity-50"
+                onClick={() => goToIndex(currentIndex + 1)}
+                disabled={saving || isLastProducer}
+              >
+                Suivant
+              </button>
+            </>
+          ) : null}
+          <button
+            className="rounded-md bg-forest px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+            onClick={saveDraft}
+            disabled={saving || editingLocked || (hasManyProducers && !isLastProducer)}
+          >
+            {hasManyProducers
+              ? `Enregistrer et valider tous mes producteurs (${dirtyCount})`
+              : "Enregistrer et valider"}
+          </button>
+        </div>
       </div>
     </div>
   );
 }
+

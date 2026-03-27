@@ -218,6 +218,8 @@ export default function ProducersEditor({
       const haystack = [
         entry.id,
         getByPath(entry.data, "name"),
+        getByPath(entry.data, "contact.firstName"),
+        getByPath(entry.data, "contact.lastName"),
         getByPath(entry.data, "email"),
         getByPath(entry.data, "referentName"),
         getByPath(entry.data, "address.street"),
@@ -320,6 +322,7 @@ export default function ProducersEditor({
             <table className="min-w-full text-left text-sm">
               <thead className="border-b border-clay/70 bg-stone/80">
                 <tr>
+                  <th className="px-3 py-2 text-xs font-semibold text-ink">Photo</th>
                   <th className="cursor-pointer px-3 py-2 text-xs font-semibold text-ink" onClick={() => toggleSort("name")}>Producteur{sortKey === "name" ? (sortDir === "asc" ? " ^" : " v") : ""}</th>
                   <th className="cursor-pointer px-3 py-2 text-xs font-semibold text-ink" onClick={() => toggleSort("products")}>Produits{sortKey === "products" ? (sortDir === "asc" ? " ^" : " v") : ""}</th>
                   <th className="cursor-pointer px-3 py-2 text-xs font-semibold text-ink" onClick={() => toggleSort("referent")}>Référent{sortKey === "referent" ? (sortDir === "asc" ? " ^" : " v") : ""}</th>
@@ -334,6 +337,21 @@ export default function ProducersEditor({
                   const hasReferent = Boolean(referentId);
                   return (
                     <tr key={entry.id} className={`border-b border-clay/50 ${hasReferent ? "hover:bg-stone/60" : "bg-ember/5 hover:bg-ember/10"}`}>
+                      <td className="px-3 py-2">
+                        <div className="h-10 w-10 overflow-hidden rounded-full border border-ink/15 bg-stone">
+                          {String(getByPath(entry.data, "imageUrl") ?? "").trim() ? (
+                            <img
+                              src={String(getByPath(entry.data, "imageUrl") ?? "")}
+                              alt={String(getByPath(entry.data, "name") ?? "Producteur")}
+                              className="h-full w-full object-cover"
+                            />
+                          ) : (
+                            <div className="flex h-full w-full items-center justify-center text-[10px] text-ink/45">
+                              -
+                            </div>
+                          )}
+                        </div>
+                      </td>
                       <td className="px-3 py-2 text-xs text-ink/80">
                         <Link href={`/admin/producers/${entry.id}`} className="font-semibold hover:underline">
                           {String(getByPath(entry.data, "name") ?? "-")}

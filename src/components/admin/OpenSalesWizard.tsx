@@ -11,8 +11,10 @@ import {
   doc,
   getDoc,
   getDocs,
+  query,
   setDoc,
   updateDoc,
+  where,
   writeBatch,
 } from "firebase/firestore";
 import { useAuth } from "@/components/auth/AuthProvider";
@@ -38,7 +40,6 @@ type Producer = {
   name?: string;
   referentId?: string | null;
   referentName?: string | null;
-  coopStatus?: string | null;
 };
 type Member = { id: string; firstName?: string; lastName?: string };
 type Order = { distributionId?: string | null; memberId?: string | null; totals?: { totalAmount?: number } };
@@ -95,6 +96,8 @@ type ProductDraft = {
   existingVariantIds: string[];
 };
 
+type SalesViewMode = "overview" | "current" | "next" | "history";
+
 const FINISHED = new Set(["finished", "fermee", "ferme", "closed"]);
 
 const toDate = (value?: FireDate) => value?.toDate?.() ?? null;
@@ -107,16 +110,20 @@ const formatLongDate = (value?: Date | null) =>
   value
     ? value.toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })
     : "-";
-const distributionDateLabels = (distribution?: Distribution | null) =>
+const formatBadgeDate = (value?: Date | null) =>
+  value
+    ? value
+        .toLocaleDateString("fr-FR", { weekday: "short", day: "2-digit", month: "short" })
+        .replace(/\.$/, "")
+    : "-";
+const distributionDateBadges = (distribution?: Distribution | null) =>
   (distribution?.dates ?? [])
     .slice(0, 3)
-    .map((date) => formatDate(toDate(date)))
+    .map((date) => formatBadgeDate(toDate(date)))
     .filter((label) => label !== "-");
 const money = (value: number) => value.toFixed(2).replace(".", ",");
 const isPlanned = (status?: string) =>
   !isOpenStatus(status) && !FINISHED.has(String(status ?? "").toLowerCase());
-const isProducerActive = (status?: string | null) =>
-  !["inactive", "inactif", "inactif ", "off"].includes(String(status ?? "").toLowerCase().trim());
 const fullName = (m?: Member | null) => `${m?.firstName ?? ""} ${m?.lastName ?? ""}`.trim();
 const newId = () =>
   typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -128,13 +135,17 @@ const sameStringSet = (left: string[], right: string[]) => {
   return left.every((item) => rightSet.has(item));
 };
 
-export default function OpenSalesWizard() {
+export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesViewMode }) {
   const router = useRouter();
   const { effectiveRole, effectiveMemberId } = useAuth();
   const isAdmin = effectiveRole === "admin";
   const isReferent = effectiveRole === "referent";
   const canManageAdmin = isAdmin || isReferent;
   const canManageLifecycle = isAdmin;
+  const isOverviewMode = mode === "overview";
+  const isCurrentMode = mode === "current";
+  const isNextMode = mode === "next";
+  const isHistoryMode = mode === "history";
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -173,8 +184,11 @@ export default function OpenSalesWizard() {
     [distributions],
   );
   const nextPlannedDistribution = plannedDistributions[0] ?? null;
-  // Preparation is always done on the next planned distribution.
-  const targetDistribution = useMemo(() => nextPlannedDistribution ?? null, [nextPlannedDistribution]);
+  const targetDistribution = useMemo(() => {
+    if (isCurrentMode) return openDistribution ?? null;
+    if (isNextMode || isOverviewMode) return nextPlannedDistribution ?? null;
+    return null;
+  }, [isCurrentMode, isNextMode, isOverviewMode, openDistribution, nextPlannedDistribution]);
   const saleDates = useMemo(
     () =>
       ((targetDistribution?.dates ?? []).slice(0, 3).map((d) => toDate(d)).filter(Boolean) as Date[]).map((d) => ({
@@ -185,15 +199,15 @@ export default function OpenSalesWizard() {
   );
   const saleDateKeys = useMemo(() => saleDates.map((d) => d.key), [saleDates]);
   const openDistributionDates = useMemo(
-    () => distributionDateLabels(openDistribution),
+    () => distributionDateBadges(openDistribution),
     [openDistribution],
   );
   const nextDistributionDates = useMemo(
-    () => distributionDateLabels(nextPlannedDistribution),
+    () => distributionDateBadges(nextPlannedDistribution),
     [nextPlannedDistribution],
   );
-  const validationDistributionDates = useMemo(
-    () => distributionDateLabels(targetDistribution),
+  const targetDistributionDates = useMemo(
+    () => distributionDateBadges(targetDistribution),
     [targetDistribution],
   );
 
@@ -367,8 +381,7 @@ export default function OpenSalesWizard() {
 
     const producerItems = producerSnap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Producer, "id">) }));
     producerItems.sort((a, b) => (a.name ?? "").localeCompare(b.name ?? ""));
-    const activeProducerItems = producerItems.filter((producer) => isProducerActive(producer.coopStatus));
-    setProducers(activeProducerItems);
+    setProducers(producerItems);
 
     const memberMap: Record<string, Member> = {};
     memberSnap.docs.forEach((d) => {
@@ -487,7 +500,7 @@ export default function OpenSalesWizard() {
         .map((date) => toDate(date))
         .filter(Boolean) as Date[]
     ).map((date) => dateKey(date));
-    await syncRows(defaultTarget, activeProducerItems, memberMap, nextProductsByProducer, defaultTargetDateKeys);
+    await syncRows(defaultTarget, producerItems, memberMap, nextProductsByProducer, defaultTargetDateKeys);
 
     const overviewDistributionId = open?.id ?? "";
     if (overviewDistributionId) {
@@ -579,6 +592,7 @@ export default function OpenSalesWizard() {
     rows.length > 0 &&
     validatedCount === rows.length;
   const saleLocked = isOpenStatus(targetDistribution?.status);
+  const editingLocked = saleLocked && !isAdmin;
 
   const groups = useMemo(() => {
     const map: Record<
@@ -615,14 +629,38 @@ export default function OpenSalesWizard() {
     () => plannedDistributions,
     [plannedDistributions],
   );
+  const historicalDistributions = useMemo(
+    () =>
+      distributions
+        .filter((distribution) => FINISHED.has(String(distribution.status ?? "").toLowerCase()))
+        .sort(
+          (left, right) =>
+            (toDate(right.dates?.[0]) ?? new Date(0)).getTime() -
+            (toDate(left.dates?.[0]) ?? new Date(0)).getTime(),
+        ),
+    [distributions],
+  );
+  const showCurrentSection = isOverviewMode || isCurrentMode;
+  const showNextSection = isOverviewMode || isNextMode;
+  const showValidationSection = isNextMode || (isCurrentMode && isAdmin);
+  const showUpcomingSection = isOverviewMode;
+  const showHistorySection = isHistoryMode;
 
   const openFlow = (producerIds: string[], startAt = 0) => {
     if (!targetDistribution?.id) {
-      setMessage("Aucune distribution planifiee a preparer.");
+      setMessage(
+        isCurrentMode
+          ? "Aucune vente en cours a modifier."
+          : "Aucune distribution planifiee a preparer.",
+      );
       return;
     }
-    if (saleLocked) {
-      setMessage("Cette distribution est ouverte : preparation verrouillee.");
+    if (editingLocked) {
+      setMessage(
+        isCurrentMode
+          ? "Cette vente en cours est modifiable uniquement par les admins."
+          : "Cette distribution est ouverte : preparation reservee aux admins.",
+      );
       return;
     }
     if (!producerIds.length) {
@@ -720,6 +758,82 @@ export default function OpenSalesWizard() {
       },
       { merge: true },
     );
+    if (isCurrentMode) {
+      const offerItemsRef = collection(firebaseDb, "distributionDates", targetDistribution.id, "offerItems");
+      const existingOfferSnap = await getDocs(
+        query(offerItemsRef, where("producerId", "==", row.producerId)),
+      );
+
+      const ops: Array<
+        | { type: "delete"; ref: (typeof existingOfferSnap.docs)[number]["ref"] }
+        | {
+            type: "set";
+            ref: ReturnType<typeof doc>;
+            data: {
+              producerId: string;
+              productId: string;
+              variantId: string;
+              saleDateKey: string;
+              title: string;
+              variantLabel: string;
+              imageUrl: string | null;
+              isOrganic: boolean;
+              priceApplied: number;
+              limitTotal: number;
+              active: true;
+            };
+          }
+      > = [];
+
+      existingOfferSnap.docs.forEach((offerDoc) => {
+        ops.push({ type: "delete", ref: offerDoc.ref });
+      });
+
+      if (validated) {
+        (productsByProducer[row.producerId] ?? []).forEach((product) => {
+          const limitTotal = Number(product.saleLimit ?? 0);
+          product.variants.forEach((variant) => {
+            const sourceDates = Array.isArray(variant.activeDates) ? variant.activeDates : [];
+            const activeDates = (
+              sourceDates.length > 0 ? sourceDates : saleDateKeys
+            ).filter((key) => saleDateKeys.includes(key));
+            Array.from(new Set(activeDates)).forEach((saleDateKey) => {
+              ops.push({
+                type: "set",
+                ref: doc(offerItemsRef),
+                data: {
+                  producerId: row.producerId,
+                  productId: product.id,
+                  variantId: variant.id,
+                  saleDateKey,
+                  title: product.name,
+                  variantLabel: variant.label,
+                  imageUrl: product.imageUrl || null,
+                  isOrganic: product.isOrganic,
+                  priceApplied: Number(variant.price ?? 0),
+                  limitTotal: Number.isFinite(limitTotal) && limitTotal > 0 ? limitTotal : 0,
+                  active: true,
+                },
+              });
+            });
+          });
+        });
+      }
+
+      const MAX_BATCH_OPS = 380;
+      for (let index = 0; index < ops.length; index += MAX_BATCH_OPS) {
+        const batch = writeBatch(firebaseDb);
+        const chunk = ops.slice(index, index + MAX_BATCH_OPS);
+        chunk.forEach((op) => {
+          if (op.type === "delete") {
+            batch.delete(op.ref);
+            return;
+          }
+          batch.set(op.ref, op.data);
+        });
+        await batch.commit();
+      }
+    }
     await load();
     setSaving(false);
   };
@@ -915,6 +1029,7 @@ export default function OpenSalesWizard() {
 
   return (
     <div className="flex flex-col gap-4">
+      {showCurrentSection ? (
       <section className="rounded-md border border-ink/20 bg-white p-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
@@ -924,7 +1039,7 @@ export default function OpenSalesWizard() {
             </h2>
             <p className="mt-2 text-sm text-ink/70">
               {openDistribution
-                ? `Ouverte le ${formatLongDate(toDate(openDistribution.openedAt))}${toDate(openDistribution.closeAt) ? ` · fermeture auto le ${formatLongDate(toDate(openDistribution.closeAt))} a 22h` : ""}.`
+                ? `Ouverte le ${formatLongDate(toDate(openDistribution.openedAt))}${toDate(openDistribution.closeAt) ? ` - fermeture auto le ${formatLongDate(toDate(openDistribution.closeAt))} a 22h` : ""}.`
                 : "La boutique est actuellement fermee."}
             </p>
             <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -933,14 +1048,10 @@ export default function OpenSalesWizard() {
                   <span
                     key={`open-date-${index}`}
                     className="rounded-full border border-forest/30 bg-forest/10 px-3 py-1 text-xs font-semibold text-forest"
-                  >
-                    📅 Date {index + 1}: {label}
-                  </span>
+                  >{label}</span>
                 ))
               ) : (
-                <span className="rounded-full border border-ink/20 bg-ink/5 px-3 py-1 text-xs text-ink/70">
-                  📅 Dates de distribution non renseignées
-                </span>
+                <span className="rounded-full border border-ink/20 bg-ink/5 px-3 py-1 text-xs text-ink/70">Dates de distribution non renseignees</span>
               )}
             </div>
           </div>
@@ -961,6 +1072,15 @@ export default function OpenSalesWizard() {
                 disabled={saving || !canOpen}
               >
                 Ouvrir la vente
+              </button>
+            ) : null}
+            {isCurrentMode && isAdmin && openDistribution ? (
+              <button
+                className="rounded-md bg-forest px-5 py-2 text-sm font-semibold text-white disabled:opacity-50"
+                onClick={() => openFlow(rows.map((row) => row.producerId))}
+                disabled={saving || editingLocked || rows.length === 0}
+              >
+                Modifier la vente en cours
               </button>
             ) : null}
           </div>
@@ -989,15 +1109,76 @@ export default function OpenSalesWizard() {
 
         {canManageLifecycle && !openDistribution && !canOpen ? (
           <p className="mt-3 text-sm text-ink/70">
-            Pour ouvrir la vente, valide tous les producteurs actifs de la prochaine distribution.
+            Pour ouvrir la vente, valide tous les producteurs de la prochaine distribution.
           </p>
         ) : null}
       </section>
+      ) : null}
 
+      {showHistorySection ? (
+        <section className="rounded-md border border-ink/20 bg-white p-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-ink/60">Historique des ventes</p>
+              <h3 className="mt-1 font-serif text-3xl">Ventes passees</h3>
+            </div>
+            <p className="text-xs text-ink/65">
+              {historicalDistributions.length} vente(s) cloturee(s)
+            </p>
+          </div>
+
+          {historicalDistributions.length > 0 ? (
+            <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+              {historicalDistributions.map((distribution) => {
+                const metrics = distributionMetrics[distribution.id];
+                const dateLabels = distributionDateBadges(distribution);
+                return (
+                  <article key={distribution.id} className="rounded-sm border border-clay/70 bg-stone p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-sm font-semibold text-ink">{distributionLabel(distribution)}</p>
+                      <span className="rounded-sm border border-ink/25 bg-ink/5 px-2 py-0.5 text-[11px] font-semibold text-ink/80">
+                        Cloturee
+                      </span>
+                    </div>
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {dateLabels.length ? (
+                        dateLabels.map((label, index) => (
+                          <span key={`${distribution.id}-history-date-${index}`} className="rounded-full border border-clay/60 bg-white/85 px-2 py-0.5 text-[11px] font-semibold text-ink/80">
+                            {label}
+                          </span>
+                        ))
+                      ) : (
+                        <span className="text-xs text-ink/65">Dates non renseignees</span>
+                      )}
+                    </div>
+                    <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
+                      <div className="rounded-sm border border-clay/70 bg-white px-2 py-1">
+                        Producteurs: <span className="font-semibold">{metrics?.producersActive ?? 0}</span>
+                      </div>
+                      <div className="rounded-sm border border-clay/70 bg-white px-2 py-1">
+                        Valides: <span className="font-semibold">{metrics?.producersValidated ?? 0}</span>
+                      </div>
+                      <div className="rounded-sm border border-clay/70 bg-white px-2 py-1">
+                        Produits: <span className="font-semibold">{metrics?.productsCount ?? 0}</span>
+                      </div>
+                      <div className="rounded-sm border border-clay/70 bg-white px-2 py-1">
+                        Commandes: <span className="font-semibold">{metrics?.ordersCount ?? 0}</span>
+                      </div>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="mt-3 text-sm text-ink/70">Aucune vente cloturee pour le moment.</p>
+          )}
+        </section>
+      ) : null}
+      {showNextSection ? (
       <section className="rounded-md border border-ink/20 bg-white p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-ink/60">🟩 Prochaine vente</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-ink/60">Prochaine vente</p>
             <h3 className="mt-1 font-serif text-3xl">Preparation de la prochaine distribution</h3>
             <p className="mt-1 text-sm text-ink/70">
               {nextPlannedDistribution
@@ -1010,9 +1191,7 @@ export default function OpenSalesWizard() {
                   <span
                     key={`next-date-${index}`}
                     className="rounded-full border border-honey/45 bg-honey/20 px-3 py-1 text-xs font-semibold text-ink/85"
-                  >
-                    📅 Date {index + 1}: {label}
-                  </span>
+                  >{label}</span>
                 ))}
               </div>
             ) : null}
@@ -1039,25 +1218,9 @@ export default function OpenSalesWizard() {
         </div>
 
         {nextPlannedDistribution ? (
-          <div className="mt-3 grid gap-2 md:grid-cols-5">
+          <div className="mt-3 grid gap-2 md:grid-cols-4">
             <div className="rounded-sm border border-clay/70 bg-clay/10 px-3 py-2 text-sm">
-              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-ink/65">
-                📅 Dates distribution
-              </p>
-              <div className="mt-1 flex flex-wrap gap-1.5">
-                {nextDistributionDates.length ? (
-                  nextDistributionDates.map((label, index) => (
-                    <span key={`next-dates-card-${index}`} className="rounded-full bg-white/85 px-2 py-0.5 text-xs font-semibold text-ink/80">
-                      {index + 1}. {label}
-                    </span>
-                  ))
-                ) : (
-                  <span className="text-xs text-ink/65">Dates non renseignées</span>
-                )}
-              </div>
-            </div>
-            <div className="rounded-sm border border-clay/70 bg-clay/10 px-3 py-2 text-sm">
-              Producteurs actifs:{" "}
+              Producteurs inclus:{" "}
               <span className="font-semibold">{rows.length}</span>
             </div>
             <div className="rounded-sm border border-clay/70 bg-clay/10 px-3 py-2 text-sm">
@@ -1075,14 +1238,22 @@ export default function OpenSalesWizard() {
           </div>
         ) : null}
       </section>
+      ) : null}
 
+      {showValidationSection ? (
       <section className="rounded-md border border-ink/20 bg-white p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-ink/60">Validation referents</p>
-            <h3 className="mt-1 font-serif text-3xl">Producteurs a valider</h3>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-ink/60">
+              {isCurrentMode ? "Vente en cours" : "Validation referents"}
+            </p>
+            <h3 className="mt-1 font-serif text-3xl">
+              {isCurrentMode ? "Modifier la vente en cours" : "Producteurs a valider"}
+            </h3>
             <p className="mt-1 text-sm text-ink/70">
-              Seuls les producteurs avec produits apparaissent dans le tableau.
+              {isCurrentMode
+                ? "Modification en direct de la vente ouverte (admin uniquement)."
+                : "Seuls les producteurs avec produits apparaissent dans le tableau."}
             </p>
             <p className="mt-2 text-sm font-semibold text-ink/85">
               Validation pour:{" "}
@@ -1091,46 +1262,46 @@ export default function OpenSalesWizard() {
               </span>
             </p>
             <div className="mt-2 flex flex-wrap items-center gap-2">
-              {validationDistributionDates.length ? (
-                validationDistributionDates.map((label, index) => (
+              {targetDistributionDates.length ? (
+                targetDistributionDates.map((label, index) => (
                   <span
                     key={`validation-date-${index}`}
                     className="rounded-full border border-clay/70 bg-stone px-3 py-1 text-xs font-semibold text-ink/80"
-                  >
-                    📅 Date {index + 1}: {label}
-                  </span>
+                  >{label}</span>
                 ))
               ) : (
-                <span className="rounded-full border border-ink/20 bg-ink/5 px-3 py-1 text-xs text-ink/70">
-                  📅 Dates non renseignees
-                </span>
+                <span className="rounded-full border border-ink/20 bg-ink/5 px-3 py-1 text-xs text-ink/70">Dates non renseignees</span>
               )}
             </div>
-            {saleLocked ? (
+            {editingLocked ? (
               <p className="mt-1 text-xs text-ember">
-                Cette distribution est ouverte : validations et editions verrouillees.
+                Cette distribution est ouverte : validations et editions reservees aux admins.
+              </p>
+            ) : saleLocked ? (
+              <p className="mt-1 text-xs text-moss">
+                Vente ouverte : modifications autorisees (admin).
               </p>
             ) : null}
           </div>
           <div className="flex flex-wrap gap-2">
-            {isReferent ? (
+            {!isCurrentMode && isReferent ? (
               <button
                 className="rounded-md bg-forest px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
                 onClick={() =>
                   openFlow(rows.filter((row) => row.referentId === effectiveMemberId).map((row) => row.producerId))
                 }
-                disabled={saleLocked}
+                disabled={editingLocked}
               >
                 Gerer mes producteurs pour la vente
               </button>
             ) : null}
-            {canManageAdmin ? (
+            {(isCurrentMode ? isAdmin : canManageAdmin) ? (
               <button
                 className="rounded-md border border-ink/25 px-4 py-2 text-sm font-semibold disabled:opacity-50"
                 onClick={() => openFlow(rows.map((row) => row.producerId))}
-                disabled={saleLocked}
+                disabled={editingLocked}
               >
-                Gerer tous les producteurs
+                {isCurrentMode ? "Modifier les producteurs de la vente" : "Gerer tous les producteurs"}
               </button>
             ) : null}
           </div>
@@ -1163,7 +1334,7 @@ export default function OpenSalesWizard() {
             <tbody>
               {groups.map((group) =>
                 group.rows.map((row, index) => {
-                  const canEdit = canManageAdmin && !saleLocked;
+                  const canEdit = (isCurrentMode ? isAdmin : canManageAdmin) && !editingLocked;
                   const myProducerIds = rows
                     .filter((item) => item.referentId === effectiveMemberId)
                     .map((item) => item.producerId);
@@ -1189,7 +1360,7 @@ export default function OpenSalesWizard() {
                           <button
                             className="rounded-md border border-ink/25 px-3 py-1 text-xs font-semibold disabled:opacity-50"
                             onClick={() => openFlow([row.producerId])}
-                            disabled={saleLocked}
+                            disabled={editingLocked}
                           >
                             Gérer
                           </button>
@@ -1202,7 +1373,7 @@ export default function OpenSalesWizard() {
                                   myProducerIds.findIndex((id) => id === row.producerId),
                                 )
                               }
-                              disabled={saleLocked}
+                              disabled={editingLocked}
                             >
                               Gérer tous mes producteurs
                             </button>
@@ -1225,7 +1396,7 @@ export default function OpenSalesWizard() {
           </table>
         </div>
 
-        {producersWithoutProducts.length > 0 ? (
+        {!isCurrentMode && producersWithoutProducts.length > 0 ? (
           <div className="mt-4 border border-dashed border-ink/25 bg-ink/5 px-3 py-3">
             <p className="text-xs font-semibold uppercase tracking-[0.12em] text-ink/55">
               Producteurs sans produits ({producersWithoutProducts.length})
@@ -1246,11 +1417,13 @@ export default function OpenSalesWizard() {
           </div>
         ) : null}
       </section>
+      ) : null}
 
+      {showUpcomingSection ? (
       <section className="rounded-md border border-ink/20 bg-white p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-ink/60">📅 Ventes a venir</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-ink/60">Ventes a venir</p>
             <h3 className="mt-1 font-serif text-3xl">Recap des prochaines distributions</h3>
           </div>
           <p className="text-xs text-ink/65">
@@ -1262,7 +1435,7 @@ export default function OpenSalesWizard() {
           <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
             {upcomingPlannedDistributions.map((distribution) => {
               const metrics = distributionMetrics[distribution.id];
-              const dateLabels = distributionDateLabels(distribution);
+              const dateLabels = distributionDateBadges(distribution);
               return (
                 <article key={distribution.id} className="rounded-sm border border-clay/70 bg-stone p-3">
                   <div className="flex items-center justify-between gap-2">
@@ -1275,7 +1448,7 @@ export default function OpenSalesWizard() {
                     {dateLabels.length ? (
                       dateLabels.map((label, index) => (
                         <span key={`${distribution.id}-date-${index}`} className="rounded-full border border-clay/60 bg-white/85 px-2 py-0.5 text-[11px] font-semibold text-ink/80">
-                          📅 {index + 1}: {label}
+                          {label}
                         </span>
                       ))
                     ) : (
@@ -1304,6 +1477,7 @@ export default function OpenSalesWizard() {
           <p className="mt-3 text-sm text-ink/70">Aucune distribution planifiee.</p>
         )}
       </section>
+      ) : null}
 
       {message ? <p className="text-sm text-ink/70">{message}</p> : null}
 
@@ -1504,3 +1678,5 @@ export default function OpenSalesWizard() {
     </div>
   );
 }
+
+

@@ -11,6 +11,9 @@ export type CartItem = {
   saleDateKey?: string;
   saleDateLabel?: string;
   offerItemId?: string;
+  isSoldByWeight?: boolean;
+  estimatedPriceMin?: number | null;
+  estimatedPriceMax?: number | null;
 };
 
 const CART_KEY = "brouette_cart";
@@ -47,6 +50,10 @@ function writeCartToKey(key: string, items: CartItem[]) {
 
 function writeCart(items: CartItem[]) {
   writeCartToKey(currentCartKey, items);
+}
+
+export function replaceCart(items: CartItem[]) {
+  writeCart(items);
 }
 
 export function setCartUser(scopeId: string | null) {

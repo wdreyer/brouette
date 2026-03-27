@@ -8,41 +8,125 @@ import { firebaseDb } from "@/lib/firebase/client";
 import { pickOpenDistribution } from "@/lib/distributions";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { findMemberByUser } from "@/lib/members";
+import { readBalanceTrackingEnabled } from "@/lib/balanceTracking";
+import { reconcileCartWithOpenSale } from "@/lib/cartReconcile";
+
+type ProducerGroup = {
+  producerId: string;
+  producerLabel: string;
+  items: CartItem[];
+  total: number;
+};
+
+type DateGroup = {
+  key: string;
+  label: string;
+  producers: ProducerGroup[];
+  total: number;
+};
 
 function formatMoney(amount: number) {
   return amount.toFixed(2).replace(".", ",");
 }
 
-function groupByDate(items: CartItem[]) {
-  const groups = new Map<string, CartItem[]>();
+function formatEstimatedRange(min?: number | null, max?: number | null) {
+  const hasMin = typeof min === "number" && min >= 0;
+  const hasMax = typeof max === "number" && max >= 0;
+  if (!hasMin && !hasMax) return "Prix final au retrait";
+  if (hasMin && hasMax) {
+    return min === max
+      ? `Estimatif: ${min.toFixed(2)} EUR`
+      : `Estimatif: ${min.toFixed(2)} EUR - ${max.toFixed(2)} EUR`;
+  }
+  if (hasMin) return `Estimatif: a partir de ${min!.toFixed(2)} EUR`;
+  return `Estimatif: jusqu'a ${max!.toFixed(2)} EUR`;
+}
+
+function groupByDateThenProducer(
+  items: CartItem[],
+  producerLabelById: Record<string, string>,
+): DateGroup[] {
+  const byDate = new Map<string, { label: string; byProducer: Map<string, CartItem[]> }>();
+
   items.forEach((item) => {
-    const key = item.saleDateKey ?? "no-date";
-    const list = groups.get(key) ?? [];
-    list.push(item);
-    groups.set(key, list);
+    const dateKey = item.saleDateKey ?? "no-date";
+    const dateLabel = item.saleDateLabel ?? "Date non definie";
+    if (!byDate.has(dateKey)) {
+      byDate.set(dateKey, { label: dateLabel, byProducer: new Map<string, CartItem[]>() });
+    }
+    const dateGroup = byDate.get(dateKey)!;
+    const producerId = item.producerId || "unknown";
+    const producerItems = dateGroup.byProducer.get(producerId) ?? [];
+    producerItems.push(item);
+    dateGroup.byProducer.set(producerId, producerItems);
   });
-  return Array.from(groups.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+
+  return Array.from(byDate.entries())
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([key, dateGroup]) => {
+      const producers = Array.from(dateGroup.byProducer.entries())
+        .map(([producerId, producerItems]) => {
+          const producerLabel =
+            producerLabelById[producerId] ?? (producerId === "unknown" ? "Producteur" : producerId);
+          const total = producerItems.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
+          return { producerId, producerLabel, items: producerItems, total };
+        })
+        .sort((a, b) => a.producerLabel.localeCompare(b.producerLabel, "fr", { sensitivity: "base" }));
+
+      return {
+        key,
+        label: dateGroup.label,
+        producers,
+        total: producers.reduce((sum, producer) => sum + producer.total, 0),
+      };
+    });
 }
 
 export default function CheckoutPage() {
   const [items, setItems] = useState<CartItem[]>([]);
+  const [producerLabelById, setProducerLabelById] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState("");
   const { user, memberId } = useAuth();
   const router = useRouter();
 
   useEffect(() => {
-    setItems(getCart());
-    const onStorage = () => setItems(getCart());
+    let cancelled = false;
+    const refresh = async () => {
+      await reconcileCartWithOpenSale().catch(() => undefined);
+      if (cancelled) return;
+      setItems(getCart());
+    };
+    const onStorage = () => {
+      refresh().catch(() => undefined);
+    };
+    refresh().catch(() => undefined);
     window.addEventListener("cart:updated", onStorage);
     window.addEventListener("storage", onStorage);
     return () => {
+      cancelled = true;
       window.removeEventListener("cart:updated", onStorage);
       window.removeEventListener("storage", onStorage);
     };
   }, []);
 
-  const grouped = useMemo(() => groupByDate(items), [items]);
+  useEffect(() => {
+    const loadProducers = async () => {
+      const snap = await getDocs(collection(firebaseDb, "producers"));
+      const map: Record<string, string> = {};
+      snap.docs.forEach((docSnap) => {
+        const data = docSnap.data() as { name?: string };
+        map[docSnap.id] = String(data.name ?? docSnap.id);
+      });
+      setProducerLabelById(map);
+    };
+    loadProducers().catch(() => undefined);
+  }, []);
+
+  const grouped = useMemo(
+    () => groupByDateThenProducer(items, producerLabelById),
+    [items, producerLabelById],
+  );
   const total = useMemo(
     () => items.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0),
     [items],
@@ -50,13 +134,18 @@ export default function CheckoutPage() {
 
   const submitOrder = async () => {
     if (!user) return;
-    if (items.length === 0) return;
     setSubmitting(true);
     setMessage("");
-      try {
-      const memberMatch = memberId
-        ? { id: memberId }
-        : await findMemberByUser(firebaseDb, user);
+    try {
+      await reconcileCartWithOpenSale();
+      const freshItems = getCart();
+      setItems(freshItems);
+      if (freshItems.length === 0) {
+        setMessage("Panier vide ou vente fermee. Ajoute de nouveaux produits.");
+        return;
+      }
+
+      const memberMatch = memberId ? { id: memberId } : await findMemberByUser(firebaseDb, user);
       const orderMemberId = memberMatch?.id ?? user.uid;
 
       const distSnap = await getDocs(collection(firebaseDb, "distributionDates"));
@@ -77,15 +166,17 @@ export default function CheckoutPage() {
         setMessage("Aucune vente ouverte. Impossible de valider la commande.");
         return;
       }
+
       const distributionId = resolvedOpenDist.id;
-      const itemCount = items.reduce((sum, item) => sum + item.quantity, 0);
+      const itemCount = freshItems.reduce((sum, item) => sum + item.quantity, 0);
+      const freshTotal = freshItems.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
 
       const orderRef = await addDoc(collection(firebaseDb, "orders"), {
         distributionId,
         memberId: orderMemberId,
         memberUid: user.uid,
         status: "validated",
-        totals: { totalAmount: total, itemCount },
+        totals: { totalAmount: freshTotal, itemCount },
         memberSnapshot: {
           email: user.email ?? null,
         },
@@ -95,7 +186,7 @@ export default function CheckoutPage() {
 
       const itemsCollection = collection(firebaseDb, "orders", orderRef.id, "items");
       await Promise.all(
-        items.map((item) =>
+        freshItems.map((item) =>
           addDoc(itemsCollection, {
             offerItemId: item.offerItemId ?? null,
             producerId: item.producerId,
@@ -108,20 +199,26 @@ export default function CheckoutPage() {
             variantLabel: item.variantLabel,
             saleDateKey: item.saleDateKey ?? null,
             saleDateLabel: item.saleDateLabel ?? null,
+            isSoldByWeight: Boolean(item.isSoldByWeight),
+            estimatedPriceMin: item.isSoldByWeight ? item.estimatedPriceMin ?? null : null,
+            estimatedPriceMax: item.isSoldByWeight ? item.estimatedPriceMax ?? null : null,
           }),
         ),
       );
 
-      await addDoc(collection(firebaseDb, "members", orderMemberId, "ledger"), {
-        type: "order",
-        amount: -total,
-        label: "Commande",
-        orderId: orderRef.id,
-        memberUid: user.uid,
-        memberId: orderMemberId,
-        createdAt: serverTimestamp(),
-        occurredAt: serverTimestamp(),
-      });
+      const balanceTrackingEnabled = await readBalanceTrackingEnabled(firebaseDb);
+      if (balanceTrackingEnabled) {
+        await addDoc(collection(firebaseDb, "members", orderMemberId, "ledger"), {
+          type: "order",
+          amount: -freshTotal,
+          label: "Commande",
+          orderId: orderRef.id,
+          memberUid: user.uid,
+          memberId: orderMemberId,
+          createdAt: serverTimestamp(),
+          occurredAt: serverTimestamp(),
+        });
+      }
 
       clearCart();
       router.replace("/profil");
@@ -139,7 +236,7 @@ export default function CheckoutPage() {
         <p className="text-[11px] font-semibold uppercase tracking-[0.32em] text-ink/60">Panier</p>
         <h1 className="font-serif text-4xl">Relecture de la commande</h1>
         <p className="text-sm text-ink/70">
-          Vérifie les dates et les quantités avant de valider. Paiement sur place.
+          Verifie les dates, les producteurs et les quantites avant de valider.
         </p>
       </section>
 
@@ -150,76 +247,94 @@ export default function CheckoutPage() {
       ) : (
         <div className="grid gap-6 lg:grid-cols-[1.6fr_0.9fr]">
           <div className="flex flex-col gap-5">
-            {grouped.map(([key, groupItems]) => {
-              const label = groupItems[0]?.saleDateLabel ?? "Date non définie";
-              const groupTotal = groupItems.reduce(
-                (sum, item) => sum + item.unitPrice * item.quantity,
-                0,
-              );
-              return (
-                <section
-                  key={key}
-                  className="rounded-xl border border-clay/70 bg-white/95 p-5 shadow-card"
-                >
-                  <div className="flex flex-wrap items-center justify-between gap-3">
-                    <h2 className="font-serif text-2xl">{label}</h2>
-                    <span className="text-sm font-semibold text-ink">
-                      {formatMoney(groupTotal)} EUR
-                    </span>
-                  </div>
-                  <div className="mt-4 overflow-hidden rounded-lg border border-clay/70">
-                    <div className="hidden grid-cols-[1.5fr_0.6fr_0.6fr_0.6fr_0.3fr] gap-3 border-b border-clay/70 bg-stone px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-ink/60 md:grid">
-                      <span>Produit</span>
-                      <span>PU</span>
-                      <span>Qt</span>
-                      <span>Total</span>
-                      <span />
-                    </div>
-                    <div className="divide-y divide-clay/70">
-                      {groupItems.map((item) => (
-                        <div
-                          key={item.id}
-                          className="grid gap-3 px-4 py-3 md:grid-cols-[1.5fr_0.6fr_0.6fr_0.6fr_0.3fr]"
-                        >
-                          <div>
-                            <p className="text-sm font-semibold text-ink">{item.name}</p>
-                            <p className="text-xs text-ink/60">{item.variantLabel}</p>
-                          </div>
-                          <div className="text-sm font-semibold">{formatMoney(item.unitPrice)} EUR</div>
-                          <div className="flex items-center gap-2">
-                            <button
-                              className="h-7 w-7 rounded-full border border-ink/20 bg-white text-xs font-semibold"
-                              onClick={() => updateCartItem(item.id, item.quantity - 1)}
-                              disabled={item.quantity <= 1}
-                            >
-                              -
-                            </button>
-                            <span className="w-6 text-center text-xs font-semibold text-ink">
-                              {item.quantity}
-                            </span>
-                            <button
-                              className="h-7 w-7 rounded-full border border-ink/20 bg-white text-xs font-semibold"
-                              onClick={() => updateCartItem(item.id, item.quantity + 1)}
-                            >
-                              +
-                            </button>
-                          </div>
-                          <div className="text-sm font-semibold">
-                            {formatMoney(item.unitPrice * item.quantity)} EUR
-                          </div>
-                          <button
-                            className="text-xs text-ink/50 underline"
-                            onClick={() => removeFromCart(item.id)}
+            {grouped.map((dateGroup) => (
+              <section
+                key={dateGroup.key}
+                className="rounded-xl border border-clay/70 bg-white/95 p-5 shadow-card"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <h2 className="font-serif text-2xl">{dateGroup.label}</h2>
+                  <span className="text-sm font-semibold text-ink">
+                    {formatMoney(dateGroup.total)} EUR
+                  </span>
+                </div>
+
+                <div className="mt-4 flex flex-col gap-4">
+                  {dateGroup.producers.map((producerGroup) => (
+                    <div
+                      key={`${dateGroup.key}-${producerGroup.producerId}`}
+                      className="overflow-hidden rounded-lg border border-clay/70"
+                    >
+                      <div className="flex items-center justify-between border-b border-clay/70 bg-stone px-4 py-2">
+                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-ink/70">
+                          {producerGroup.producerLabel}
+                        </p>
+                        <span className="text-xs font-semibold text-ink">
+                          {formatMoney(producerGroup.total)} EUR
+                        </span>
+                      </div>
+
+                      <div className="hidden grid-cols-[1.5fr_0.6fr_0.6fr_0.6fr_0.3fr] gap-3 border-b border-clay/70 bg-white px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-ink/60 md:grid">
+                        <span>Produit</span>
+                        <span>PU</span>
+                        <span>Qt</span>
+                        <span>Total</span>
+                        <span />
+                      </div>
+
+                      <div className="divide-y divide-clay/70">
+                        {producerGroup.items.map((item) => (
+                          <div
+                            key={item.id}
+                            className="grid gap-3 px-4 py-3 md:grid-cols-[1.5fr_0.6fr_0.6fr_0.6fr_0.3fr]"
                           >
-                            Retirer
-                          </button>
-                        </div>
-                      ))}
+                            <div>
+                              <p className="text-sm font-semibold text-ink">{item.name}</p>
+                              <p className="text-xs text-ink/60">{item.variantLabel}</p>
+                              {item.isSoldByWeight ? (
+                                <p className="text-xs text-ink/55">
+                                  Produit au poids - {formatEstimatedRange(item.estimatedPriceMin, item.estimatedPriceMax)}
+                                </p>
+                              ) : null}
+                            </div>
+                            <div className={`text-sm font-semibold ${item.isSoldByWeight ? "text-ink/60" : "text-ink"}`}>
+                              {item.isSoldByWeight ? "0,00 EUR" : `${formatMoney(item.unitPrice)} EUR`}
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <button
+                                className="h-7 w-7 rounded-full border border-ink/20 bg-white text-xs font-semibold"
+                                onClick={() => updateCartItem(item.id, item.quantity - 1)}
+                                disabled={item.quantity <= 1}
+                              >
+                                -
+                              </button>
+                              <span className="w-6 text-center text-xs font-semibold text-ink">
+                                {item.quantity}
+                              </span>
+                              <button
+                                className="h-7 w-7 rounded-full border border-ink/20 bg-white text-xs font-semibold"
+                                onClick={() => updateCartItem(item.id, item.quantity + 1)}
+                              >
+                                +
+                              </button>
+                            </div>
+                            <div className="text-sm font-semibold">
+                              {formatMoney(item.unitPrice * item.quantity)} EUR
+                            </div>
+                            <button
+                              className="text-xs text-ink/50 underline"
+                              onClick={() => removeFromCart(item.id)}
+                            >
+                              Retirer
+                            </button>
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                </section>
-              );
-            })}
+                  ))}
+                </div>
+              </section>
+            ))}
           </div>
 
           <aside className="h-fit rounded-xl border border-clay/70 bg-white/95 p-5 shadow-card">
@@ -229,7 +344,7 @@ export default function CheckoutPage() {
               <span>{formatMoney(total)} EUR</span>
             </div>
             <p className="mt-2 text-xs text-ink/60">
-              Paiement sur place lors du retrait. Tu peux modifier les quantités avant validation.
+              Paiement sur place lors du retrait.
             </p>
             {message ? <p className="mt-2 text-xs text-ember">{message}</p> : null}
             <button

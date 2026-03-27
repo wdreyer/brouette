@@ -22,6 +22,11 @@ type NavItem = {
     | "documents"
     | "settings";
   roles?: Array<"admin" | "referent">;
+  children?: Array<{
+    href: string;
+    label: string;
+    roles?: Array<"admin" | "referent">;
+  }>;
 };
 
 type NavGroup = {
@@ -161,7 +166,16 @@ const adminGroups: NavGroup[] = [
     defaultOpen: true,
     items: [
       { href: "/admin", label: "Résumé", icon: "home" },
-      { href: "/admin/vente", label: "Ventes", icon: "sale" },
+            {
+        href: "/admin/vente",
+        label: "Ventes",
+        icon: "sale",
+        children: [
+          { href: "/admin/vente/en-cours", label: "Vente en cours" },
+          { href: "/admin/vente/prochaine", label: "Prochaine vente" },
+          { href: "/admin/vente/historique", label: "Historique des ventes" },
+        ],
+      },
       { href: "/admin/orders", label: "Commandes", icon: "orders" },
     ],
   },
@@ -200,16 +214,21 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
   const pathname = usePathname();
   const { effectiveRole } = useAuth();
 
+  const roleAllowed = (roles?: Array<"admin" | "referent">) =>
+    !roles ||
+    (effectiveRole === "admin" || effectiveRole === "referent"
+      ? roles.includes(effectiveRole)
+      : false);
+
   const groups = adminGroups
     .map((group) => ({
       ...group,
-      items: group.items.filter(
-        (item) =>
-          !item.roles ||
-          (effectiveRole === "admin" || effectiveRole === "referent"
-            ? item.roles.includes(effectiveRole)
-            : false),
-      ),
+      items: group.items
+        .filter((item) => roleAllowed(item.roles))
+        .map((item) => ({
+          ...item,
+          children: (item.children ?? []).filter((child) => roleAllowed(child.roles)),
+        })),
     }))
     .filter((group) => group.items.length > 0);
 
@@ -227,20 +246,44 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
                 </p>
                 <div className="flex flex-col gap-1 px-2">
                   {group.items.map((item) => {
-                    const active = pathname === item.href;
+                    const active =
+                      item.href === "/admin"
+                        ? pathname === "/admin"
+                        : pathname === item.href || pathname.startsWith(`${item.href}/`);
                     return (
-                      <Link
-                        key={item.href}
-                        className={`flex items-center gap-2 rounded-md px-3 py-2 text-sm font-semibold transition ${
-                          active
-                            ? "bg-forest text-white"
-                            : "text-ink/85 hover:bg-forest/20 hover:text-forest"
-                        }`}
-                        href={item.href}
-                      >
-                        <Icon kind={item.icon} />
-                        <span>{item.label}</span>
-                      </Link>
+                      <div key={item.href} className="flex flex-col">
+                        <Link
+                          className={`flex items-center gap-2 rounded-md px-3 py-2 text-sm font-semibold transition ${
+                            active
+                              ? "bg-forest text-white"
+                              : "text-ink/85 hover:bg-forest/20 hover:text-forest"
+                          }`}
+                          href={item.href}
+                        >
+                          <Icon kind={item.icon} />
+                          <span>{item.label}</span>
+                        </Link>
+                        {item.children && item.children.length > 0 ? (
+                          <div className="mt-0.5 ml-9 flex flex-col">
+                            {item.children.map((child) => {
+                              const childActive = pathname === child.href;
+                              return (
+                                <Link
+                                  key={child.href}
+                                  href={child.href}
+                                  className={`rounded-md px-2 py-1.5 text-sm font-medium transition ${
+                                    childActive
+                                      ? "text-forest"
+                                      : "text-ink/70 hover:text-forest"
+                                  }`}
+                                >
+                                  {child.label}
+                                </Link>
+                              );
+                            })}
+                          </div>
+                        ) : null}
+                      </div>
                     );
                   })}
                 </div>
@@ -253,3 +296,4 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
     </div>
   );
 }
+

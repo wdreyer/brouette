@@ -10,12 +10,11 @@ import { distributionLabel } from "@/lib/distributions";
 type Producer = {
   id: string;
   name?: string;
+  imageUrl?: string;
   email?: string;
   phone?: string;
   productType?: string;
-  frequency?: string;
   notes?: string;
-  coopStatus?: string | null;
   referentId?: string | null;
   referentName?: string | null;
   referentPhone?: string | null;
@@ -52,11 +51,10 @@ type OrderItem = {
 
 type ProducerDraft = {
   name: string;
-  coopStatus: string;
+  imageUrl: string;
   email: string;
   phone: string;
   productType: string;
-  frequency: string;
   notes: string;
   referentId: string;
   contactFirstName: string;
@@ -68,11 +66,10 @@ type ProducerDraft = {
 
 const EMPTY_DRAFT: ProducerDraft = {
   name: "",
-  coopStatus: "active",
+  imageUrl: "",
   email: "",
   phone: "",
   productType: "",
-  frequency: "",
   notes: "",
   referentId: "",
   contactFirstName: "",
@@ -149,11 +146,10 @@ export default function ProducerPage() {
       setProducer({ id: producerSnap.id, ...data });
       setDraft({
         name: data.name ?? "",
-        coopStatus: data.coopStatus ?? "active",
+        imageUrl: data.imageUrl ?? "",
         email: data.email ?? "",
         phone: data.phone ?? "",
         productType: data.productType ?? "",
-        frequency: data.frequency ?? "",
         notes: data.notes ?? "",
         referentId: data.referentId ?? "",
         contactFirstName: data.contact?.firstName ?? "",
@@ -299,11 +295,10 @@ export default function ProducerPage() {
       : "";
     const payload = {
       name: draft.name.trim(),
-      coopStatus: draft.coopStatus === "inactive" ? "inactive" : "active",
+      imageUrl: draft.imageUrl.trim(),
       email: draft.email.trim(),
       phone: draft.phone.trim(),
       productType: draft.productType.trim(),
-      frequency: draft.frequency.trim(),
       notes: draft.notes.trim(),
       referentId: draft.referentId || null,
       referentName: referentName || null,
@@ -350,10 +345,21 @@ export default function ProducerPage() {
   return (
     <div className="flex flex-col gap-6">
       <div className="border border-clay/70 bg-white/90 p-6">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">Producteur</p>
-            <h2 className="font-serif text-3xl">{producer.name ?? "Producteur"}</h2>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="flex min-w-[260px] items-center gap-4">
+            <div className="h-16 w-16 overflow-hidden rounded-full border border-clay/70 bg-stone">
+              {producer.imageUrl ? (
+                <img src={producer.imageUrl} alt={producer.name ?? "Producteur"} className="h-full w-full object-cover" />
+              ) : (
+                <div className="flex h-full w-full items-center justify-center text-[10px] uppercase tracking-[0.1em] text-ink/45">
+                  Photo
+                </div>
+              )}
+            </div>
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">Producteur</p>
+              <h2 className="font-serif text-3xl">{producer.name ?? "Producteur"}</h2>
+            </div>
           </div>
           <div className="flex items-center gap-2">
             <Link className="rounded-full border border-ink/20 px-4 py-2 text-xs font-semibold" href="/admin/producers">
@@ -386,6 +392,14 @@ export default function ProducerPage() {
                     Informations
                   </h3>
                   <div className="mt-4 grid gap-3 text-sm text-ink/80">
+                    <p>
+                      <span className="text-ink/60">Contact prénom:</span>{" "}
+                      {String(producer.contact?.firstName ?? "").trim() || "-"}
+                    </p>
+                    <p>
+                      <span className="text-ink/60">Contact nom:</span>{" "}
+                      {String(producer.contact?.lastName ?? "").trim() || "-"}
+                    </p>
                     <p><span className="text-ink/60">Téléphone :</span> {producer.phone || "-"}</p>
                     <p><span className="text-ink/60">Email:</span> {producer.email || "-"}</p>
                     <p>
@@ -395,19 +409,9 @@ export default function ProducerPage() {
                         .filter(Boolean)
                         .join(" ") || "-"}
                     </p>
-                    <p><span className="text-ink/60">Statut:</span> {producer.coopStatus === "inactive" ? "Inactif" : "Actif"}</p>
                     <p><span className="text-ink/60">Type de produit:</span> {producer.productType || "-"}</p>
-                    <p><span className="text-ink/60">Frequence:</span> {producer.frequency || "-"}</p>
                   </div>
                 </div>
-                {producer.email ? (
-                  <a
-                    className="rounded-full border border-ink/20 px-4 py-2 text-xs font-semibold"
-                    href={`mailto:${producer.email}?subject=${encodeURIComponent(`Brouette - ${producer.name ?? "Producteur"}`)}`}
-                  >
-                    Contacter le producteur
-                  </a>
-                ) : null}
               </div>
               <div className="mt-4 text-sm leading-7 text-ink/70">
                 {producer.notes || "Aucune précision."}
@@ -526,7 +530,7 @@ export default function ProducerPage() {
         <div className="border border-clay/70 bg-white/90 p-6">
           <div className="grid gap-4 md:grid-cols-2">
             <label className="flex flex-col gap-2 text-sm font-semibold text-ink/70">
-              Nom
+              Nom du producteur
               <input
                 className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
                 value={draft.name}
@@ -534,16 +538,26 @@ export default function ProducerPage() {
               />
             </label>
             <label className="flex flex-col gap-2 text-sm font-semibold text-ink/70">
-              Statut
-              <select
+              Photo (URL)
+              <input
                 className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
-                value={draft.coopStatus}
-                onChange={(event) => setDraft((prev) => ({ ...prev, coopStatus: event.target.value }))}
-              >
-                <option value="active">Actif</option>
-                <option value="inactive">Inactif</option>
-              </select>
+                value={draft.imageUrl}
+                onChange={(event) => setDraft((prev) => ({ ...prev, imageUrl: event.target.value }))}
+                placeholder="https://..."
+              />
             </label>
+            <div className="md:col-span-2 rounded-xl border border-clay/70 bg-stone/40 p-3">
+              <p className="text-xs font-semibold uppercase tracking-[0.1em] text-ink/60">Aperçu photo</p>
+              <div className="mt-2 h-20 w-20 overflow-hidden rounded-full border border-clay/70 bg-stone">
+                {draft.imageUrl.trim() ? (
+                  <img src={draft.imageUrl.trim()} alt={draft.name || "Producteur"} className="h-full w-full object-cover" />
+                ) : (
+                  <div className="flex h-full w-full items-center justify-center text-[10px] uppercase tracking-[0.1em] text-ink/45">
+                    Aucune
+                  </div>
+                )}
+              </div>
+            </div>
             <label className="flex flex-col gap-2 text-sm font-semibold text-ink/70">
               Téléphone
               <input
@@ -569,11 +583,19 @@ export default function ProducerPage() {
               />
             </label>
             <label className="flex flex-col gap-2 text-sm font-semibold text-ink/70">
-              Frequence
+              Prénom du contact
               <input
                 className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
-                value={draft.frequency}
-                onChange={(event) => setDraft((prev) => ({ ...prev, frequency: event.target.value }))}
+                value={draft.contactFirstName}
+                onChange={(event) => setDraft((prev) => ({ ...prev, contactFirstName: event.target.value }))}
+              />
+            </label>
+            <label className="flex flex-col gap-2 text-sm font-semibold text-ink/70">
+              Nom du contact
+              <input
+                className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
+                value={draft.contactLastName}
+                onChange={(event) => setDraft((prev) => ({ ...prev, contactLastName: event.target.value }))}
               />
             </label>
             <label className="flex flex-col gap-2 text-sm font-semibold text-ink/70">
@@ -646,3 +668,4 @@ export default function ProducerPage() {
     </div>
   );
 }
+

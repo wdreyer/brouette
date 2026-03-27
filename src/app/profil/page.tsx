@@ -6,6 +6,7 @@ import { useAuth } from "@/components/auth/AuthProvider";
 import ProfileForm from "@/components/profile/ProfileForm";
 import { firebaseDb } from "@/lib/firebase/client";
 import { findMemberByUser } from "@/lib/members";
+import { readBalanceTrackingEnabled } from "@/lib/balanceTracking";
 
 type Order = {
   id: string;
@@ -19,12 +20,18 @@ type Order = {
 
 type OrderItem = {
   id: string;
+  producerId?: string;
   label?: string;
   variantLabel?: string;
   quantity?: number;
   unitPrice?: number;
   saleDateLabel?: string;
   saleDateKey?: string;
+};
+
+type Producer = {
+  id: string;
+  name?: string;
 };
 
 type LedgerEntry = {
@@ -61,9 +68,11 @@ export default function ProfilePage() {
   const { user, memberId } = useAuth();
   const [orders, setOrders] = useState<Order[]>([]);
   const [orderItems, setOrderItems] = useState<Record<string, OrderItem[]>>({});
+  const [producersById, setProducersById] = useState<Record<string, Producer>>({});
   const [ledger, setLedger] = useState<LedgerEntry[]>([]);
   const [loadingOrders, setLoadingOrders] = useState(true);
   const [resolvedMemberId, setResolvedMemberId] = useState<string | null>(null);
+  const [balanceTrackingEnabled, setBalanceTrackingEnabled] = useState(true);
 
   if (!user) {
     return (
@@ -76,13 +85,18 @@ export default function ProfilePage() {
   useEffect(() => {
     const load = async () => {
       setLoadingOrders(true);
+      const nextBalanceTrackingEnabled = await readBalanceTrackingEnabled(firebaseDb).catch(() => true);
+      setBalanceTrackingEnabled(nextBalanceTrackingEnabled);
       const resolved = memberId ? { id: memberId } : await findMemberByUser(firebaseDb, user);
       const nextMemberId = resolved?.id ?? user.uid;
       setResolvedMemberId(nextMemberId);
       const candidateMemberIds = Array.from(new Set([nextMemberId, user.uid].filter(Boolean)));
       const userEmail = String(user.email ?? "").toLowerCase().trim();
 
-      const ordersSnap = await getDocs(collection(firebaseDb, "orders"));
+      const [ordersSnap, producersSnap] = await Promise.all([
+        getDocs(collection(firebaseDb, "orders")),
+        getDocs(collection(firebaseDb, "producers")),
+      ]);
       const entries = ordersSnap.docs
         .map((docSnap) => ({ id: docSnap.id, ...(docSnap.data() as Omit<Order, "id">) }))
         .filter((order) => {
@@ -102,6 +116,12 @@ export default function ProfilePage() {
       });
       setOrders(entries);
 
+      const producerMap: Record<string, Producer> = {};
+      producersSnap.docs.forEach((docSnap) => {
+        producerMap[docSnap.id] = { id: docSnap.id, ...(docSnap.data() as Omit<Producer, "id">) };
+      });
+      setProducersById(producerMap);
+
       const itemsMap: Record<string, OrderItem[]> = {};
       await Promise.all(
         entries.map(async (order) => {
@@ -114,20 +134,24 @@ export default function ProfilePage() {
       );
       setOrderItems(itemsMap);
 
-      const ledgerEntries: LedgerEntry[] = [];
-      await Promise.all(
-        candidateMemberIds.map(async (candidateId) => {
-          const ledgerSnap = await getDocs(collection(firebaseDb, "members", candidateId, "ledger"));
-          ledgerSnap.docs.forEach((docSnap) => {
-            ledgerEntries.push({
-              id: `${candidateId}-${docSnap.id}`,
-              ...(docSnap.data() as Omit<LedgerEntry, "id">),
+      if (nextBalanceTrackingEnabled) {
+        const ledgerEntries: LedgerEntry[] = [];
+        await Promise.all(
+          candidateMemberIds.map(async (candidateId) => {
+            const ledgerSnap = await getDocs(collection(firebaseDb, "members", candidateId, "ledger"));
+            ledgerSnap.docs.forEach((docSnap) => {
+              ledgerEntries.push({
+                id: `${candidateId}-${docSnap.id}`,
+                ...(docSnap.data() as Omit<LedgerEntry, "id">),
+              });
             });
-          });
-        }),
-      );
-      ledgerEntries.sort((a, b) => entryDate(b).getTime() - entryDate(a).getTime());
-      setLedger(ledgerEntries);
+          }),
+        );
+        ledgerEntries.sort((a, b) => entryDate(b).getTime() - entryDate(a).getTime());
+        setLedger(ledgerEntries);
+      } else {
+        setLedger([]);
+      }
 
       setLoadingOrders(false);
     };
@@ -136,19 +160,65 @@ export default function ProfilePage() {
   }, [user, memberId]);
 
   const groupedItems = useMemo(() => {
-    const map: Record<string, Record<string, OrderItem[]>> = {};
+    const map: Record<
+      string,
+      Array<{
+        dateKey: string;
+        dateLabel: string;
+        total: number;
+        producers: Array<{
+          producerId: string;
+          producerLabel: string;
+          total: number;
+          items: OrderItem[];
+        }>;
+      }>
+    > = {};
+
     orders.forEach((order) => {
       const items = orderItems[order.id] ?? [];
-      const groups: Record<string, OrderItem[]> = {};
+      const byDate = new Map<string, { dateLabel: string; byProducer: Map<string, OrderItem[]> }>();
+
       items.forEach((item) => {
-        const key = item.saleDateLabel ?? item.saleDateKey ?? "Date";
-        groups[key] = groups[key] ?? [];
-        groups[key].push(item);
+        const dateKey = item.saleDateKey ?? "no-date";
+        const dateLabel = item.saleDateLabel ?? "Date";
+        if (!byDate.has(dateKey)) {
+          byDate.set(dateKey, { dateLabel, byProducer: new Map<string, OrderItem[]>() });
+        }
+        const dateGroup = byDate.get(dateKey)!;
+        const producerId = item.producerId ?? "unknown";
+        const producerItems = dateGroup.byProducer.get(producerId) ?? [];
+        producerItems.push(item);
+        dateGroup.byProducer.set(producerId, producerItems);
       });
-      map[order.id] = groups;
+
+      map[order.id] = Array.from(byDate.entries())
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .map(([dateKey, dateGroup]) => {
+          const producers = Array.from(dateGroup.byProducer.entries())
+            .map(([producerId, producerItems]) => {
+              const producerLabel =
+                producersById[producerId]?.name ??
+                (producerId === "unknown" ? "Producteur" : producerId);
+              const total = producerItems.reduce(
+                (sum, item) => sum + Number(item.unitPrice ?? 0) * Number(item.quantity ?? 0),
+                0,
+              );
+              return { producerId, producerLabel, total, items: producerItems };
+            })
+            .sort((a, b) => a.producerLabel.localeCompare(b.producerLabel, "fr", { sensitivity: "base" }));
+
+          return {
+            dateKey,
+            dateLabel: dateGroup.dateLabel,
+            total: producers.reduce((sum, producer) => sum + producer.total, 0),
+            producers,
+          };
+        });
     });
+
     return map;
-  }, [orders, orderItems]);
+  }, [orders, orderItems, producersById]);
 
   const historyRows = useMemo(() => {
     const rows: HistoryRow[] = [];
@@ -203,42 +273,44 @@ export default function ProfilePage() {
         <ProfileForm userId={resolvedMemberId ?? user.uid} requireEditToggle canEditStatus={false} />
       </section>
 
-      <section className="rounded-xl border border-clay/70 bg-white/95 p-6 shadow-card">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.32em] text-ink/60">Mon solde</p>
-        <div className="mt-2 flex items-end justify-between gap-3">
-          <h2 className="font-serif text-3xl">
-            {balance >= 0 ? "+" : "-"} {formatMoney(Math.abs(balance))} EUR
-          </h2>
-        </div>
-        <div className="mt-4 overflow-hidden rounded-lg border border-clay/70">
-          <div className="grid grid-cols-[130px_1fr_120px] border-b border-clay/70 bg-stone px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-ink/60">
-            <span>Date</span>
-            <span>Mouvement</span>
-            <span className="text-right">Montant</span>
+      {balanceTrackingEnabled ? (
+        <section className="rounded-xl border border-clay/70 bg-white/95 p-6 shadow-card">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.32em] text-ink/60">Mon solde</p>
+          <div className="mt-2 flex items-end justify-between gap-3">
+            <h2 className="font-serif text-3xl">
+              {balance >= 0 ? "+" : "-"} {formatMoney(Math.abs(balance))} EUR
+            </h2>
           </div>
-          <div className="divide-y divide-clay/70">
-            {historyRows.length ? (
-              historyRows.map((row) => (
-                <div key={row.id} className="grid grid-cols-[130px_1fr_120px] items-center px-3 py-2 text-sm">
-                  <span className="text-ink/70">{row.date.toLocaleDateString("fr-FR")}</span>
-                  <div className="min-w-0">
-                    <p className="truncate font-semibold text-ink">{row.label}</p>
-                    {row.note ? <p className="truncate text-xs text-ink/60">{row.note}</p> : null}
+          <div className="mt-4 overflow-hidden rounded-lg border border-clay/70">
+            <div className="grid grid-cols-[130px_1fr_120px] border-b border-clay/70 bg-stone px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-ink/60">
+              <span>Date</span>
+              <span>Mouvement</span>
+              <span className="text-right">Montant</span>
+            </div>
+            <div className="divide-y divide-clay/70">
+              {historyRows.length ? (
+                historyRows.map((row) => (
+                  <div key={row.id} className="grid grid-cols-[130px_1fr_120px] items-center px-3 py-2 text-sm">
+                    <span className="text-ink/70">{row.date.toLocaleDateString("fr-FR")}</span>
+                    <div className="min-w-0">
+                      <p className="truncate font-semibold text-ink">{row.label}</p>
+                      {row.note ? <p className="truncate text-xs text-ink/60">{row.note}</p> : null}
+                    </div>
+                    <span
+                      className={`text-right font-semibold ${row.amount >= 0 ? "text-forest" : "text-ember"}`}
+                    >
+                      {row.amount >= 0 ? "+" : "-"}
+                      {formatMoney(Math.abs(row.amount))} EUR
+                    </span>
                   </div>
-                  <span
-                    className={`text-right font-semibold ${row.amount >= 0 ? "text-forest" : "text-ember"}`}
-                  >
-                    {row.amount >= 0 ? "+" : "-"}
-                    {formatMoney(Math.abs(row.amount))} EUR
-                  </span>
-                </div>
-              ))
-            ) : (
-              <p className="px-3 py-3 text-sm text-ink/70">Aucun mouvement.</p>
-            )}
+                ))
+              ) : (
+                <p className="px-3 py-3 text-sm text-ink/70">Aucun mouvement.</p>
+              )}
+            </div>
           </div>
-        </div>
-      </section>
+        </section>
+      ) : null}
 
       <section className="rounded-xl border border-clay/70 bg-white/95 p-6 shadow-card">
         <p className="text-[11px] font-semibold uppercase tracking-[0.32em] text-ink/60">Historique</p>
@@ -266,14 +338,33 @@ export default function ProfilePage() {
                   </span>
                 </div>
                 <div className="mt-3 flex flex-col gap-3">
-                  {Object.entries(groupedItems[order.id] ?? {}).map(([label, items]) => (
-                    <div key={label} className="rounded-lg border border-clay/70 bg-white p-3">
-                      <p className="text-xs font-semibold text-ink/70">{label}</p>
-                      <div className="mt-2 flex flex-col gap-1 text-xs text-ink/70">
-                        {items.map((item) => (
-                          <span key={item.id}>
-                            {item.quantity} x {item.label} {item.variantLabel ? `(${item.variantLabel})` : ""}
-                          </span>
+                  {(groupedItems[order.id] ?? []).map((dateGroup) => (
+                    <div key={dateGroup.dateKey} className="rounded-lg border border-clay/70 bg-white p-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-xs font-semibold text-ink/70">{dateGroup.dateLabel}</p>
+                        <p className="text-xs font-semibold text-ink">
+                          {formatMoney(dateGroup.total)} EUR
+                        </p>
+                      </div>
+                      <div className="mt-2 flex flex-col gap-2">
+                        {dateGroup.producers.map((producerGroup) => (
+                          <div key={producerGroup.producerId} className="rounded-md border border-clay/60 bg-stone p-2">
+                            <div className="flex items-center justify-between gap-3">
+                              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-ink/60">
+                                {producerGroup.producerLabel}
+                              </p>
+                              <p className="text-[11px] font-semibold text-ink">
+                                {formatMoney(producerGroup.total)} EUR
+                              </p>
+                            </div>
+                            <div className="mt-1 flex flex-col gap-1 text-xs text-ink/70">
+                              {producerGroup.items.map((item) => (
+                                <span key={item.id}>
+                                  {item.quantity} x {item.label} {item.variantLabel ? `(${item.variantLabel})` : ""}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
                         ))}
                       </div>
                     </div>
