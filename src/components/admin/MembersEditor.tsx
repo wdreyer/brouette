@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   addDoc,
   collection,
+  deleteDoc,
   deleteField,
   doc,
   getDocs,
@@ -12,6 +13,8 @@ import {
   serverTimestamp,
   setDoc,
   Timestamp,
+  where,
+  writeBatch,
 } from "firebase/firestore";
 import { firebaseDb } from "@/lib/firebase/client";
 import { useAuth } from "@/components/auth/AuthProvider";
@@ -175,7 +178,7 @@ export default function MembersEditor({
   fields,
   viewMode = "all",
 }: EditorProps) {
-  const { role } = useAuth();
+  const { role, memberId } = useAuth();
   const canEditMembers = role === "admin" || role === "referent";
   const isAdmin = role === "admin";
   const [docs, setDocs] = useState<DocEntry[]>([]);
@@ -196,6 +199,7 @@ export default function MembersEditor({
   const [filterRole, setFilterRole] = useState<string>("all");
   const [sortKey, setSortKey] = useState<string>("lastName");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const [deletingMember, setDeletingMember] = useState(false);
   const [balanceByMemberId, setBalanceByMemberId] = useState<Record<string, number>>({});
   const [ledgerByMemberId, setLedgerByMemberId] = useState<Record<string, LedgerEntry[]>>({});
   const [ledgerLoadingMemberId, setLedgerLoadingMemberId] = useState<string | null>(null);
@@ -438,6 +442,144 @@ export default function MembersEditor({
     } catch (error) {
       const err = error instanceof Error ? error.message : "Erreur inconnue.";
       setMessage(err);
+    }
+  };
+
+  const deleteMemberLedger = async (targetMemberId: string) => {
+    let deleted = 0;
+    while (true) {
+      const ledgerSnap = await getDocs(
+        query(collection(firebaseDb, collectionName, targetMemberId, "ledger"), limit(350)),
+      );
+      if (ledgerSnap.empty) break;
+      const batch = writeBatch(firebaseDb);
+      ledgerSnap.docs.forEach((docSnap) => {
+        batch.delete(docSnap.ref);
+        deleted += 1;
+      });
+      await batch.commit();
+    }
+    return deleted;
+  };
+
+  const cleanupReferentLinks = async (targetMemberId: string) => {
+    const now = Timestamp.now();
+    let producerLinksUpdated = 0;
+    let distributionLinksUpdated = 0;
+
+    const producerSnap = await getDocs(
+      query(collection(firebaseDb, "producers"), where("referentId", "==", targetMemberId)),
+    );
+    if (!producerSnap.empty) {
+      let batch = writeBatch(firebaseDb);
+      let count = 0;
+      producerSnap.docs.forEach((docSnap) => {
+        batch.set(
+          docSnap.ref,
+          {
+            referentId: null,
+            referentName: null,
+            referentPhone: null,
+            updatedAt: now,
+          },
+          { merge: true },
+        );
+        producerLinksUpdated += 1;
+        count += 1;
+      });
+      if (count > 0) await batch.commit();
+    }
+
+    const distributionsSnap = await getDocs(collection(firebaseDb, "distributionDates"));
+    for (const distributionDoc of distributionsSnap.docs) {
+      const rowsSnap = await getDocs(
+        query(
+          collection(firebaseDb, "distributionDates", distributionDoc.id, "producers"),
+          where("referentId", "==", targetMemberId),
+        ),
+      );
+      if (rowsSnap.empty) continue;
+
+      let batch = writeBatch(firebaseDb);
+      let count = 0;
+      rowsSnap.docs.forEach((rowDoc) => {
+        batch.set(
+          rowDoc.ref,
+          {
+            referentId: null,
+            referentName: null,
+            validatedByReferent: false,
+            validatedAt: null,
+            updatedAt: now,
+          },
+          { merge: true },
+        );
+        distributionLinksUpdated += 1;
+        count += 1;
+      });
+      if (count > 0) await batch.commit();
+    }
+
+    return { producerLinksUpdated, distributionLinksUpdated };
+  };
+
+  const deleteEditingMember = async () => {
+    if (!isAdmin || !editingId) return;
+    if (memberId && editingId === memberId) {
+      setMessage("Tu ne peux pas supprimer ton propre compte.");
+      return;
+    }
+
+    const targetEntry = docs.find((entry) => entry.id === editingId);
+    const targetData = targetEntry?.data ?? editDraft;
+    const targetRole = String(getByPath(targetData, "auth.role") ?? "member").toLowerCase();
+    const adminCount = docs.filter(
+      (entry) => String(getByPath(entry.data, "auth.role") ?? "member").toLowerCase() === "admin",
+    ).length;
+    if (targetRole === "admin" && adminCount <= 1) {
+      setMessage("Suppression bloquee: il faut conserver au moins un admin.");
+      return;
+    }
+
+    const firstName = String(getByPath(targetData, "firstName") ?? "").trim();
+    const lastName = String(getByPath(targetData, "lastName") ?? "").trim();
+    const displayName = `${firstName} ${lastName}`.trim() || editingId;
+    const assignedProducersCount = producers.filter((producer) => producer.referentId === editingId).length;
+    const warningText = [
+      `Supprimer definitivement "${displayName}" (${formatRole(targetRole)}) ?`,
+      "",
+      "Cette action supprime aussi l'historique de solde (ledger).",
+      assignedProducersCount > 0
+        ? `Les ${assignedProducersCount} producteur(s) relies a ce referent seront dissocies.`
+        : "Aucun producteur lie a ce membre.",
+      "",
+      "Action irreversible.",
+    ].join("\n");
+
+    const confirmed = typeof window === "undefined" ? true : window.confirm(warningText);
+    if (!confirmed) return;
+
+    try {
+      setDeletingMember(true);
+      setMessage("");
+
+      const deletedLedger = await deleteMemberLedger(editingId);
+      const cleanup = await cleanupReferentLinks(editingId);
+      await deleteDoc(doc(firebaseDb, collectionName, editingId));
+
+      setMessage(
+        `Membre supprime. Ledger: ${deletedLedger} ligne(s), producteurs nettoyes: ${cleanup.producerLinksUpdated}, lignes distributions nettoyees: ${cleanup.distributionLinksUpdated}.`,
+      );
+      setEditingId(null);
+      setViewingEntry((prev) => (prev?.id === editingId ? null : prev));
+      setEditEmails([""]);
+      setEditPhones([""]);
+      await load();
+    } catch (error) {
+      const err = error instanceof Error ? error.message : "Erreur inconnue.";
+      setMessage(err);
+    } finally {
+      setDeletingMember(false);
     }
   };
 
@@ -1050,12 +1192,23 @@ export default function MembersEditor({
               <button
                 className="rounded-full bg-moss px-5 py-2 text-sm font-semibold text-white"
                 onClick={saveEdit}
+                disabled={deletingMember}
               >
                 Enregistrer
               </button>
+              {isAdmin ? (
+                <button
+                  className="rounded-full border border-ember/40 px-4 py-2 text-sm font-semibold text-ember disabled:opacity-50"
+                  onClick={() => deleteEditingMember().catch(() => undefined)}
+                  disabled={deletingMember}
+                >
+                  {deletingMember ? "Suppression..." : "Supprimer"}
+                </button>
+              ) : null}
               <button
                 className="rounded-full border border-ink/20 px-4 py-2 text-sm font-semibold"
                 onClick={() => setEditingId(null)}
+                disabled={deletingMember}
               >
                 Fermer
               </button>

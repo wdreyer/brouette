@@ -97,7 +97,7 @@ export default function DistributionsEditor({ title, description }: EditorProps)
   const [updatingStatusId, setUpdatingStatusId] = useState<string | null>(null);
 
   const [rows, setRows] = useState<
-    Array<{ distribution: DistributionDoc; checkedProducers: number; totalProducers: number }>
+    Array<{ distribution: DistributionDoc; checkedProducers: number }>
   >([]);
   const [producers, setProducers] = useState<ProducerDoc[]>([]);
 
@@ -139,16 +139,27 @@ export default function DistributionsEditor({ title, description }: EditorProps)
         return a.getTime() - b.getTime();
       });
 
-    const nextRows: Array<{ distribution: DistributionDoc; checkedProducers: number; totalProducers: number }> = [];
+    const nextRows: Array<{ distribution: DistributionDoc; checkedProducers: number }> = [];
     for (const distribution of distributions) {
-      const [calendarSnap, producersSnap] = await Promise.all([
-        getDocs(collection(firebaseDb, "distributionDates", distribution.id, "calendarProducers")),
-        getDocs(collection(firebaseDb, "distributionDates", distribution.id, "producers")),
-      ]);
+      const calendarSnap = await getDocs(
+        collection(firebaseDb, "distributionDates", distribution.id, "calendarProducers"),
+      );
+      const distributionDateKeys = (distribution.dates ?? [])
+        .slice(0, 3)
+        .map((value) => value.toDate?.())
+        .filter(Boolean)
+        .map((value) => dateKey(value as Date));
+      const checkedProducers = calendarSnap.docs.reduce((sum, docSnap) => {
+        const data = docSnap.data() as CalendarProducerDoc;
+        const activeDateKeys = Array.isArray(data.activeDateKeys)
+          ? data.activeDateKeys.filter((key): key is string => typeof key === "string")
+          : [];
+        const hasCheckedDate = activeDateKeys.some((key) => distributionDateKeys.includes(key));
+        return hasCheckedDate ? sum + 1 : sum;
+      }, 0);
       nextRows.push({
         distribution,
-        checkedProducers: calendarSnap.size,
-        totalProducers: producersSnap.size,
+        checkedProducers,
       });
     }
     setRows(nextRows);
@@ -396,7 +407,7 @@ export default function DistributionsEditor({ title, description }: EditorProps)
                   <th className="px-3 py-2 text-xs uppercase tracking-[0.12em]">Date 2</th>
                   <th className="px-3 py-2 text-xs uppercase tracking-[0.12em]">Date 3</th>
                   <th className="px-3 py-2 text-xs uppercase tracking-[0.12em]">Statut</th>
-                  <th className="px-3 py-2 text-xs uppercase tracking-[0.12em]">Producteurs coches</th>
+                  <th className="px-3 py-2 text-xs uppercase tracking-[0.12em]">Producteurs avec au moins une date cochee</th>
                   <th className="px-3 py-2 text-xs uppercase tracking-[0.12em]">Actions</th>
                 </tr>
               </thead>
@@ -429,7 +440,7 @@ export default function DistributionsEditor({ title, description }: EditorProps)
                       )}
                     </td>
                     <td className="px-3 py-2 text-xs text-ink/70">
-                      {row.checkedProducers} / {row.totalProducers}
+                      {row.checkedProducers}
                     </td>
                     <td className="px-3 py-2">
                       <button

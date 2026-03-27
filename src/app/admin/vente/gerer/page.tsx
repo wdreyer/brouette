@@ -314,16 +314,22 @@ export default function AdminSaleProducerManagerPage() {
     return min === max ? `${min.toFixed(2)} €` : `${min.toFixed(2)} - ${max.toFixed(2)} €`;
   };
 
-  const isProductDateChecked = (product: ProductDraft, targetDateKey: string) =>
-    product.variants.length > 0 &&
-    product.variants.every((variant) => variant.activeDates.includes(targetDateKey));
+  const getProductDateState = (product: ProductDraft, targetDateKey: string) => {
+    if (product.variants.length === 0) return "none" as const;
+    const selectedCount = product.variants.filter((variant) =>
+      variant.activeDates.includes(targetDateKey),
+    ).length;
+    if (selectedCount === 0) return "none" as const;
+    if (selectedCount === product.variants.length) return "all" as const;
+    return "partial" as const;
+  };
 
   const toggleProductDate = (productIndex: number, targetDateKey: string) => {
     if (!editableDateKeys.includes(targetDateKey)) return;
     setDraftProducts((prev) =>
       prev.map((product, idx) => {
         if (idx !== productIndex) return product;
-        const checked = isProductDateChecked(product, targetDateKey);
+        const checked = getProductDateState(product, targetDateKey) === "all";
         const variants = product.variants.map((variant) => ({
           ...variant,
           activeDates: checked
@@ -608,12 +614,22 @@ export default function AdminSaleProducerManagerPage() {
                             }
                           />
                         ) : (
-                          <input
-                            type="checkbox"
-                            checked={isProductDateChecked(product, date.key)}
-                            disabled={!editableDateKeys.includes(date.key)}
-                            onChange={() => toggleProductDate(productIndex, date.key)}
-                          />
+                          (() => {
+                            const dateState = getProductDateState(product, date.key);
+                            return (
+                              <input
+                                type="checkbox"
+                                checked={dateState === "all"}
+                                ref={(element) => {
+                                  if (element) {
+                                    element.indeterminate = dateState === "partial";
+                                  }
+                                }}
+                                disabled={!editableDateKeys.includes(date.key)}
+                                onChange={() => toggleProductDate(productIndex, date.key)}
+                              />
+                            );
+                          })()
                         )}
                       </td>
                     ))}
