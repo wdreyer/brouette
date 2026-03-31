@@ -170,15 +170,14 @@ export default function AdminSaleProducerManagerPage() {
       ? "Retour vente en cours"
       : "Retour prochaine vente";
   const editableDateKeys = useMemo(
-    () => (allowedDateKeys.length ? allowedDateKeys : saleDateKeys),
-    [allowedDateKeys, saleDateKeys],
+    () => [...allowedDateKeys],
+    [allowedDateKeys],
   );
   const editingProduct =
     editingProductIndex !== null ? (draftProducts[editingProductIndex] ?? null) : null;
   const hasManyProducers = producerIds.length > 1;
   const isFirstProducer = currentIndex === 0;
   const isLastProducer = currentIndex >= producerIds.length - 1;
-  const dirtyCount = dirtyProducerIds.length;
 
   const createDraftVariant = (): VariantDraft => ({
     tempId: newId(),
@@ -276,22 +275,21 @@ export default function AdminSaleProducerManagerPage() {
         setDistributionLocked(false);
       }
 
-      const allowedFromCalendar =
-        calendarSnap?.exists() && Array.isArray((calendarSnap.data() as { activeDateKeys?: string[] }).activeDateKeys)
-          ? ((calendarSnap.data() as { activeDateKeys?: string[] }).activeDateKeys ?? []).filter((key) =>
-              loadedSaleDateKeys.includes(key),
-            )
-          : [];
-      setAllowedDateKeys(allowedFromCalendar);
-      const nextEditableDateKeys = allowedFromCalendar.length
-        ? allowedFromCalendar
+      const calendarData = calendarSnap?.exists()
+        ? (calendarSnap.data() as { activeDateKeys?: string[] })
+        : null;
+      const allowedFromCalendar = Array.isArray(calendarData?.activeDateKeys)
+        ? (calendarData?.activeDateKeys ?? []).filter((key) => loadedSaleDateKeys.includes(key))
         : loadedSaleDateKeys;
+      const nextEditableDateKeys = calendarData ? allowedFromCalendar : loadedSaleDateKeys;
+      setAllowedDateKeys(nextEditableDateKeys);
       setEditableDateKeysByProducer((prev) => ({
         ...prev,
         [currentProducerId]: nextEditableDateKeys,
       }));
 
       const offersByVariant = new Map<string, string[]>();
+      let hasProducerOffers = false;
       if (distributionId) {
         const offerSnap = await getDocs(
           query(
@@ -299,6 +297,7 @@ export default function AdminSaleProducerManagerPage() {
             where("producerId", "==", currentProducerId),
           ),
         );
+        hasProducerOffers = offerSnap.size > 0;
         offerSnap.docs.forEach((offerDoc) => {
           const data = offerDoc.data() as {
             productId?: string;
@@ -335,17 +334,25 @@ export default function AdminSaleProducerManagerPage() {
         const productId = productSnap.docs[index]?.id;
         if (!productId) return;
         const variants = variantSnap.docs.map((variantDoc) => {
-          const variantData = variantDoc.data() as { label?: string; price?: number };
-          const activeDates =
+          const variantData = variantDoc.data() as { label?: string; price?: number; activeDates?: string[] };
+          const activeDatesFromOffers =
             offersByVariant.get(`${productId}:${variantDoc.id}`)?.filter((key) =>
               nextEditableDateKeys.includes(key),
             ) ?? [];
+          const activeDatesFromVariant = Array.isArray(variantData.activeDates)
+            ? variantData.activeDates.filter((key) => nextEditableDateKeys.includes(key))
+            : [];
+          const activeDates = hasProducerOffers
+            ? activeDatesFromOffers
+            : activeDatesFromVariant.length > 0
+              ? activeDatesFromVariant
+              : [...nextEditableDateKeys];
           return {
             id: variantDoc.id,
             tempId: variantDoc.id,
             label: String(variantData.label ?? "Variante"),
             price: Number(variantData.price ?? 0),
-            activeDates: activeDates.length > 0 ? activeDates : [...nextEditableDateKeys],
+            activeDates,
           } satisfies VariantDraft;
         });
         variantsByProduct.set(productId, variants);
@@ -536,7 +543,9 @@ export default function AdminSaleProducerManagerPage() {
 
       const batchOps: Array<(batch: ReturnType<typeof writeBatch>) => void> = [];
       const now = Timestamp.now();
-      const selectedDateKeys = producerEditableDateKeys.length ? producerEditableDateKeys : saleDateKeys;
+      const selectedDateKeys = Array.from(
+        new Set(producerEditableDateKeys.filter((key) => saleDateKeys.includes(key))),
+      );
 
       for (const product of producerDrafts) {
         const parsedLimit = Number(product.limitTotal || 0);
@@ -571,6 +580,7 @@ export default function AdminSaleProducerManagerPage() {
           const variantPayload = {
             label: variant.label.trim() || "Variante",
             price: isSoldByWeight ? 0 : Number(variant.price || 0),
+            activeDates: selectedActiveDates,
           };
           keptVariantIds.add(variantId);
           const variantRef = doc(firebaseDb, "products", productId, "variants", variantId);
@@ -641,7 +651,8 @@ export default function AdminSaleProducerManagerPage() {
               producerId,
               referentId: producerData.referentId ?? null,
               referentName: producerData.referentName ?? null,
-              active: true,
+              active: selectedDateKeys.length > 0,
+              activeDateKeys: selectedDateKeys,
               validatedByReferent: true,
               validatedAt: now,
             },
@@ -661,31 +672,92 @@ export default function AdminSaleProducerManagerPage() {
     [distributionId, saleDateKeys],
   );
 
-  const validateProducerWithoutChanges = useCallback(
-    async (producerId: string) => {
-      if (!distributionId) return;
-      const now = Timestamp.now();
-      const producerSnap = await getDoc(doc(firebaseDb, "producers", producerId));
-      const producerData = producerSnap.exists()
-        ? (producerSnap.data() as { referentId?: string | null; referentName?: string | null })
-        : {};
-      const producerRef = doc(firebaseDb, "distributionDates", distributionId, "producers", producerId);
-      const batch = writeBatch(firebaseDb);
-      batch.set(
-        producerRef,
-        {
-          producerId,
-          referentId: producerData.referentId ?? null,
-          referentName: producerData.referentName ?? null,
-          active: true,
-          validatedByReferent: true,
-          validatedAt: now,
-        },
-        { merge: true },
+  const loadProducerDraftsFromDb = useCallback(
+    async (producerId: string, producerEditableDateKeys: string[]) => {
+      const selectedDateKeys = Array.from(
+        new Set(producerEditableDateKeys.filter((key) => saleDateKeys.includes(key))),
       );
-      await batch.commit();
+      const productSnap = await getDocs(
+        query(collection(firebaseDb, "products"), where("producerId", "==", producerId)),
+      );
+      const variantSnaps = await Promise.all(
+        productSnap.docs.map((productDoc) =>
+          getDocs(collection(firebaseDb, "products", productDoc.id, "variants")),
+        ),
+      );
+
+      return productSnap.docs.map((productDoc, productIndex) => {
+        const productData = productDoc.data() as {
+          name?: string;
+          description?: string;
+          imageUrl?: string;
+          isOrganic?: boolean;
+          isSoldByWeight?: boolean;
+          estimatedPriceMin?: number;
+          estimatedPriceMax?: number;
+          saleLimit?: number;
+        };
+        const variants = (variantSnaps[productIndex]?.docs ?? []).map((variantDoc) => {
+          const variantData = variantDoc.data() as {
+            label?: string;
+            price?: number;
+            activeDates?: string[];
+          };
+          const activeDates = Array.isArray(variantData.activeDates)
+            ? variantData.activeDates.filter((key) => selectedDateKeys.includes(key))
+            : [...selectedDateKeys];
+          return {
+            id: variantDoc.id,
+            tempId: variantDoc.id,
+            label: String(variantData.label ?? "Variante"),
+            price: Number(variantData.price ?? 0),
+            activeDates,
+          } satisfies VariantDraft;
+        });
+
+        return {
+          id: productDoc.id,
+          name: String(productData.name ?? "Produit"),
+          description: String(productData.description ?? ""),
+          imageUrl: String(productData.imageUrl ?? ""),
+          isOrganic: Boolean(productData.isOrganic),
+          isSoldByWeight: Boolean(productData.isSoldByWeight),
+          estimatedPriceMin:
+            typeof productData.estimatedPriceMin === "number" && productData.estimatedPriceMin >= 0
+              ? String(productData.estimatedPriceMin)
+              : "",
+          estimatedPriceMax:
+            typeof productData.estimatedPriceMax === "number" && productData.estimatedPriceMax >= 0
+              ? String(productData.estimatedPriceMax)
+              : "",
+          limitTotal:
+            typeof productData.saleLimit === "number" && productData.saleLimit > 0
+              ? String(productData.saleLimit)
+              : "",
+          variants,
+          existingVariantIds: variants.map((variant) => variant.id!).filter(Boolean),
+        } satisfies ProductDraft;
+      });
     },
-    [distributionId],
+    [saleDateKeys],
+  );
+
+  const resolveProducerEditableDateKeys = useCallback(
+    async (producerId: string) => {
+      const cached = editableDateKeysByProducerRef.current[producerId];
+      if (Array.isArray(cached)) return cached;
+      if (!distributionId) return [...saleDateKeys];
+      const calendarSnap = await getDoc(
+        doc(firebaseDb, "distributionDates", distributionId, "calendarProducers", producerId),
+      );
+      if (!calendarSnap.exists()) return [...saleDateKeys];
+      const calendarData = calendarSnap.data() as { activeDateKeys?: string[] };
+      if (!Array.isArray(calendarData.activeDateKeys)) return [...saleDateKeys];
+      return calendarData.activeDateKeys.filter(
+        (key): key is string => typeof key === "string" && saleDateKeys.includes(key),
+      );
+    },
+    [distributionId, saleDateKeys],
   );
 
   const saveDraft = async () => {
@@ -697,27 +769,18 @@ export default function AdminSaleProducerManagerPage() {
     setSaving(true);
     setMessage("");
     try {
-      const targetProducerIds = hasManyProducers ? producerIds : [currentProducerId];
+      const drafts =
+        draftsByProducerRef.current[currentProducerId] ??
+        draftProducts;
+      const producerDateKeys = await resolveProducerEditableDateKeys(currentProducerId);
+      const producerDrafts =
+        dirtyProducerIds.includes(currentProducerId) || drafts.length > 0
+          ? drafts
+          : await loadProducerDraftsFromDb(currentProducerId, producerDateKeys);
+      await saveProducerDraft(currentProducerId, producerDrafts, producerDateKeys);
 
-      for (const producerId of targetProducerIds) {
-        const drafts =
-          draftsByProducerRef.current[producerId] ??
-          (producerId === currentProducerId ? draftProducts : []);
-        const producerDateKeys =
-          editableDateKeysByProducerRef.current[producerId] ?? saleDateKeys;
-        if (dirtyProducerIds.includes(producerId) && drafts.length > 0) {
-          await saveProducerDraft(producerId, drafts, producerDateKeys);
-        } else {
-          await validateProducerWithoutChanges(producerId);
-        }
-      }
-
-      setDirtyProducerIds((prev) => prev.filter((id) => !targetProducerIds.includes(id)));
-      setMessage(
-        targetProducerIds.length > 1
-          ? `${targetProducerIds.length} producteurs enregistres et valides.`
-          : "Producteur enregistre et valide.",
-      );
+      setDirtyProducerIds((prev) => prev.filter((id) => id !== currentProducerId));
+      setMessage("Producteur enregistre et valide.");
       router.push(distributionLocked ? "/admin/vente/en-cours" : "/admin/vente/prochaine");
     } finally {
       setSaving(false);
@@ -735,7 +798,7 @@ export default function AdminSaleProducerManagerPage() {
             <h1 className="mt-1 font-serif text-3xl">{producer?.name ?? "Producteur"}</h1>
             {producerIds.length > 1 ? (
               <p className="mt-1 text-sm text-ink/70">
-                Producteur {currentIndex + 1}/{producerIds.length} - {dirtyCount} modifie(s)
+                Producteur {currentIndex + 1}/{producerIds.length}
               </p>
             ) : null}
           </div>
@@ -1281,9 +1344,6 @@ export default function AdminSaleProducerManagerPage() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="text-sm text-ink/70">
           <p>{message}</p>
-          {hasManyProducers && !isLastProducer ? (
-            <p className="text-xs text-ink/60">Passe au dernier producteur pour enregistrer le lot.</p>
-          ) : null}
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {hasManyProducers ? (
@@ -1307,11 +1367,9 @@ export default function AdminSaleProducerManagerPage() {
           <button
             className="rounded-md bg-forest px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
             onClick={saveDraft}
-            disabled={saving || editingLocked || (hasManyProducers && !isLastProducer)}
+            disabled={saving || editingLocked}
           >
-            {hasManyProducers
-              ? `Enregistrer et valider tous mes producteurs (${dirtyCount})`
-              : "Enregistrer et valider"}
+            Enregistrer et valider
           </button>
         </div>
       </div>

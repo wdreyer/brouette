@@ -469,99 +469,6 @@ export async function seedDatabase() {
     return { ...product, saleDates };
   });
 
-  const documents = [
-    {
-      id: "doc1",
-      type: "producer-order",
-      distributionId: "d1",
-      producerId: "p1",
-      storagePath: "pdfs/d1/p1-commande.pdf",
-      generatedAt: t("2026-02-05T09:00:00.000Z"),
-      generatedBy: "uid_m8",
-    },
-    {
-      id: "doc2",
-      type: "producer-order",
-      distributionId: "d1",
-      producerId: "p4",
-      storagePath: "pdfs/d1/p4-commande.pdf",
-      generatedAt: t("2026-02-05T09:05:00.000Z"),
-      generatedBy: "uid_m8",
-    },
-    {
-      id: "doc3",
-      type: "distribution-sheet",
-      distributionId: "d1",
-      producerId: null,
-      storagePath: "pdfs/d1/fiche-distribution.pdf",
-      generatedAt: t("2026-02-05T09:10:00.000Z"),
-      generatedBy: "uid_m8",
-    },
-    {
-      id: "doc4",
-      type: "producer-order",
-      distributionId: "d2",
-      producerId: "p2",
-      storagePath: "pdfs/d2/p2-commande.pdf",
-      generatedAt: t("2026-02-19T09:00:00.000Z"),
-      generatedBy: "uid_m8",
-    },
-    {
-      id: "doc5",
-      type: "distribution-sheet",
-      distributionId: "d2",
-      producerId: null,
-      storagePath: "pdfs/d2/fiche-distribution.pdf",
-      generatedAt: t("2026-02-19T09:10:00.000Z"),
-      generatedBy: "uid_m8",
-    },
-    {
-      id: "doc6",
-      type: "producer-order",
-      distributionId: "d3",
-      producerId: "p3",
-      storagePath: "pdfs/d3/p3-commande.pdf",
-      generatedAt: t("2026-03-05T09:00:00.000Z"),
-      generatedBy: "uid_m8",
-    },
-    {
-      id: "doc7",
-      type: "distribution-sheet",
-      distributionId: "d3",
-      producerId: null,
-      storagePath: "pdfs/d3/fiche-distribution.pdf",
-      generatedAt: t("2026-03-05T09:10:00.000Z"),
-      generatedBy: "uid_m8",
-    },
-    {
-      id: "doc8",
-      type: "producer-order",
-      distributionId: "d4",
-      producerId: "p7",
-      storagePath: "pdfs/d4/p7-commande.pdf",
-      generatedAt: t("2026-03-19T09:00:00.000Z"),
-      generatedBy: "uid_m8",
-    },
-    {
-      id: "doc9",
-      type: "distribution-sheet",
-      distributionId: "d4",
-      producerId: null,
-      storagePath: "pdfs/d4/fiche-distribution.pdf",
-      generatedAt: t("2026-03-19T09:10:00.000Z"),
-      generatedBy: "uid_m8",
-    },
-    {
-      id: "doc10",
-      type: "distribution-sheet",
-      distributionId: "d5",
-      producerId: null,
-      storagePath: "pdfs/d5/fiche-distribution.pdf",
-      generatedAt: t("2026-04-02T09:10:00.000Z"),
-      generatedBy: "uid_m8",
-    },
-  ];
-
   const messages = [
     {
       id: "msg1",
@@ -1121,11 +1028,6 @@ export async function seedDatabase() {
         data: itemData,
       });
     }
-  }
-
-  for (const docEntry of documents) {
-    const { id, ...data } = docEntry;
-    batchItems.push({ refPath: ["documents", id], data });
   }
 
   for (const message of messages) {

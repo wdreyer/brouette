@@ -67,6 +67,16 @@ function dateKey(date: Date) {
   return date.toISOString().slice(0, 10);
 }
 
+function parseSaleDateTime(raw?: string | null) {
+  const value = String(raw ?? "").trim();
+  if (!value) return Number.POSITIVE_INFINITY;
+  const isoCandidate = new Date(`${value}T00:00:00.000Z`);
+  if (!Number.isNaN(isoCandidate.getTime())) return isoCandidate.getTime();
+  const fallback = new Date(value);
+  if (!Number.isNaN(fallback.getTime())) return fallback.getTime();
+  return Number.POSITIVE_INFINITY;
+}
+
 function ChartCard({
   title,
   series,
@@ -181,38 +191,69 @@ export default function OrdersEditor() {
   }, []);
 
   const recapByDate = useMemo(() => {
-    const map: Record<string, { total: number; members: Set<string> }> = {};
+    const map = new Map<
+      string,
+      { dateLabel: string; total: number; members: Set<string>; sortTime: number }
+    >();
     Object.entries(orderItems).forEach(([orderId, items]) => {
       const memberId = orders.find((order) => order.id === orderId)?.memberId ?? "unknown";
       items.forEach((item) => {
-        const key = item.saleDateLabel ?? item.saleDateKey ?? "Date";
-        if (!map[key]) map[key] = { total: 0, members: new Set() };
-        map[key].total += item.lineTotal ?? 0;
-        map[key].members.add(memberId);
+        const rawDateKey = String(item.saleDateKey ?? "").trim();
+        const dateLabel = item.saleDateLabel ?? (rawDateKey || "Date");
+        const bucketKey = rawDateKey || dateLabel;
+        if (!map.has(bucketKey)) {
+          map.set(bucketKey, {
+            dateLabel,
+            total: 0,
+            members: new Set<string>(),
+            sortTime: parseSaleDateTime(rawDateKey),
+          });
+        }
+        const bucket = map.get(bucketKey)!;
+        bucket.total += Number(item.lineTotal ?? 0);
+        bucket.members.add(memberId);
       });
     });
-    return Object.entries(map).map(([label, data]) => ({
-      label,
-      total: data.total,
-      members: data.members.size,
-    }));
+
+    return Array.from(map.values())
+      .sort((a, b) => a.sortTime - b.sortTime || a.dateLabel.localeCompare(b.dateLabel, "fr"))
+      .map((entry) => ({
+        label: entry.dateLabel,
+        total: entry.total,
+        members: entry.members.size,
+      }));
   }, [orderItems, orders]);
 
   const recapByDateProducer = useMemo(() => {
-    const map: Record<string, Record<string, number>> = {};
+    const map = new Map<
+      string,
+      { dateLabel: string; sortTime: number; producersMap: Record<string, number> }
+    >();
     Object.values(orderItems).forEach((items) => {
       items.forEach((item) => {
-        const dateKey = item.saleDateLabel ?? item.saleDateKey ?? "Date";
+        const rawDateKey = String(item.saleDateKey ?? "").trim();
+        const dateLabel = item.saleDateLabel ?? (rawDateKey || "Date");
+        const bucketKey = rawDateKey || dateLabel;
         const producerId = item.producerId ?? "unknown";
-        map[dateKey] = map[dateKey] ?? {};
-        map[dateKey][producerId] = (map[dateKey][producerId] ?? 0) + (item.lineTotal ?? 0);
+        if (!map.has(bucketKey)) {
+          map.set(bucketKey, {
+            dateLabel,
+            sortTime: parseSaleDateTime(rawDateKey),
+            producersMap: {},
+          });
+        }
+        const bucket = map.get(bucketKey)!;
+        bucket.producersMap[producerId] =
+          (bucket.producersMap[producerId] ?? 0) + Number(item.lineTotal ?? 0);
       });
     });
-    return map;
+
+    return Array.from(map.entries())
+      .map(([key, value]) => ({ key, ...value }))
+      .sort((a, b) => a.sortTime - b.sortTime || a.dateLabel.localeCompare(b.dateLabel, "fr"));
   }, [orderItems]);
 
   const trends = useMemo(() => {
-    const recentDistributions = [...distributions].slice(-9);
     const totalsByDate = new Map<string, { members: Set<string>; revenue: number; items: number }>();
 
     orders.forEach((order) => {
@@ -236,21 +277,23 @@ export default function OrdersEditor() {
       });
     });
 
-    const points: TrendPoint[] = [];
-    recentDistributions.forEach((distribution) => {
-      const dates = (distribution.dates ?? []).slice(0, 3).map((d) => d.toDate()).filter(Boolean);
-      dates.forEach((date, index) => {
-        const key = dateKey(date);
-        const totals = totalsByDate.get(key);
-        points.push({
-          key: `${distribution.id}-${key}-${index}`,
-          label: date.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" }),
-          orders: totals?.members.size ?? 0,
-          revenue: totals?.revenue ?? 0,
-          items: totals?.items ?? 0,
-        });
-      });
+    const recentDates = distributions
+      .flatMap((distribution) => (distribution.dates ?? []).slice(0, 3).map((d) => d.toDate()).filter(Boolean))
+      .sort((a, b) => a.getTime() - b.getTime())
+      .slice(-6);
+
+    const points: TrendPoint[] = recentDates.map((date, index) => {
+      const key = dateKey(date);
+      const totals = totalsByDate.get(key);
+      return {
+        key: `${key}-${index}`,
+        label: date.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" }),
+        orders: totals?.members.size ?? 0,
+        revenue: totals?.revenue ?? 0,
+        items: totals?.items ?? 0,
+      };
     });
+
     return points;
   }, [orders, orderItems, distributions]);
 
@@ -399,10 +442,10 @@ export default function OrdersEditor() {
               <p className="text-xs font-semibold text-ink">
                 Total global:{" "}
                 {formatMoney(
-                  Object.values(recapByDateProducer).reduce(
-                    (sum, producersMap) =>
+                  recapByDateProducer.reduce(
+                    (sum, byDate) =>
                       sum +
-                      Object.values(producersMap).reduce((localSum, value) => localSum + value, 0),
+                      Object.values(byDate.producersMap).reduce((localSum, value) => localSum + value, 0),
                     0,
                   ),
                 )}{" "}
@@ -410,10 +453,10 @@ export default function OrdersEditor() {
               </p>
             </div>
             <div className="mt-3 flex flex-col gap-4">
-              {Object.entries(recapByDateProducer).map(([dateLabel, producersMap]) => {
+              {recapByDateProducer.map(({ key, dateLabel, producersMap }) => {
                 const dateTotal = Object.values(producersMap).reduce((sum, value) => sum + value, 0);
                 return (
-                <div key={dateLabel} className="rounded-xl border border-clay/70 bg-stone p-3">
+                <div key={key} className="rounded-xl border border-clay/70 bg-stone p-3">
                   <div className="flex items-center justify-between gap-3">
                     <p className="text-xs font-semibold text-ink/70">{dateLabel}</p>
                     <p className="text-xs font-semibold text-ink">{formatMoney(dateTotal)} EUR</p>

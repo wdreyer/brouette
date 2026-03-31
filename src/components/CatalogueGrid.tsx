@@ -39,12 +39,14 @@ type Distribution = {
 };
 
 type OfferItem = {
+  producerId?: string;
   productId?: string;
   saleDateKey?: string;
   dateIndex?: number;
   priceApplied?: number;
   price?: number;
   limitTotal?: number;
+  active?: boolean;
 };
 
 function dateKey(date: Date) {
@@ -140,27 +142,59 @@ export default function CatalogueGrid({ hideWhenClosed = false }: { hideWhenClos
 
         const activeProducerDocs = activeProducersSnap?.docs ?? [];
         setHasProducerLinks(activeProducerDocs.length > 0);
-        const activeIds = activeProducerDocs
-          .map((docSnap) => {
+        const openDateKeys = (openDist?.dates ?? []).slice(0, 3).map((date) => dateKey(date.toDate()));
+        const activeIds = activeProducerDocs.flatMap((docSnap) => {
+          const data = docSnap.data() as {
+            producerId?: string;
+            active?: boolean;
+            activeDateKeys?: string[];
+            validatedByReferent?: boolean;
+          };
+          if (data.active === false || data.validatedByReferent !== true) return [];
+          const producerId = String(data.producerId ?? docSnap.id);
+          if (!producerId) return [];
+          const activeDateKeys = Array.isArray(data.activeDateKeys)
+            ? data.activeDateKeys.filter((key): key is string => typeof key === "string")
+            : [];
+          const constrainedDateKeys = (
+            activeDateKeys.length > 0 ? activeDateKeys : openDateKeys
+          ).filter((key) => openDateKeys.includes(key));
+          return constrainedDateKeys.length > 0 ? [producerId] : [];
+        });
+        setActiveProducerIds(activeIds);
+
+        const prices: Record<string, { min: number; max: number }> = {};
+        const availability: Record<string, { dateKeys: string[]; hasLimit?: boolean; minLimit?: number }> = {};
+        const activeProducerDateMap: Record<string, Set<string>> = {};
+        if (activeProducerDocs.length > 0) {
+          activeProducerDocs.forEach((docSnap) => {
             const data = docSnap.data() as {
               producerId?: string;
               active?: boolean;
+              activeDateKeys?: string[];
               validatedByReferent?: boolean;
             };
-            if (data.active === false) return "";
-            if (data.validatedByReferent !== true) return "";
-            return String(data.producerId ?? docSnap.id);
-          })
-          .filter(Boolean);
-        setActiveProducerIds(activeIds);
-
-        const openDateKeys = (openDist?.dates ?? []).slice(0, 3).map((date) => dateKey(date.toDate()));
-        const prices: Record<string, { min: number; max: number }> = {};
-        const availability: Record<string, { dateKeys: string[]; hasLimit?: boolean; minLimit?: number }> = {};
+            if (data.active === false || data.validatedByReferent !== true) return;
+            const producerId = String(data.producerId ?? docSnap.id);
+            if (!producerId) return;
+            const activeDateKeys = Array.isArray(data.activeDateKeys)
+              ? data.activeDateKeys.filter((key): key is string => typeof key === "string")
+              : [];
+            const constrainedDateKeys = (
+              activeDateKeys.length > 0 ? activeDateKeys : openDateKeys
+            ).filter((key) => openDateKeys.includes(key));
+            if (!constrainedDateKeys.length) return;
+            activeProducerDateMap[producerId] = new Set(constrainedDateKeys);
+          });
+        }
 
         const offers = offerSnap?.docs.map((docSnap) => docSnap.data() as OfferItem) ?? [];
         offers.forEach((offer) => {
+          if (offer.active === false) return;
           if (!offer.productId) return;
+          const producerId = String(offer.producerId ?? "");
+          const producerDateKeys = activeProducerDateMap[producerId];
+          if (activeProducerDocs.length > 0 && (!producerId || !producerDateKeys)) return;
           const entry = availability[offer.productId] ?? { dateKeys: [] };
           const offerDateKey =
             typeof offer.saleDateKey === "string" && offer.saleDateKey
@@ -168,6 +202,8 @@ export default function CatalogueGrid({ hideWhenClosed = false }: { hideWhenClos
               : typeof offer.dateIndex === "number" && openDateKeys[offer.dateIndex]
                 ? openDateKeys[offer.dateIndex]
                 : "";
+          if (!offerDateKey || !openDateKeys.includes(offerDateKey)) return;
+          if (producerDateKeys && !producerDateKeys.has(offerDateKey)) return;
           if (offerDateKey && !entry.dateKeys.includes(offerDateKey)) {
             entry.dateKeys.push(offerDateKey);
           }

@@ -19,7 +19,7 @@ type NavItem = {
     | "stats"
     | "messages"
     | "invites"
-    | "documents"
+    | "pdfs"
     | "settings";
   roles?: Array<"admin" | "referent">;
   children?: Array<{
@@ -141,7 +141,7 @@ function Icon({ kind }: { kind: NavItem["icon"] }) {
           <rect x="5" y="5" width="14" height="14" rx="3" />
         </svg>
       );
-    case "documents":
+    case "pdfs":
       return (
         <svg {...props}>
           <path d="M8 3h7l4 4v14H8Z" />
@@ -187,7 +187,6 @@ const adminGroups: NavGroup[] = [
       { href: "/admin/producers", label: "Producteurs", icon: "producers" },
       { href: "/admin/catalogues", label: "Catégories", icon: "categories", roles: ["admin"] },
       { href: "/admin/calendrier-annuel", label: "Calendrier annuel", icon: "distributions", roles: ["admin"] },
-      { href: "/admin/distributionDates", label: "Distributions", icon: "distributions", roles: ["admin"] },
     ],
   },
   {
@@ -203,7 +202,7 @@ const adminGroups: NavGroup[] = [
     items: [
       { href: "/admin/invites", label: "Invitations", icon: "invites", roles: ["admin", "referent"] },
       { href: "/admin/messages", label: "Messages", icon: "messages", roles: ["admin", "referent"] },
-      { href: "/admin/documents", label: "Documents PDF", icon: "documents", roles: ["admin", "referent"] },
+      { href: "/admin/generations-pdf", label: "Générations PDF", icon: "pdfs", roles: ["admin", "referent"] },
       { href: "/admin/settings", label: "Paramètres", icon: "settings", roles: ["admin"] },
       { href: "/admin/stats", label: "Stats", icon: "stats", roles: ["admin", "referent"] },
     ],

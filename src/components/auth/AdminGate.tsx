@@ -17,7 +17,7 @@ const REFERENT_ALLOWED_PREFIXES = [
   "/admin/invite",
   "/admin/invitations",
   "/admin/messages",
-  "/admin/documents",
+  "/admin/generations-pdf",
 ];
 
 function isReferentPathAllowed(pathname: string) {

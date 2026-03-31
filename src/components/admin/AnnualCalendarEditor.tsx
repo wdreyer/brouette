@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Timestamp, collection, deleteDoc, doc, getDocs, setDoc, writeBatch } from "firebase/firestore";
+import { Timestamp, collection, doc, getDocs, setDoc, writeBatch } from "firebase/firestore";
 import { firebaseDb } from "@/lib/firebase/client";
 import { distributionLabel } from "@/lib/distributions";
 
@@ -11,6 +11,8 @@ type DistributionDoc = {
   id: string;
   status?: string;
   dates?: FireDate[];
+  archivedAt?: FireDate | null;
+  archivedFromStatus?: string | null;
 };
 
 type ProducerDoc = {
@@ -52,10 +54,39 @@ function formatDateLabel(value: Date) {
   return value.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" });
 }
 
+function normalizeStatus(value?: string) {
+  return String(value ?? "").toLowerCase().trim();
+}
+
+function isArchivedStatus(value?: string) {
+  const status = normalizeStatus(value);
+  return status === "archived" || status === "archivee" || status === "archivée";
+}
+
+function isOpenStatus(value?: string) {
+  const status = normalizeStatus(value);
+  return status === "open" || status === "ouverte" || status === "ouvertes";
+}
+
+function statusSelectValue(status?: string): "planned" | "open" | "finished" {
+  const value = normalizeStatus(status);
+  if (value === "open" || value === "ouverte" || value === "ouvertes") return "open";
+  if (value === "finished" || value === "fermee" || value === "ferme" || value === "closed") return "finished";
+  return "planned";
+}
+
+function statusLabel(status?: string) {
+  const value = statusSelectValue(status);
+  if (value === "open") return "Ouverte";
+  if (value === "finished") return "Finie";
+  return "Planifiee";
+}
+
 export default function AnnualCalendarEditor() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState("");
+  const [updatingStatusId, setUpdatingStatusId] = useState<string | null>(null);
 
   const [distributions, setDistributions] = useState<DistributionDoc[]>([]);
   const [producers, setProducers] = useState<ProducerDoc[]>([]);
@@ -65,6 +96,7 @@ export default function AnnualCalendarEditor() {
   const [existingCalendarDocs, setExistingCalendarDocs] = useState<Record<string, string[]>>({});
   const [createOpen, setCreateOpen] = useState(false);
   const [createDates, setCreateDates] = useState({ date1: "", date2: "", date3: "" });
+  const [showArchived, setShowArchived] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -155,7 +187,9 @@ export default function AnnualCalendarEditor() {
 
   const dateColumns = useMemo(() => {
     const columns: DateColumn[] = [];
-    distributions.forEach((distribution) => {
+    distributions
+      .filter((distribution) => !isArchivedStatus(distribution.status))
+      .forEach((distribution) => {
       const keys = sortDateKeys(distributionDateKeys[distribution.id] ?? []);
       keys.forEach((key, index) => {
         columns.push({
@@ -165,9 +199,73 @@ export default function AnnualCalendarEditor() {
           isStart: index === 0,
         });
       });
-    });
+      });
     return columns;
   }, [distributionDateKeys, distributions]);
+
+  const activeDistributions = useMemo(
+    () => distributions.filter((distribution) => !isArchivedStatus(distribution.status)),
+    [distributions],
+  );
+
+  const archivedDistributions = useMemo(
+    () => distributions.filter((distribution) => isArchivedStatus(distribution.status)),
+    [distributions],
+  );
+
+  const checkedProducersByDistribution = useMemo(() => {
+    const next: Record<string, number> = {};
+    activeDistributions.forEach((distribution) => {
+      const keys = sortDateKeys(distributionDateKeys[distribution.id] ?? []);
+      let count = 0;
+      producers.forEach((producer) => {
+        const isChecked = keys.some((key) => Boolean(selectedByProducer[producer.id]?.[key]));
+        if (isChecked) count += 1;
+      });
+      next[distribution.id] = count;
+    });
+    return next;
+  }, [activeDistributions, distributionDateKeys, producers, selectedByProducer]);
+
+  const updateDistributionStatus = async (
+    distribution: DistributionDoc,
+    nextStatus: "planned" | "open" | "finished",
+  ) => {
+    if (
+      nextStatus === "open" &&
+      activeDistributions.some((item) => item.id !== distribution.id && isOpenStatus(item.status))
+    ) {
+      setMessage("Une seule distribution peut etre ouverte a la fois.");
+      return;
+    }
+
+    setUpdatingStatusId(distribution.id);
+    setMessage("");
+    try {
+      const payload: Record<string, unknown> = {
+        status: nextStatus,
+        updatedAt: Timestamp.now(),
+      };
+      if (nextStatus === "open") {
+        payload.openedAt = Timestamp.now();
+        payload.closedAt = null;
+      } else if (nextStatus === "finished") {
+        payload.closedAt = Timestamp.now();
+      } else {
+        payload.openedAt = null;
+        payload.closedAt = null;
+      }
+      await setDoc(doc(firebaseDb, "distributionDates", distribution.id), payload, { merge: true });
+      setDistributions((prev) =>
+        prev.map((item) => (item.id === distribution.id ? { ...item, status: nextStatus } : item)),
+      );
+      setMessage("Statut de la distribution mis a jour.");
+    } catch {
+      setMessage("Impossible de mettre a jour le statut.");
+    } finally {
+      setUpdatingStatusId(null);
+    }
+  };
 
   const openCreateDistribution = () => {
     setCreateDates({
@@ -178,37 +276,64 @@ export default function AnnualCalendarEditor() {
     setCreateOpen(true);
   };
 
-  const deleteDistribution = async (distributionId: string) => {
-    if (!window.confirm("Supprimer cette distribution et ses donnees associees ?")) {
+  const archiveDistribution = async (distribution: DistributionDoc) => {
+    if (isOpenStatus(distribution.status)) {
+      setMessage("Impossible d'archiver une vente ouverte. Ferme la vente d'abord.");
+      return;
+    }
+    if (
+      !window.confirm(
+        "Archiver cette distribution ? Les donnees sont conservees et visibles dans les archives.",
+      )
+    ) {
       return;
     }
 
     setSaving(true);
     setMessage("");
     try {
-      const operations: Array<(batch: ReturnType<typeof writeBatch>) => void> = [];
-      const subCollections = ["calendarProducers", "producers", "offerItems"];
-
-      for (const subName of subCollections) {
-        const subSnap = await getDocs(collection(firebaseDb, "distributionDates", distributionId, subName));
-        subSnap.docs.forEach((docSnap) => {
-          const subRef = doc(firebaseDb, "distributionDates", distributionId, subName, docSnap.id);
-          operations.push((batch) => batch.delete(subRef));
-        });
-      }
-
-      const chunkSize = 350;
-      for (let index = 0; index < operations.length; index += chunkSize) {
-        const batch = writeBatch(firebaseDb);
-        operations.slice(index, index + chunkSize).forEach((operation) => operation(batch));
-        await batch.commit();
-      }
-
-      await deleteDoc(doc(firebaseDb, "distributionDates", distributionId));
-      setMessage("Distribution supprimee.");
+      await setDoc(
+        doc(firebaseDb, "distributionDates", distribution.id),
+        {
+          status: "archived",
+          archivedAt: Timestamp.now(),
+          archivedFromStatus: normalizeStatus(distribution.status) || "planned",
+        },
+        { merge: true },
+      );
+      setMessage("Distribution archivee.");
+      setShowArchived(true);
       await load();
     } catch {
-      setMessage("Impossible de supprimer la distribution.");
+      setMessage("Impossible d'archiver la distribution.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const restoreDistribution = async (distribution: DistributionDoc) => {
+    if (!window.confirm("Restaurer cette distribution dans le planning actif ?")) {
+      return;
+    }
+
+    setSaving(true);
+    setMessage("");
+    try {
+      const restoredStatus = normalizeStatus(distribution.archivedFromStatus ?? "") || "planned";
+      const allowedStatus = restoredStatus === "open" ? "planned" : restoredStatus;
+      await setDoc(
+        doc(firebaseDb, "distributionDates", distribution.id),
+        {
+          status: allowedStatus,
+          archivedAt: null,
+          archivedFromStatus: null,
+        },
+        { merge: true },
+      );
+      setMessage("Distribution restauree.");
+      await load();
+    } catch {
+      setMessage("Impossible de restaurer la distribution.");
     } finally {
       setSaving(false);
     }
@@ -273,7 +398,7 @@ export default function AnnualCalendarEditor() {
     const operations: Array<(batch: ReturnType<typeof writeBatch>) => void> = [];
     const now = Timestamp.now();
 
-    distributions.forEach((distribution) => {
+    activeDistributions.forEach((distribution) => {
       const keys = sortDateKeys(distributionDateKeys[distribution.id] ?? []);
       const existing = new Set(existingCalendarDocs[distribution.id] ?? []);
       const distributionRef = doc(firebaseDb, "distributionDates", distribution.id);
@@ -396,9 +521,9 @@ export default function AnnualCalendarEditor() {
           </div>
         </div>
 
-        {distributions.length > 0 ? (
+        {activeDistributions.length > 0 ? (
           <div className="mt-3 grid gap-2 md:grid-cols-2">
-            {distributions.map((distribution) => {
+            {activeDistributions.map((distribution) => {
               const keys = sortDateKeys(distributionDateKeys[distribution.id] ?? []);
               return (
                 <div
@@ -410,17 +535,91 @@ export default function AnnualCalendarEditor() {
                     <p className="text-xs text-ink/60">
                       {keys.map((key) => formatDateLabel(toDateFromKey(key))).join(" / ")}
                     </p>
+                    <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-ink/65">
+                      <span>Statut</span>
+                      <select
+                        className="rounded-md border border-ink/20 bg-white px-2 py-1 text-xs font-semibold text-ink"
+                        value={statusSelectValue(distribution.status)}
+                        onChange={(event) =>
+                          updateDistributionStatus(
+                            distribution,
+                            event.target.value as "planned" | "open" | "finished",
+                          ).catch(() => undefined)
+                        }
+                        disabled={saving || updatingStatusId === distribution.id}
+                      >
+                        <option value="planned">Planifiee</option>
+                        <option value="open">Ouverte</option>
+                        <option value="finished">Finie</option>
+                      </select>
+                      <span className="text-ink/55">
+                        Producteurs coches: {checkedProducersByDistribution[distribution.id] ?? 0}
+                      </span>
+                    </div>
                   </div>
-                  <button
-                    className="rounded-md border border-red-300 bg-red-50 px-2 py-1 text-xs font-semibold text-red-700 disabled:opacity-50"
-                    onClick={() => deleteDistribution(distribution.id)}
-                    disabled={saving}
-                  >
-                    Supprimer
-                  </button>
+                  <div className="flex flex-col items-end gap-1">
+                    <span className="text-[11px] font-semibold text-ink/60">{statusLabel(distribution.status)}</span>
+                    <button
+                      className="rounded-md border border-ink/20 bg-stone px-2 py-1 text-xs font-semibold text-ink disabled:opacity-50"
+                      onClick={() => archiveDistribution(distribution)}
+                      disabled={saving || updatingStatusId === distribution.id}
+                    >
+                      Archiver
+                    </button>
+                  </div>
                 </div>
               );
             })}
+          </div>
+        ) : null}
+
+        {archivedDistributions.length > 0 ? (
+          <div className="mt-3 border border-ink/15 bg-white p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-xs font-semibold uppercase tracking-[0.12em] text-ink/60">
+                Archives ({archivedDistributions.length})
+              </p>
+              <button
+                className="rounded-md border border-ink/20 bg-white px-3 py-1 text-xs font-semibold"
+                onClick={() => setShowArchived((prev) => !prev)}
+              >
+                {showArchived ? "Masquer" : "Voir les archives"}
+              </button>
+            </div>
+            {showArchived ? (
+              <div className="mt-2 grid gap-2 md:grid-cols-2">
+                {archivedDistributions.map((distribution) => {
+                  const keys = sortDateKeys(distributionDateKeys[distribution.id] ?? []);
+                  const archivedAt = distribution.archivedAt?.toDate?.();
+                  return (
+                    <div
+                      key={`archived-${distribution.id}`}
+                      className="flex items-center justify-between gap-3 border border-ink/15 bg-stone px-3 py-2"
+                    >
+                      <div>
+                        <p className="text-sm font-semibold text-ink">{distributionLabel(distribution)}</p>
+                        <p className="text-xs text-ink/60">
+                          {keys.map((key) => formatDateLabel(toDateFromKey(key))).join(" / ")}
+                        </p>
+                        <p className="text-[11px] text-ink/55">
+                          Archivee {archivedAt ? `le ${archivedAt.toLocaleDateString("fr-FR")}` : ""}
+                        </p>
+                        <p className="text-[11px] text-ink/55">
+                          Ancien statut: {statusLabel(distribution.archivedFromStatus ?? distribution.status)}
+                        </p>
+                      </div>
+                      <button
+                        className="rounded-md border border-ink/20 bg-white px-2 py-1 text-xs font-semibold text-ink disabled:opacity-50"
+                        onClick={() => restoreDistribution(distribution)}
+                        disabled={saving}
+                      >
+                        Restaurer
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : null}
           </div>
         ) : null}
 
@@ -494,7 +693,7 @@ export default function AnnualCalendarEditor() {
                 <th className="sticky left-0 top-0 z-30 h-10 border-r border-ink/20 bg-ink px-3 py-2 text-xs uppercase tracking-[0.12em]">
                   Producteur
                 </th>
-                {distributions.map((distribution) => (
+                {activeDistributions.map((distribution) => (
                   <th
                     key={`dist-${distribution.id}`}
                     colSpan={(distributionDateKeys[distribution.id] ?? []).length || 1}

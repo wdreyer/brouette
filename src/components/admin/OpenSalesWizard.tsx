@@ -68,6 +68,7 @@ type ProducerRow = {
   producerName: string;
   referentId: string | null;
   referentName: string;
+  activeDateKeys: string[];
   validatedByReferent: boolean;
   validatedAtLabel: string;
   productCount: number;
@@ -99,6 +100,8 @@ type ProductDraft = {
 type SalesViewMode = "overview" | "current" | "next" | "history";
 
 const FINISHED = new Set(["finished", "fermee", "ferme", "closed"]);
+const PLANNED = new Set(["planned", "planifiee", "planifiée"]);
+const ARCHIVED = new Set(["archived", "archivee", "archivée"]);
 
 const toDate = (value?: FireDate) => value?.toDate?.() ?? null;
 const dateKey = (value: Date) => value.toISOString().slice(0, 10);
@@ -122,8 +125,12 @@ const distributionDateBadges = (distribution?: Distribution | null) =>
     .map((date) => formatBadgeDate(toDate(date)))
     .filter((label) => label !== "-");
 const money = (value: number) => value.toFixed(2).replace(".", ",");
-const isPlanned = (status?: string) =>
-  !isOpenStatus(status) && !FINISHED.has(String(status ?? "").toLowerCase());
+const normalizedStatus = (status?: string) => String(status ?? "").toLowerCase().trim();
+const isPlanned = (status?: string) => {
+  const value = normalizedStatus(status);
+  return value === "" || PLANNED.has(value);
+};
+const isArchived = (status?: string) => ARCHIVED.has(normalizedStatus(status));
 const fullName = (m?: Member | null) => `${m?.firstName ?? ""} ${m?.lastName ?? ""}`.trim();
 const newId = () =>
   typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -175,6 +182,7 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
   const plannedDistributions = useMemo(
     () =>
       distributions
+        .filter((distribution) => !isArchived(distribution.status))
         .filter((distribution) => isPlanned(distribution.status))
         .sort(
           (left, right) =>
@@ -325,6 +333,7 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
           producerName: producer?.name ?? "Producteur",
           referentId,
           referentName,
+          activeDateKeys,
           validatedByReferent: dbRow?.validatedByReferent === true,
           validatedAtLabel: formatLongDate(toDate(dbRow?.validatedAt)),
           productCount: (productMap[producerId] ?? []).length,
@@ -357,6 +366,9 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
     );
 
     if (autoClosed.length > 0) {
+      for (const distribution of autoClosed) {
+        await sanitizeOfferItemsForDistribution(distribution);
+      }
       const batch = writeBatch(firebaseDb);
       autoClosed.forEach((distribution) => {
         batch.update(doc(firebaseDb, "distributionDates", distribution.id), {
@@ -450,24 +462,65 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
           getDocs(collection(firebaseDb, "distributionDates", distribution.id, "producers")),
           getDocs(collection(firebaseDb, "distributionDates", distribution.id, "offerItems")),
         ]);
+        const distributionDateKeys = (
+          (distribution.dates ?? [])
+            .slice(0, 3)
+            .map((date) => toDate(date))
+            .filter(Boolean) as Date[]
+        ).map((date) => dateKey(date));
 
         let producersActive = 0;
         let producersValidated = 0;
+        const hasProducerLinks = producersLinkSnap.size > 0;
+        const validatedProducerDateKeys = new Map<string, Set<string>>();
         producersLinkSnap.docs.forEach((linkDoc) => {
           const data = linkDoc.data() as {
             active?: boolean;
             activeDateKeys?: string[];
             validatedByReferent?: boolean;
           };
-          const activeDateKeys = Array.isArray(data.activeDateKeys) ? data.activeDateKeys : [];
-          const isActive = data.active !== false && activeDateKeys.length > 0;
-          if (!isActive) return;
+          const producerId = String((data as { producerId?: string }).producerId ?? linkDoc.id);
+          const activeDateKeys = Array.isArray(data.activeDateKeys)
+            ? data.activeDateKeys.filter((key): key is string => typeof key === "string")
+            : [];
+          const constrainedDateKeys = (
+            activeDateKeys.length > 0 ? activeDateKeys : distributionDateKeys
+          ).filter((key) => distributionDateKeys.includes(key));
+          const isEffectivelyActive = data.active !== false && constrainedDateKeys.length > 0;
+          if (!isEffectivelyActive) return;
           producersActive += 1;
-          if (data.validatedByReferent === true) producersValidated += 1;
+          if (data.validatedByReferent === true) {
+            producersValidated += 1;
+            validatedProducerDateKeys.set(producerId, new Set(constrainedDateKeys));
+          }
+        });
+
+        const filteredOffers = offerSnap.docs.filter((offerDoc) => {
+          const data = offerDoc.data() as {
+            producerId?: string;
+            productId?: string;
+            saleDateKey?: string;
+            dateIndex?: number;
+            active?: boolean;
+          };
+          if (data.active === false) return false;
+          const resolvedSaleDateKey =
+            typeof data.saleDateKey === "string" && data.saleDateKey
+              ? data.saleDateKey
+              : typeof data.dateIndex === "number"
+                ? distributionDateKeys[data.dateIndex] ?? ""
+                : "";
+          if (!resolvedSaleDateKey || !distributionDateKeys.includes(resolvedSaleDateKey)) return false;
+          if (!hasProducerLinks) return true;
+          const producerId = String(data.producerId ?? "");
+          if (!producerId) return false;
+          const allowedDateKeys = validatedProducerDateKeys.get(producerId);
+          if (!allowedDateKeys) return false;
+          return allowedDateKeys.has(resolvedSaleDateKey);
         });
 
         const productIds = new Set(
-          offerSnap.docs
+          filteredOffers
             .map((docSnap) => String((docSnap.data() as { productId?: string }).productId ?? ""))
             .filter(Boolean),
         );
@@ -481,7 +534,7 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
           {
             producersActive,
             producersValidated,
-            offersCount: offerSnap.size,
+            offersCount: filteredOffers.length,
             productsCount: productIds.size,
             ordersCount,
           } satisfies DistributionMetrics,
@@ -504,16 +557,65 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
 
     const overviewDistributionId = open?.id ?? "";
     if (overviewDistributionId) {
-      const offerSnap = await getDocs(
-        collection(firebaseDb, "distributionDates", overviewDistributionId, "offerItems"),
-      );
+      const [overviewProducerSnap, offerSnap] = await Promise.all([
+        getDocs(collection(firebaseDb, "distributionDates", overviewDistributionId, "producers")),
+        getDocs(collection(firebaseDb, "distributionDates", overviewDistributionId, "offerItems")),
+      ]);
+      const overviewDistributionDateKeys = (
+        (open?.dates ?? [])
+          .slice(0, 3)
+          .map((date) => toDate(date))
+          .filter(Boolean) as Date[]
+      ).map((date) => dateKey(date));
+      const hasProducerLinks = overviewProducerSnap.size > 0;
+      const validatedProducerDateKeys = new Map<string, Set<string>>();
+      overviewProducerSnap.docs.forEach((producerDoc) => {
+        const data = producerDoc.data() as {
+          producerId?: string;
+          active?: boolean;
+          activeDateKeys?: string[];
+          validatedByReferent?: boolean;
+        };
+        const producerId = String(data.producerId ?? producerDoc.id);
+        if (data.active === false || data.validatedByReferent !== true) return;
+        const activeDateKeys = Array.isArray(data.activeDateKeys)
+          ? data.activeDateKeys.filter((key): key is string => typeof key === "string")
+          : [];
+        const constrainedDateKeys = (
+          activeDateKeys.length > 0 ? activeDateKeys : overviewDistributionDateKeys
+        ).filter((key) => overviewDistributionDateKeys.includes(key));
+        if (!constrainedDateKeys.length) return;
+        validatedProducerDateKeys.set(producerId, new Set(constrainedDateKeys));
+      });
+      const filteredOverviewOffers = offerSnap.docs.filter((offerDoc) => {
+        const data = offerDoc.data() as {
+          producerId?: string;
+          saleDateKey?: string;
+          dateIndex?: number;
+          active?: boolean;
+        };
+        if (data.active === false) return false;
+        const resolvedSaleDateKey =
+          typeof data.saleDateKey === "string" && data.saleDateKey
+            ? data.saleDateKey
+            : typeof data.dateIndex === "number"
+              ? overviewDistributionDateKeys[data.dateIndex] ?? ""
+              : "";
+        if (!resolvedSaleDateKey || !overviewDistributionDateKeys.includes(resolvedSaleDateKey)) return false;
+        if (!hasProducerLinks) return true;
+        const producerId = String(data.producerId ?? "");
+        if (!producerId) return false;
+        const allowedDateKeys = validatedProducerDateKeys.get(producerId);
+        if (!allowedDateKeys) return false;
+        return allowedDateKeys.has(resolvedSaleDateKey);
+      });
       const offerProductIds = new Set(
-        offerSnap.docs
+        filteredOverviewOffers
           .map((docSnap) => String((docSnap.data() as { productId?: string }).productId ?? ""))
           .filter(Boolean),
       );
       const offerProducerIds = new Set(
-        offerSnap.docs
+        filteredOverviewOffers
           .map((docSnap) => String((docSnap.data() as { producerId?: string }).producerId ?? ""))
           .filter(Boolean),
       );
@@ -752,7 +854,8 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
         producerId: row.producerId,
         referentId: row.referentId,
         referentName: row.referentName,
-        active: validated,
+        active: row.activeDateKeys.length > 0,
+        activeDateKeys: row.activeDateKeys,
         validatedByReferent: validated,
         validatedAt: validated ? Timestamp.now() : null,
       },
@@ -796,7 +899,7 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
             const sourceDates = Array.isArray(variant.activeDates) ? variant.activeDates : [];
             const activeDates = (
               sourceDates.length > 0 ? sourceDates : saleDateKeys
-            ).filter((key) => saleDateKeys.includes(key));
+            ).filter((key) => saleDateKeys.includes(key) && row.activeDateKeys.includes(key));
             Array.from(new Set(activeDates)).forEach((saleDateKey) => {
               ops.push({
                 type: "set",
@@ -937,7 +1040,7 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
             const sourceDates = Array.isArray(variant.activeDates) ? variant.activeDates : [];
             const activeDates = (
               sourceDates.length > 0 ? sourceDates : distributionDateKeys
-            ).filter((key) => distributionDateKeys.includes(key));
+            ).filter((key) => distributionDateKeys.includes(key) && row.activeDateKeys.includes(key));
             Array.from(new Set(activeDates)).forEach((saleDateKey) => {
               const offerRef = doc(offerItemsRef);
               batch.set(offerRef, {
@@ -965,12 +1068,164 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
     return { offersCreated, producersWithOffers: producersWithOffers.size };
   };
 
+  const sanitizeOfferItemsForDistribution = useCallback(
+    async (distribution: Distribution) => {
+      const distributionDateKeys = (
+        (distribution.dates ?? [])
+          .slice(0, 3)
+          .map((date) => toDate(date))
+          .filter(Boolean) as Date[]
+      ).map((date) => dateKey(date));
+
+      const offerItemsRef = collection(firebaseDb, "distributionDates", distribution.id, "offerItems");
+      const producerLinksRef = collection(firebaseDb, "distributionDates", distribution.id, "producers");
+      const [producerLinksSnap, offersSnap] = await Promise.all([
+        getDocs(producerLinksRef),
+        getDocs(offerItemsRef),
+      ]);
+
+      const hasProducerLinks = producerLinksSnap.size > 0;
+      const producerRules = new Map<string, { active: boolean; validated: boolean; allowedDateKeys: Set<string> }>();
+      producerLinksSnap.docs.forEach((producerDoc) => {
+        const data = producerDoc.data() as {
+          producerId?: string;
+          active?: boolean;
+          activeDateKeys?: string[];
+          validatedByReferent?: boolean;
+        };
+        const producerId = String(data.producerId ?? producerDoc.id);
+        const activeDateKeys = Array.isArray(data.activeDateKeys)
+          ? data.activeDateKeys.filter((key): key is string => typeof key === "string")
+          : [];
+        const constrainedDateKeys = (
+          activeDateKeys.length > 0 ? activeDateKeys : distributionDateKeys
+        ).filter((key) => distributionDateKeys.includes(key));
+        producerRules.set(producerId, {
+          active: data.active !== false,
+          validated: data.validatedByReferent === true,
+          allowedDateKeys: new Set(constrainedDateKeys),
+        });
+      });
+
+      const productIds = Array.from(
+        new Set(
+          offersSnap.docs
+            .map((offerDoc) => String((offerDoc.data() as { productId?: string }).productId ?? ""))
+            .filter(Boolean),
+        ),
+      );
+
+      const productMeta = new Map<string, { producerId: string; variantIds: Set<string> }>();
+      await Promise.all(
+        productIds.map(async (productId) => {
+          const productSnap = await getDoc(doc(firebaseDb, "products", productId));
+          if (!productSnap.exists()) return;
+          const producerId = String((productSnap.data() as { producerId?: string }).producerId ?? "");
+          const variantsSnap = await getDocs(collection(firebaseDb, "products", productId, "variants"));
+          productMeta.set(productId, {
+            producerId,
+            variantIds: new Set(variantsSnap.docs.map((variantDoc) => variantDoc.id)),
+          });
+        }),
+      );
+
+      const seen = new Set<string>();
+      const ops: Array<
+        | { type: "delete"; ref: (typeof offersSnap.docs)[number]["ref"] }
+        | { type: "set"; ref: (typeof offersSnap.docs)[number]["ref"]; data: { producerId: string; saleDateKey: string; active: true } }
+      > = [];
+
+      offersSnap.docs.forEach((offerDoc) => {
+        const data = offerDoc.data() as {
+          producerId?: string;
+          productId?: string;
+          variantId?: string;
+          saleDateKey?: string;
+          dateIndex?: number;
+          active?: boolean;
+        };
+        if (data.active === false) {
+          ops.push({ type: "delete", ref: offerDoc.ref });
+          return;
+        }
+        const productId = String(data.productId ?? "");
+        const variantId = String(data.variantId ?? "");
+        const meta = productMeta.get(productId);
+        if (!meta || !variantId || !meta.variantIds.has(variantId) || !meta.producerId) {
+          ops.push({ type: "delete", ref: offerDoc.ref });
+          return;
+        }
+        const resolvedSaleDateKey =
+          typeof data.saleDateKey === "string" && data.saleDateKey
+            ? data.saleDateKey
+            : typeof data.dateIndex === "number"
+              ? distributionDateKeys[data.dateIndex] ?? ""
+              : "";
+        if (!resolvedSaleDateKey || !distributionDateKeys.includes(resolvedSaleDateKey)) {
+          ops.push({ type: "delete", ref: offerDoc.ref });
+          return;
+        }
+        if (hasProducerLinks) {
+          const rule = producerRules.get(meta.producerId);
+          if (!rule || !rule.active || !rule.validated || !rule.allowedDateKeys.has(resolvedSaleDateKey)) {
+            ops.push({ type: "delete", ref: offerDoc.ref });
+            return;
+          }
+        }
+        const dedupeKey = `${meta.producerId}|${productId}|${variantId}|${resolvedSaleDateKey}`;
+        if (seen.has(dedupeKey)) {
+          ops.push({ type: "delete", ref: offerDoc.ref });
+          return;
+        }
+        seen.add(dedupeKey);
+
+        if (
+          String(data.producerId ?? "") !== meta.producerId ||
+          data.saleDateKey !== resolvedSaleDateKey ||
+          data.active !== true
+        ) {
+          ops.push({
+            type: "set",
+            ref: offerDoc.ref,
+            data: {
+              producerId: meta.producerId,
+              saleDateKey: resolvedSaleDateKey,
+              active: true,
+            },
+          });
+        }
+      });
+
+      const MAX_BATCH_OPS = 380;
+      for (let index = 0; index < ops.length; index += MAX_BATCH_OPS) {
+        const batch = writeBatch(firebaseDb);
+        const chunk = ops.slice(index, index + MAX_BATCH_OPS);
+        chunk.forEach((op) => {
+          if (op.type === "delete") {
+            batch.delete(op.ref);
+            return;
+          }
+          batch.set(op.ref, op.data, { merge: true });
+        });
+        await batch.commit();
+      }
+      return { touched: ops.length };
+    },
+    [],
+  );
+
   const openSale = async () => {
     if (!targetDistribution || !canOpen) return;
     setSaving(true);
     setMessage("");
     try {
       const offerSync = await rebuildOffersForValidatedProducers(targetDistribution.id, saleDateKeys);
+      const otherOpenDistributions = distributions.filter(
+        (distribution) => isOpenStatus(distribution.status) && distribution.id !== targetDistribution.id,
+      );
+      for (const distribution of otherOpenDistributions) {
+        await sanitizeOfferItemsForDistribution(distribution);
+      }
 
       const batch = writeBatch(firebaseDb);
       const firstDate = toDate(targetDistribution.dates?.[0]);
@@ -981,10 +1236,8 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
         closeDate.setHours(22, 0, 0, 0);
         closeAt = Timestamp.fromDate(closeDate);
       }
-      distributions.forEach((distribution) => {
-        if (isOpenStatus(distribution.status) && distribution.id !== targetDistribution.id) {
-          batch.update(doc(firebaseDb, "distributionDates", distribution.id), { status: "finished" });
-        }
+      otherOpenDistributions.forEach((distribution) => {
+        batch.update(doc(firebaseDb, "distributionDates", distribution.id), { status: "finished" });
       });
       batch.update(doc(firebaseDb, "distributionDates", targetDistribution.id), {
         status: "open",
@@ -1004,12 +1257,16 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
   const closeSale = async () => {
     if (!openDistribution || !canManageLifecycle) return;
     setSaving(true);
-    await updateDoc(doc(firebaseDb, "distributionDates", openDistribution.id), {
-      status: "finished",
-      closedAt: Timestamp.now(),
-    });
-    await load();
-    setSaving(false);
+    try {
+      await sanitizeOfferItemsForDistribution(openDistribution);
+      await updateDoc(doc(firebaseDb, "distributionDates", openDistribution.id), {
+        status: "finished",
+        closedAt: Timestamp.now(),
+      });
+      await load();
+    } finally {
+      setSaving(false);
+    }
   };
 
   const goToStep = (nextIndex: number) => {
@@ -1072,15 +1329,6 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
                 disabled={saving || !canOpen}
               >
                 Ouvrir la vente
-              </button>
-            ) : null}
-            {isCurrentMode && isAdmin && openDistribution ? (
-              <button
-                className="rounded-md bg-forest px-5 py-2 text-sm font-semibold text-white disabled:opacity-50"
-                onClick={() => openFlow(rows.map((row) => row.producerId))}
-                disabled={saving || editingLocked || rows.length === 0}
-              >
-                Modifier la vente en cours
               </button>
             ) : null}
           </div>
@@ -1283,28 +1531,7 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
               </p>
             ) : null}
           </div>
-          <div className="flex flex-wrap gap-2">
-            {!isCurrentMode && isReferent ? (
-              <button
-                className="rounded-md bg-forest px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
-                onClick={() =>
-                  openFlow(rows.filter((row) => row.referentId === effectiveMemberId).map((row) => row.producerId))
-                }
-                disabled={editingLocked}
-              >
-                Gerer mes producteurs pour la vente
-              </button>
-            ) : null}
-            {(isCurrentMode ? isAdmin : canManageAdmin) ? (
-              <button
-                className="rounded-md border border-ink/25 px-4 py-2 text-sm font-semibold disabled:opacity-50"
-                onClick={() => openFlow(rows.map((row) => row.producerId))}
-                disabled={editingLocked}
-              >
-                {isCurrentMode ? "Modifier les producteurs de la vente" : "Gerer tous les producteurs"}
-              </button>
-            ) : null}
-          </div>
+          <div className="flex flex-wrap gap-2" />
         </div>
 
         <div className="mt-3 grid gap-2 md:grid-cols-3">
@@ -1335,9 +1562,6 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
               {groups.map((group) =>
                 group.rows.map((row, index) => {
                   const canEdit = (isCurrentMode ? isAdmin : canManageAdmin) && !editingLocked;
-                  const myProducerIds = rows
-                    .filter((item) => item.referentId === effectiveMemberId)
-                    .map((item) => item.producerId);
                   return (
                     <tr key={row.producerId} className={`border-b border-ink/10 ${group.mine ? "bg-forest/10" : "bg-white"}`}>
                       <td className="px-3 py-2 text-xs text-ink/70">{index === 0 ? group.referentName : null}</td>
@@ -1364,20 +1588,6 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
                           >
                             Gérer
                           </button>
-                          {isReferent && row.referentId === effectiveMemberId ? (
-                            <button
-                              className="rounded-md border border-ink/25 px-3 py-1 text-xs font-semibold disabled:opacity-50"
-                              onClick={() =>
-                                openFlow(
-                                  myProducerIds,
-                                  myProducerIds.findIndex((id) => id === row.producerId),
-                                )
-                              }
-                              disabled={editingLocked}
-                            >
-                              Gérer tous mes producteurs
-                            </button>
-                          ) : null}
                           {canEdit ? (
                             <button
                               className="rounded-md border border-ink/25 px-3 py-1 text-xs font-semibold"
@@ -1486,7 +1696,7 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
           <div className="flex flex-wrap items-start justify-between gap-3 border-b border-ink/20 pb-4">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">
-                Gerer mes producteurs pour la vente
+                Gerer un producteur
               </p>
               <h4 className="mt-1 font-serif text-2xl">{currentProducer?.name ?? "Producteur"}</h4>
               <p className="text-sm text-ink/70">
@@ -1678,5 +1888,6 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
     </div>
   );
 }
+
 
 

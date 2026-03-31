@@ -3,8 +3,8 @@
 import { useMemo } from "react";
 import { useParams } from "next/navigation";
 import { useAuth } from "@/components/auth/AuthProvider";
+import AnnualCalendarEditor from "@/components/admin/AnnualCalendarEditor";
 import CollectionEditor from "@/components/admin/CollectionEditor";
-import DistributionsEditor from "@/components/admin/DistributionsEditor";
 import MembersEditor from "@/components/admin/MembersEditor";
 import ProductsEditor from "@/components/admin/ProductsEditor";
 import ProducersEditor from "@/components/admin/ProducersEditor";
@@ -140,18 +140,6 @@ const COLLECTIONS: Record<
       { label: "Date d'envoi", path: "stats.sentAt", type: "datetime" },
     ],
   },
-  documents: {
-    title: "Documents PDF",
-    description: "Historique des exports et chemins Storage.",
-    fields: [
-      { label: "Type", path: "type", type: "text", table: true },
-      { label: "Distribution", path: "distributionId", type: "text", table: true },
-      { label: "Producteur ID", path: "producerId", type: "text" },
-      { label: "Chemin Storage", path: "storagePath", type: "text" },
-      { label: "Généré le", path: "generatedAt", type: "datetime" },
-      { label: "Généré par", path: "generatedBy", type: "text" },
-    ],
-  },
   settings: {
     title: "Paramètres",
     description: "Configurations globales (par doc).",
@@ -180,7 +168,6 @@ const COLLECTION_ROLES: Record<string, Array<"admin" | "referent">> = {
   orders: ["admin", "referent"],
   invites: ["admin", "referent"],
   messages: ["admin", "referent"],
-  documents: ["admin", "referent"],
   catalogues: ["admin"],
   distributionDates: ["admin"],
   settings: ["admin"],
@@ -257,14 +244,7 @@ export default function AdminCollectionPage() {
   }
 
   if (key === "distributionDates") {
-    return (
-      <DistributionsEditor
-        collectionName={key}
-        title={config.title}
-        description={config.description}
-        fields={config.fields}
-      />
-    );
+    return <AnnualCalendarEditor />;
   }
 
   if (key === "orders") {
