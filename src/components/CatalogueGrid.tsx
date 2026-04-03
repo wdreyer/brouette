@@ -5,6 +5,11 @@ import { useEffect, useMemo, useState } from "react";
 import { collection, getDocs } from "firebase/firestore";
 import { firebaseDb } from "@/lib/firebase/client";
 import { pickOpenDistribution } from "@/lib/distributions";
+import {
+  buildValidatedProducerDateMap,
+  filterVisibleOffers,
+  type ProducerLinkLike,
+} from "@/lib/offerVisibility";
 
 type Product = {
   id: string;
@@ -141,69 +146,24 @@ export default function CatalogueGrid({ hideWhenClosed = false }: { hideWhenClos
         setCategoryMap(catMap);
 
         const activeProducerDocs = activeProducersSnap?.docs ?? [];
-        setHasProducerLinks(activeProducerDocs.length > 0);
+        const producerLinks: ProducerLinkLike[] = activeProducerDocs.map((docSnap) => ({
+          id: docSnap.id,
+          ...(docSnap.data() as Omit<ProducerLinkLike, "id">),
+        }));
+        setHasProducerLinks(producerLinks.length > 0);
         const openDateKeys = (openDist?.dates ?? []).slice(0, 3).map((date) => dateKey(date.toDate()));
-        const activeIds = activeProducerDocs.flatMap((docSnap) => {
-          const data = docSnap.data() as {
-            producerId?: string;
-            active?: boolean;
-            activeDateKeys?: string[];
-            validatedByReferent?: boolean;
-          };
-          if (data.active === false || data.validatedByReferent !== true) return [];
-          const producerId = String(data.producerId ?? docSnap.id);
-          if (!producerId) return [];
-          const activeDateKeys = Array.isArray(data.activeDateKeys)
-            ? data.activeDateKeys.filter((key): key is string => typeof key === "string")
-            : [];
-          const constrainedDateKeys = (
-            activeDateKeys.length > 0 ? activeDateKeys : openDateKeys
-          ).filter((key) => openDateKeys.includes(key));
-          return constrainedDateKeys.length > 0 ? [producerId] : [];
-        });
-        setActiveProducerIds(activeIds);
+        const validatedProducerDateMap = buildValidatedProducerDateMap(producerLinks, openDateKeys);
+        setActiveProducerIds(Array.from(validatedProducerDateMap.keys()));
 
         const prices: Record<string, { min: number; max: number }> = {};
         const availability: Record<string, { dateKeys: string[]; hasLimit?: boolean; minLimit?: number }> = {};
-        const activeProducerDateMap: Record<string, Set<string>> = {};
-        if (activeProducerDocs.length > 0) {
-          activeProducerDocs.forEach((docSnap) => {
-            const data = docSnap.data() as {
-              producerId?: string;
-              active?: boolean;
-              activeDateKeys?: string[];
-              validatedByReferent?: boolean;
-            };
-            if (data.active === false || data.validatedByReferent !== true) return;
-            const producerId = String(data.producerId ?? docSnap.id);
-            if (!producerId) return;
-            const activeDateKeys = Array.isArray(data.activeDateKeys)
-              ? data.activeDateKeys.filter((key): key is string => typeof key === "string")
-              : [];
-            const constrainedDateKeys = (
-              activeDateKeys.length > 0 ? activeDateKeys : openDateKeys
-            ).filter((key) => openDateKeys.includes(key));
-            if (!constrainedDateKeys.length) return;
-            activeProducerDateMap[producerId] = new Set(constrainedDateKeys);
-          });
-        }
 
         const offers = offerSnap?.docs.map((docSnap) => docSnap.data() as OfferItem) ?? [];
-        offers.forEach((offer) => {
-          if (offer.active === false) return;
-          if (!offer.productId) return;
-          const producerId = String(offer.producerId ?? "");
-          const producerDateKeys = activeProducerDateMap[producerId];
-          if (activeProducerDocs.length > 0 && (!producerId || !producerDateKeys)) return;
+        const visibleOffers = filterVisibleOffers(offers, producerLinks, openDateKeys);
+        visibleOffers.forEach((offer) => {
           const entry = availability[offer.productId] ?? { dateKeys: [] };
-          const offerDateKey =
-            typeof offer.saleDateKey === "string" && offer.saleDateKey
-              ? offer.saleDateKey
-              : typeof offer.dateIndex === "number" && openDateKeys[offer.dateIndex]
-                ? openDateKeys[offer.dateIndex]
-                : "";
+          const offerDateKey = offer.resolvedSaleDateKey;
           if (!offerDateKey || !openDateKeys.includes(offerDateKey)) return;
-          if (producerDateKeys && !producerDateKeys.has(offerDateKey)) return;
           if (offerDateKey && !entry.dateKeys.includes(offerDateKey)) {
             entry.dateKeys.push(offerDateKey);
           }

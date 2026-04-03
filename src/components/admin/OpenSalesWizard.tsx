@@ -28,6 +28,12 @@ import {
   isPlannedStatus,
   pickOpenDistribution,
 } from "@/lib/distributions";
+import {
+  buildActiveProducerDateMap,
+  buildValidatedProducerDateMap,
+  filterVisibleOffers,
+  type ProducerLinkLike,
+} from "@/lib/offerVisibility";
 
 type FireDate = { toDate?: () => Date };
 
@@ -458,59 +464,27 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
             .filter(Boolean) as Date[]
         ).map((date) => dateKey(date));
 
-        let producersActive = 0;
-        let producersValidated = 0;
-        const hasProducerLinks = producersLinkSnap.size > 0;
-        const validatedProducerDateKeys = new Map<string, Set<string>>();
-        producersLinkSnap.docs.forEach((linkDoc) => {
-          const data = linkDoc.data() as {
-            active?: boolean;
-            activeDateKeys?: string[];
-            validatedByReferent?: boolean;
-          };
-          const producerId = String((data as { producerId?: string }).producerId ?? linkDoc.id);
-          const activeDateKeys = Array.isArray(data.activeDateKeys)
-            ? data.activeDateKeys.filter((key): key is string => typeof key === "string")
-            : [];
-          const constrainedDateKeys = activeDateKeys.filter((key) =>
-            distributionDateKeys.includes(key),
-          );
-          const isEffectivelyActive = data.active !== false && constrainedDateKeys.length > 0;
-          if (!isEffectivelyActive) return;
-          producersActive += 1;
-          if (data.validatedByReferent === true) {
-            producersValidated += 1;
-            validatedProducerDateKeys.set(producerId, new Set(constrainedDateKeys));
-          }
-        });
-
-        const filteredOffers = offerSnap.docs.filter((offerDoc) => {
-          const data = offerDoc.data() as {
+        const producerLinks: ProducerLinkLike[] = producersLinkSnap.docs.map((linkDoc) => ({
+          id: linkDoc.id,
+          ...(linkDoc.data() as Omit<ProducerLinkLike, "id">),
+        }));
+        const producersActive = buildActiveProducerDateMap(producerLinks, distributionDateKeys).size;
+        const producersValidated = buildValidatedProducerDateMap(producerLinks, distributionDateKeys).size;
+        const filteredOffers = filterVisibleOffers(
+          offerSnap.docs.map((offerDoc) => offerDoc.data() as {
             producerId?: string;
             productId?: string;
             saleDateKey?: string;
             dateIndex?: number;
             active?: boolean;
-          };
-          if (data.active === false) return false;
-          const resolvedSaleDateKey =
-            typeof data.saleDateKey === "string" && data.saleDateKey
-              ? data.saleDateKey
-              : typeof data.dateIndex === "number"
-                ? distributionDateKeys[data.dateIndex] ?? ""
-                : "";
-          if (!resolvedSaleDateKey || !distributionDateKeys.includes(resolvedSaleDateKey)) return false;
-          if (!hasProducerLinks) return false;
-          const producerId = String(data.producerId ?? "");
-          if (!producerId) return false;
-          const allowedDateKeys = validatedProducerDateKeys.get(producerId);
-          if (!allowedDateKeys) return false;
-          return allowedDateKeys.has(resolvedSaleDateKey);
-        });
+          }),
+          producerLinks,
+          distributionDateKeys,
+        );
 
         const productIds = new Set(
           filteredOffers
-            .map((docSnap) => String((docSnap.data() as { productId?: string }).productId ?? ""))
+            .map((offer) => String(offer.productId ?? ""))
             .filter(Boolean),
         );
 
@@ -556,56 +530,29 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
           .map((date) => toDate(date))
           .filter(Boolean) as Date[]
       ).map((date) => dateKey(date));
-      const hasProducerLinks = overviewProducerSnap.size > 0;
-      const validatedProducerDateKeys = new Map<string, Set<string>>();
-      overviewProducerSnap.docs.forEach((producerDoc) => {
-        const data = producerDoc.data() as {
-          producerId?: string;
-          active?: boolean;
-          activeDateKeys?: string[];
-          validatedByReferent?: boolean;
-        };
-        const producerId = String(data.producerId ?? producerDoc.id);
-        if (data.active === false || data.validatedByReferent !== true) return;
-        const activeDateKeys = Array.isArray(data.activeDateKeys)
-          ? data.activeDateKeys.filter((key): key is string => typeof key === "string")
-          : [];
-        const constrainedDateKeys = activeDateKeys.filter((key) =>
-          overviewDistributionDateKeys.includes(key),
-        );
-        if (!constrainedDateKeys.length) return;
-        validatedProducerDateKeys.set(producerId, new Set(constrainedDateKeys));
-      });
-      const filteredOverviewOffers = offerSnap.docs.filter((offerDoc) => {
-        const data = offerDoc.data() as {
+      const overviewProducerLinks: ProducerLinkLike[] = overviewProducerSnap.docs.map((producerDoc) => ({
+        id: producerDoc.id,
+        ...(producerDoc.data() as Omit<ProducerLinkLike, "id">),
+      }));
+      const filteredOverviewOffers = filterVisibleOffers(
+        offerSnap.docs.map((offerDoc) => offerDoc.data() as {
           producerId?: string;
           saleDateKey?: string;
           dateIndex?: number;
           active?: boolean;
-        };
-        if (data.active === false) return false;
-        const resolvedSaleDateKey =
-          typeof data.saleDateKey === "string" && data.saleDateKey
-            ? data.saleDateKey
-            : typeof data.dateIndex === "number"
-              ? overviewDistributionDateKeys[data.dateIndex] ?? ""
-              : "";
-        if (!resolvedSaleDateKey || !overviewDistributionDateKeys.includes(resolvedSaleDateKey)) return false;
-        if (!hasProducerLinks) return false;
-        const producerId = String(data.producerId ?? "");
-        if (!producerId) return false;
-        const allowedDateKeys = validatedProducerDateKeys.get(producerId);
-        if (!allowedDateKeys) return false;
-        return allowedDateKeys.has(resolvedSaleDateKey);
-      });
+          productId?: string;
+        }),
+        overviewProducerLinks,
+        overviewDistributionDateKeys,
+      );
       const offerProductIds = new Set(
         filteredOverviewOffers
-          .map((docSnap) => String((docSnap.data() as { productId?: string }).productId ?? ""))
+          .map((offer) => String(offer.productId ?? ""))
           .filter(Boolean),
       );
       const offerProducerIds = new Set(
         filteredOverviewOffers
-          .map((docSnap) => String((docSnap.data() as { producerId?: string }).producerId ?? ""))
+          .map((offer) => String(offer.producerId ?? ""))
           .filter(Boolean),
       );
       const overviewOrders = orders.filter(
@@ -733,7 +680,7 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
   );
   const showCurrentSection = isOverviewMode || isCurrentMode;
   const showNextSection = isOverviewMode || isNextMode;
-  const showValidationSection = isNextMode || (isCurrentMode && isAdmin);
+  const showValidationSection = Boolean(targetDistribution) && (isNextMode || (isCurrentMode && isAdmin));
   const showUpcomingSection = isOverviewMode;
   const showHistorySection = isHistoryMode;
 
@@ -755,7 +702,7 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
       return;
     }
     if (!producerIds.length) {
-      setMessage("Aucun producteur Ã  gÃ©rer pour cette vue.");
+      setMessage("Aucun producteur à gérer pour cette vue.");
       return;
     }
     setMessage("");
@@ -1336,7 +1283,7 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
             Commandes: <span className="font-semibold">{saleOverview.orderCount}</span>
           </div>
           <div className="rounded-sm border border-forest/30 bg-forest/10 px-3 py-2 text-sm">
-            AdhÃ©rents: <span className="font-semibold">{saleOverview.memberCount}</span>
+            Adhérents: <span className="font-semibold">{saleOverview.memberCount}</span>
           </div>
           <div className="rounded-sm border border-forest/30 bg-forest/10 px-3 py-2 text-sm">
             CA: <span className="font-semibold">{money(saleOverview.revenue)} EUR</span>
@@ -1541,7 +1488,7 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
           <table className="min-w-full text-left text-sm">
             <thead className="border-b border-ink/20 bg-ink text-xs uppercase tracking-[0.18em] text-stone">
               <tr>
-                <th className="px-3 py-2">RÃ©fÃ©rent</th>
+                <th className="px-3 py-2">Référent</th>
                 <th className="px-3 py-2">Producteur</th>
                 <th className="px-3 py-2">Produits</th>
                 <th className="px-3 py-2">Validation</th>
@@ -1552,7 +1499,6 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
             <tbody>
               {groups.map((group) =>
                 group.rows.map((row, index) => {
-                  const canEdit = (isCurrentMode ? isAdmin : canManageAdmin) && !editingLocked;
                   return (
                     <tr key={row.producerId} className={`border-b border-ink/10 ${group.mine ? "bg-forest/10" : "bg-white"}`}>
                       <td className="px-3 py-2 text-xs text-ink/70">{index === 0 ? group.referentName : null}</td>
@@ -1566,7 +1512,7 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
                               : "border border-ink/20 bg-ink/5 text-ink/70"
                           }`}
                         >
-                          {row.validatedByReferent ? "ValidÃ©" : "Ã€ valider"}
+                          {row.validatedByReferent ? "Validé" : "À valider"}
                         </span>
                       </td>
                       <td className="px-3 py-2 text-xs text-ink/60">{row.validatedAtLabel}</td>
@@ -1577,16 +1523,8 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
                             onClick={() => openFlow([row.producerId])}
                             disabled={editingLocked}
                           >
-                            GÃ©rer
+                            Gérer
                           </button>
-                          {canEdit ? (
-                            <button
-                              className="rounded-md border border-ink/25 px-3 py-1 text-xs font-semibold"
-                              onClick={() => setValidation(row, !row.validatedByReferent).catch(() => undefined)}
-                            >
-                              {row.validatedByReferent ? "Retirer validation" : "Valider"}
-                            </button>
-                          ) : null}
                         </div>
                       </td>
                     </tr>
@@ -1653,7 +1591,7 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
                         </span>
                       ))
                     ) : (
-                      <span className="text-xs text-ink/65">ðŸ“… Dates non renseignÃ©es</span>
+                      <span className="text-xs text-ink/65">📅 Dates non renseignées</span>
                     )}
                   </div>
                   <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
