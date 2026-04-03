@@ -5,7 +5,15 @@ import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { collection, getDocs } from "firebase/firestore";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { firebaseDb } from "@/lib/firebase/client";
-import { distributionLabel, isOpenStatus, pickOpenDistribution } from "@/lib/distributions";
+import {
+  distributionStatusLabel,
+  distributionLabel,
+  isOpenStatus,
+  isPlannedStatus,
+  pickOpenDistribution,
+  resolveDistributionStatus,
+  type DistributionStatusKey,
+} from "@/lib/distributions";
 
 type Distribution = {
   id: string;
@@ -63,6 +71,7 @@ type CalendarRow = {
   id: string;
   label: string;
   status: string;
+  statusKey: DistributionStatusKey;
   dates: Date[];
   activeProducers: number;
   validatedProducers: number;
@@ -147,13 +156,6 @@ function daysUntil(date?: Date | null) {
   if (!date) return null;
   const now = new Date();
   return Math.ceil((date.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-}
-
-function statusLabel(status?: string) {
-  const normalized = String(status ?? "").toLowerCase();
-  if (normalized === "open") return "Ouverte";
-  if (normalized === "finished" || normalized === "fermee") return "Fermee";
-  return "Planifiee";
 }
 
 function isCancelledOrder(status?: string | null) {
@@ -316,9 +318,7 @@ export default function AdminDashboard({
 
       const open = pickOpenDistribution(distributions);
       setOpenDistribution(open);
-      const nextPlanned =
-        distributions.find((item) => !isOpenStatus(item.status) && String(item.status ?? "").toLowerCase() !== "finished") ??
-        null;
+      const nextPlanned = distributions.find((item) => isPlannedStatus(item.status)) ?? null;
       setNextDistribution(nextPlanned);
       const targetDistribution = open ?? nextPlanned;
 
@@ -532,7 +532,8 @@ export default function AdminDashboard({
           return {
             id: distribution.id,
             label: distributionLabel(distribution),
-            status: statusLabel(distribution.status),
+            status: distributionStatusLabel(distribution.status),
+            statusKey: resolveDistributionStatus(distribution.status),
             dates: (distribution.dates ?? []).slice(0, 3).map((date) => toDate(date)).filter(Boolean) as Date[],
             activeProducers: activeRows.length,
             validatedProducers: producerRows.filter((row) => row.validatedByReferent).length,
@@ -573,7 +574,7 @@ export default function AdminDashboard({
 
   const visualCalendarRows = useMemo(() => {
     return [...calendarRows]
-      .filter((row) => row.status !== "Fermee")
+      .filter((row) => row.statusKey === "planned")
       .sort((a, b) => {
         const aDate = a.dates[0] ?? new Date(0);
         const bDate = b.dates[0] ?? new Date(0);
@@ -608,7 +609,7 @@ export default function AdminDashboard({
               <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-forest">Mes producteurs</p>
               <p className="mt-1 text-sm text-ink/80">
                 {activeDistribution
-                  ? `${distributionLabel(activeDistribution)} - ${statusLabel(activeDistribution.status)}`
+                  ? `${distributionLabel(activeDistribution)} - ${distributionStatusLabel(activeDistribution.status)}`
                   : "Aucune distribution planifiee."}
               </p>
             </div>
@@ -671,7 +672,7 @@ export default function AdminDashboard({
             <h2 className="mt-1 font-serif text-3xl">{openDistribution ? "Vente ouverte" : "Vente fermee"}</h2>
             <p className="mt-2 text-sm text-ink/75">
               {activeDistribution
-                ? `${distributionLabel(activeDistribution)} - ${statusLabel(activeDistribution.status)}`
+                ? `${distributionLabel(activeDistribution)} - ${distributionStatusLabel(activeDistribution.status)}`
                 : "Aucune distribution planifiee."}
             </p>
             {openDistribution ? (
@@ -773,10 +774,12 @@ export default function AdminDashboard({
                   </div>
                   <span
                     className={`rounded-full px-3 py-1 text-xs font-semibold ${
-                      row.status === "Ouverte"
+                      row.statusKey === "open"
                         ? "bg-forest/15 text-forest"
-                        : row.status === "Fermee"
+                        : row.statusKey === "finished"
                           ? "bg-ink/10 text-ink/70"
+                          : row.statusKey === "archived"
+                            ? "bg-ink/10 text-ink/55"
                           : "bg-honey/20 text-ink"
                     }`}
                   >

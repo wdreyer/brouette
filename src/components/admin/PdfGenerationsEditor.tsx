@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { collection, getDocs, orderBy, query } from "firebase/firestore";
 import { firebaseDb } from "@/lib/firebase/client";
-import { distributionLabel } from "@/lib/distributions";
+import { distributionLabel, resolveDistributionStatus } from "@/lib/distributions";
 
 type Order = {
   id: string;
@@ -68,6 +68,25 @@ type ProducerRow = {
   totalQuantity: number;
   totalAmount: number;
   lines: ProductLineAgg[];
+};
+
+type ProducerDateRow = {
+  dateKey: string;
+  dateLabel: string;
+  ordersCount: number;
+  totalQuantity: number;
+  totalAmount: number;
+  lines: ProductLineAgg[];
+};
+
+type ProducerDistributionRow = {
+  producerId: string;
+  producerName: string;
+  ordersCount: number;
+  totalQuantity: number;
+  totalAmount: number;
+  lines: ProductLineAgg[];
+  dateRows: ProducerDateRow[];
 };
 
 type ProducerMatrixColumn = {
@@ -149,18 +168,8 @@ function memberLabel(member?: Member | null, fallback = "Adherent inconnu") {
 }
 
 function isStatusOpenOrFinished(status?: string) {
-  const value = String(status ?? "").toLowerCase().trim();
-  return (
-    value === "open" ||
-    value === "ouverte" ||
-    value === "ouvertes" ||
-    value === "finished" ||
-    value === "finie" ||
-    value === "fini" ||
-    value === "fermee" ||
-    value === "ferme" ||
-    value === "closed"
-  );
+  const value = resolveDistributionStatus(status);
+  return value === "open" || value === "finished";
 }
 
 async function ensureLogoDataUrl() {
@@ -198,9 +207,8 @@ export default function PdfGenerationsEditor() {
   const [producersById, setProducersById] = useState<Record<string, Producer>>({});
   const [distributions, setDistributions] = useState<Distribution[]>([]);
 
-  const [selectedDistributionId, setSelectedDistributionId] = useState("all");
+  const [selectedDistributionId, setSelectedDistributionId] = useState("");
   const [selectedBdcDistributionId, setSelectedBdcDistributionId] = useState("all");
-  const [selectedDateKey, setSelectedDateKey] = useState("");
   const [previewProducerId, setPreviewProducerId] = useState<string | null>(null);
   const [previewBdcDateKey, setPreviewBdcDateKey] = useState<string | null>(null);
 
@@ -282,14 +290,6 @@ export default function PdfGenerationsEditor() {
     return Array.from(map.values()).sort((a, b) => a.key.localeCompare(b.key));
   }, [distributions]);
 
-  const filteredDateOptions = useMemo(
-    () =>
-      selectedDistributionId === "all"
-        ? dateOptions
-        : dateOptions.filter((date) => date.distributionId === selectedDistributionId),
-    [dateOptions, selectedDistributionId],
-  );
-
   const bdcFilteredDateOptions = useMemo(
     () =>
       selectedBdcDistributionId === "all"
@@ -299,10 +299,12 @@ export default function PdfGenerationsEditor() {
   );
 
   useEffect(() => {
-    if (selectedDistributionId === "all") return;
-    const exists = distributions.some((distribution) => distribution.id === selectedDistributionId);
-    if (!exists) {
-      setSelectedDistributionId("all");
+    if (!distributions.length) {
+      setSelectedDistributionId("");
+      return;
+    }
+    if (!selectedDistributionId || !distributions.some((distribution) => distribution.id === selectedDistributionId)) {
+      setSelectedDistributionId(distributions[0].id);
     }
   }, [distributions, selectedDistributionId]);
 
@@ -313,16 +315,6 @@ export default function PdfGenerationsEditor() {
       setSelectedBdcDistributionId("all");
     }
   }, [distributions, selectedBdcDistributionId]);
-
-  useEffect(() => {
-    if (filteredDateOptions.length === 0) {
-      setSelectedDateKey("");
-      return;
-    }
-    if (!filteredDateOptions.some((date) => date.key === selectedDateKey)) {
-      setSelectedDateKey(filteredDateOptions[0].key);
-    }
-  }, [filteredDateOptions, selectedDateKey]);
 
   const producerAggByDate = useMemo(() => {
     const byDate = new Map<string, Map<string, ProducerDateAgg>>();
@@ -379,9 +371,14 @@ export default function PdfGenerationsEditor() {
     return byDate;
   }, [orders, orderItemsByOrder]);
 
-  const selectedDateOption = useMemo(
-    () => filteredDateOptions.find((date) => date.key === selectedDateKey) ?? null,
-    [filteredDateOptions, selectedDateKey],
+  const selectedDistribution = useMemo(
+    () => distributions.find((distribution) => distribution.id === selectedDistributionId) ?? null,
+    [distributions, selectedDistributionId],
+  );
+
+  const selectedDistributionDates = useMemo(
+    () => dateOptions.filter((date) => date.distributionId === selectedDistributionId),
+    [dateOptions, selectedDistributionId],
   );
 
   const buildProducerRowsForDate = (targetDateKey: string) => {
@@ -408,6 +405,106 @@ export default function PdfGenerationsEditor() {
     });
 
     return rows.sort((a, b) => a.producerName.localeCompare(b.producerName, "fr", { sensitivity: "base" }));
+  };
+
+  const buildProducerRowsForDistribution = (dates: DateOption[]) => {
+    const byProducer = new Map<
+      string,
+      {
+        producerName: string;
+        orderIds: Set<string>;
+        totalQuantity: number;
+        totalAmount: number;
+        lines: Map<string, ProductLineAgg>;
+        byDate: Map<string, ProducerDateRow>;
+      }
+    >();
+
+    dates.forEach((date) => {
+      const byProducerForDate = producerAggByDate.get(date.key);
+      if (!byProducerForDate) return;
+
+      byProducerForDate.forEach((agg, producerId) => {
+        if (!byProducer.has(producerId)) {
+          const producerName =
+            producerId === "unknown" ? "Producteur inconnu" : producersById[producerId]?.name ?? producerId;
+          byProducer.set(producerId, {
+            producerName,
+            orderIds: new Set<string>(),
+            totalQuantity: 0,
+            totalAmount: 0,
+            lines: new Map<string, ProductLineAgg>(),
+            byDate: new Map<string, ProducerDateRow>(),
+          });
+        }
+        const bucket = byProducer.get(producerId)!;
+
+        agg.orderIds.forEach((orderId) => bucket.orderIds.add(orderId));
+        bucket.totalQuantity += agg.totalQuantity;
+        bucket.totalAmount += agg.totalAmount;
+
+        agg.lines.forEach((line, lineKey) => {
+          if (!bucket.lines.has(lineKey)) {
+            bucket.lines.set(lineKey, { ...line });
+            return;
+          }
+          const current = bucket.lines.get(lineKey)!;
+          current.quantity += line.quantity;
+          current.lineTotal += line.lineTotal;
+        });
+
+        const dateLines = Array.from(agg.lines.values())
+          .map((line) => ({ ...line }))
+          .sort((a, b) => {
+            const left = `${a.label} ${a.variantLabel}`.trim();
+            const right = `${b.label} ${b.variantLabel}`.trim();
+            return left.localeCompare(right, "fr", { sensitivity: "base" });
+          });
+
+        bucket.byDate.set(date.key, {
+          dateKey: date.key,
+          dateLabel: date.label,
+          ordersCount: agg.orderIds.size,
+          totalQuantity: agg.totalQuantity,
+          totalAmount: agg.totalAmount,
+          lines: dateLines,
+        });
+      });
+    });
+
+    return Array.from(byProducer.entries())
+      .map(([producerId, bucket]) => {
+        const lines = Array.from(bucket.lines.values()).sort((a, b) => {
+          const left = `${a.label} ${a.variantLabel}`.trim();
+          const right = `${b.label} ${b.variantLabel}`.trim();
+          return left.localeCompare(right, "fr", { sensitivity: "base" });
+        });
+        const dateRows = dates
+          .map(
+            (date) =>
+              bucket.byDate.get(date.key) ?? {
+                dateKey: date.key,
+                dateLabel: date.label,
+                ordersCount: 0,
+                totalQuantity: 0,
+                totalAmount: 0,
+                lines: [],
+              },
+          )
+          .sort((a, b) => a.dateKey.localeCompare(b.dateKey));
+
+        return {
+          producerId,
+          producerName: bucket.producerName,
+          ordersCount: bucket.orderIds.size,
+          totalQuantity: bucket.totalQuantity,
+          totalAmount: bucket.totalAmount,
+          lines,
+          dateRows,
+        } satisfies ProducerDistributionRow;
+      })
+      .filter((row) => row.totalQuantity > 0)
+      .sort((a, b) => a.producerName.localeCompare(b.producerName, "fr", { sensitivity: "base" }));
   };
 
   const buildProducerMatrixForDate = (targetDateKey: string): ProducerMatrix[] => {
@@ -494,9 +591,9 @@ export default function PdfGenerationsEditor() {
   };
 
   const producerRows = useMemo(() => {
-    if (!selectedDateOption) return [] as ProducerRow[];
-    return buildProducerRowsForDate(selectedDateOption.key);
-  }, [producerAggByDate, producersById, selectedDateOption]);
+    if (!selectedDistributionDates.length) return [] as ProducerDistributionRow[];
+    return buildProducerRowsForDistribution(selectedDistributionDates);
+  }, [producerAggByDate, producersById, selectedDistributionDates]);
 
   const previewRow = useMemo(
     () => producerRows.find((row) => row.producerId === previewProducerId) ?? null,
@@ -532,7 +629,11 @@ export default function PdfGenerationsEditor() {
     [previewBdcDateOption, producerAggByDate, producersById, orders, orderItemsByOrder, membersById],
   );
 
-  const exportProducerDatePdf = async (date: DateOption, row: ProducerRow) => {
+  const exportProducerDistributionPdf = async (
+    distribution: Distribution,
+    distributionDates: DateOption[],
+    row: ProducerDistributionRow,
+  ) => {
     const [{ jsPDF }, { default: autoTable }] = await Promise.all([
       import("jspdf"),
       import("jspdf-autotable"),
@@ -555,10 +656,16 @@ export default function PdfGenerationsEditor() {
 
     pdf.setFont("helvetica", "bold");
     pdf.setFontSize(16);
-    pdf.text("Commande producteur", 46, 18);
+    pdf.text("Commandes producteurs", 46, 18);
     pdf.setFont("helvetica", "normal");
     pdf.setFontSize(11);
-    pdf.text(`${date.distributionName ?? "Distribution"} - ${date.label}`, 46, 24);
+    pdf.text(distributionLabel(distribution), 46, 24);
+
+    const datesLabel = distributionDates.map((date) => date.label).join("  •  ");
+    if (datesLabel) {
+      pdf.setFontSize(9);
+      pdf.text(datesLabel, 46, 29);
+    }
 
     pdf.setFontSize(9.5);
     pdf.text(`Producteur: ${row.producerName}`, 14, 39);
@@ -568,58 +675,98 @@ export default function PdfGenerationsEditor() {
       44,
     );
 
-    const body = row.lines.map((line) => [
-      line.label,
-      line.variantLabel || "-",
-      formatQuantity(line.quantity),
-      formatMoney(line.unitPrice),
-      formatMoney(line.lineTotal),
-    ]);
+    let cursorY = 50;
+    row.dateRows.forEach((dateRow) => {
+      if (cursorY > 250) {
+        pdf.addPage("a4", "portrait");
+        cursorY = 20;
+      }
+      pdf.setFont("helvetica", "bold");
+      pdf.setFontSize(10);
+      pdf.text(dateRow.dateLabel, 14, cursorY);
+      cursorY += 5;
+      pdf.setFont("helvetica", "normal");
+      pdf.setFontSize(9);
+      pdf.text(
+        `Commandes: ${dateRow.ordersCount}   Quantite: ${formatQuantity(dateRow.totalQuantity)}   Total: ${formatMoney(dateRow.totalAmount)} EUR`,
+        14,
+        cursorY,
+      );
+      cursorY += 4;
 
-    autoTable(pdf, {
-      startY: 49,
-      head: [["Produit", "Variante", "Quantite", "PU", "Total"]],
-      body,
-      theme: "plain",
-      styles: {
-        fontSize: 9,
-        cellPadding: 1.5,
-        textColor: [35, 32, 28],
-      },
-      headStyles: {
-        fontStyle: "bold",
-        textColor: [35, 32, 28],
-      },
-      columnStyles: {
-        0: { cellWidth: 68 },
-        1: { cellWidth: 44 },
-        2: { halign: "right", cellWidth: 22 },
-        3: { halign: "right", cellWidth: 22 },
-        4: { halign: "right", cellWidth: 24 },
-      },
-      margin: { left: 14, right: 14 },
-      didDrawCell: (hook) => {
-        if (hook.section === "head") {
-          const y = hook.cell.y + hook.cell.height;
-          hook.doc.setDrawColor(190, 186, 178);
-          hook.doc.line(hook.table.settings.margin.left, y, hook.doc.internal.pageSize.getWidth() - hook.table.settings.margin.right, y);
-        }
-      },
+      if (!dateRow.lines.length) {
+        pdf.setFontSize(8.5);
+        pdf.text("Aucune commande sur cette date.", 14, cursorY + 3);
+        cursorY += 10;
+        return;
+      }
+
+      const body = dateRow.lines.map((line) => [
+        line.label,
+        line.variantLabel || "-",
+        formatQuantity(line.quantity),
+        formatMoney(line.unitPrice),
+        formatMoney(line.lineTotal),
+      ]);
+
+      autoTable(pdf, {
+        startY: cursorY + 2,
+        head: [["Produit", "Variante", "Quantite", "PU", "Total"]],
+        body,
+        theme: "plain",
+        styles: {
+          fontSize: 9,
+          cellPadding: 1.5,
+          textColor: [35, 32, 28],
+        },
+        headStyles: {
+          fontStyle: "bold",
+          textColor: [35, 32, 28],
+        },
+        columnStyles: {
+          0: { cellWidth: 68 },
+          1: { cellWidth: 44 },
+          2: { halign: "right", cellWidth: 22 },
+          3: { halign: "right", cellWidth: 22 },
+          4: { halign: "right", cellWidth: 24 },
+        },
+        margin: { left: 14, right: 14 },
+        didDrawCell: (hook) => {
+          if (hook.section === "head") {
+            const y = hook.cell.y + hook.cell.height;
+            hook.doc.setDrawColor(190, 186, 178);
+            hook.doc.line(
+              hook.table.settings.margin.left,
+              y,
+              hook.doc.internal.pageSize.getWidth() - hook.table.settings.margin.right,
+              y,
+            );
+          }
+        },
+      });
+      const finalY = (
+        pdf as unknown as { lastAutoTable?: { finalY?: number } }
+      ).lastAutoTable?.finalY;
+      cursorY = (finalY ?? cursorY + 2) + 8;
     });
 
     const producerName = sanitizeFileNamePart(row.producerName || row.producerId || "Producteur");
-    const dateLabel = sanitizeFileNamePart(formatDateForFileName(date.key));
-    const fileName = `Récap producteur ${producerName} ${dateLabel}.pdf`;
+    const firstDate = distributionDates[0]?.key ? sanitizeFileNamePart(formatDateForFileName(distributionDates[0].key)) : "";
+    const lastDate = distributionDates[distributionDates.length - 1]?.key
+      ? sanitizeFileNamePart(formatDateForFileName(distributionDates[distributionDates.length - 1].key))
+      : "";
+    const fileNameSuffix = firstDate && lastDate && firstDate !== lastDate ? `${firstDate} - ${lastDate}` : firstDate || distributionLabel(distribution);
+    const fileName = `Commandes producteurs ${producerName} ${sanitizeFileNamePart(fileNameSuffix)}.pdf`;
     pdf.save(fileName);
   };
 
-  const handleExportProducer = async (row: ProducerRow) => {
-    if (!selectedDateOption) return;
+  const handleExportProducer = async (row: ProducerDistributionRow) => {
+    if (!selectedDistribution || selectedDistributionDates.length === 0) return;
     setExportingProducerId(row.producerId);
     setMessage("");
     try {
-      await exportProducerDatePdf(selectedDateOption, row);
-      setMessage(`PDF exporte: ${row.producerName} (${selectedDateOption.label})`);
+      await exportProducerDistributionPdf(selectedDistribution, selectedDistributionDates, row);
+      setMessage(`PDF exporte: ${row.producerName} (${distributionLabel(selectedDistribution)})`);
     } catch {
       setMessage("Erreur pendant la generation du PDF.");
     } finally {
@@ -839,7 +986,7 @@ export default function PdfGenerationsEditor() {
       <section className="rounded-2xl border border-clay/70 bg-white/90 p-5 shadow-card">
         <h2 className="font-serif text-3xl">Générations PDF</h2>
         <p className="mt-2 text-sm text-ink/70">
-          Selectionne une date, puis exporte producteur par producteur.
+          Selectionne une distribution, puis exporte producteur par producteur (un PDF avec les 3 dates).
         </p>
         <p className="mt-1 text-xs text-ink/60">Affichage limite aux distributions ouvertes ou finies.</p>
       </section>
@@ -848,7 +995,7 @@ export default function PdfGenerationsEditor() {
         <div className="mb-3 flex items-center justify-between gap-2">
           <h3 className="font-serif text-2xl">Récap producteurs</h3>
         </div>
-        <div className="grid gap-3 md:grid-cols-2">
+        <div className="grid gap-3 md:grid-cols-1">
           <label className="flex flex-col gap-1 text-sm font-semibold text-ink/80">
             Distribution
             <select
@@ -859,7 +1006,6 @@ export default function PdfGenerationsEditor() {
               }}
               className="rounded-md border border-ink/20 bg-white px-3 py-2 text-sm font-normal"
             >
-              <option value="all">Toutes les distributions ouvertes ou finies</option>
               {distributions.map((distribution) => (
                 <option key={distribution.id} value={distribution.id}>
                   {distributionLabel(distribution)}
@@ -867,25 +1013,20 @@ export default function PdfGenerationsEditor() {
               ))}
             </select>
           </label>
+        </div>
 
-          <label className="flex flex-col gap-1 text-sm font-semibold text-ink/80">
-            Date
-            <select
-              value={selectedDateKey}
-              onChange={(event) => {
-                setSelectedDateKey(event.target.value);
-                setPreviewProducerId(null);
-              }}
-              className="rounded-md border border-ink/20 bg-white px-3 py-2 text-sm font-normal"
+        <div className="mt-3 flex flex-wrap gap-2">
+          {selectedDistributionDates.map((date, index) => (
+            <span
+              key={`producer-date-${date.key}`}
+              className="rounded-full border border-clay/80 bg-stone px-3 py-1 text-xs font-semibold text-ink/80"
             >
-              {filteredDateOptions.length === 0 ? <option value="">Aucune date</option> : null}
-              {filteredDateOptions.map((date) => (
-                <option key={date.key} value={date.key}>
-                  {date.label}
-                </option>
-              ))}
-            </select>
-          </label>
+              Date {index + 1}: {date.label}
+            </span>
+          ))}
+          {selectedDistributionDates.length === 0 ? (
+            <span className="text-xs text-ink/65">Aucune date pour cette distribution.</span>
+          ) : null}
         </div>
 
         <div className="mt-4 overflow-x-auto border border-clay/70 bg-white">
@@ -955,7 +1096,7 @@ export default function PdfGenerationsEditor() {
               {producerRows.length === 0 ? (
                 <tr>
                   <td colSpan={5} className="px-3 py-4 text-sm text-ink/60">
-                    Aucun producteur commande sur cette date.
+                    Aucun producteur commande sur cette distribution.
                   </td>
                 </tr>
               ) : null}
@@ -1065,14 +1206,14 @@ export default function PdfGenerationsEditor() {
         </div>
       </section>
 
-      {previewRow && selectedDateOption ? (
+      {previewRow && selectedDistribution ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/45 px-4 py-8">
           <div className="max-h-[90vh] w-full max-w-4xl overflow-hidden rounded-xl border border-clay/80 bg-white shadow-xl">
             <div className="flex items-start justify-between border-b border-clay/70 px-5 py-4">
               <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.16em] text-ink/55">Apercu producteur</p>
                 <h3 className="mt-1 font-serif text-2xl text-ink">{previewRow.producerName}</h3>
-                <p className="mt-1 text-sm text-ink/70">{selectedDateOption.label}</p>
+                <p className="mt-1 text-sm text-ink/70">{distributionLabel(selectedDistribution)}</p>
               </div>
               <button
                 type="button"
@@ -1099,29 +1240,45 @@ export default function PdfGenerationsEditor() {
             </div>
 
             <div className="max-h-[60vh] overflow-auto p-4">
-              <div className="overflow-x-auto border border-clay/70 bg-white">
-                <table className="min-w-full text-left text-sm">
-                  <thead className="border-b border-clay/70 bg-stone/80">
-                    <tr>
-                      <th className="px-3 py-2 font-semibold text-ink">Produit</th>
-                      <th className="px-3 py-2 font-semibold text-ink">Variante</th>
-                      <th className="px-3 py-2 font-semibold text-ink">Quantite</th>
-                      <th className="px-3 py-2 font-semibold text-ink">Prix unitaire</th>
-                      <th className="px-3 py-2 font-semibold text-ink">Total</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {previewRow.lines.map((line) => (
-                      <tr key={line.key} className="border-b border-clay/50">
-                        <td className="px-3 py-2">{line.label}</td>
-                        <td className="px-3 py-2">{line.variantLabel || "-"}</td>
-                        <td className="px-3 py-2">{formatQuantity(line.quantity)}</td>
-                        <td className="px-3 py-2">{formatMoney(line.unitPrice)} EUR</td>
-                        <td className="px-3 py-2">{formatMoney(line.lineTotal)} EUR</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              <div className="flex flex-col gap-4">
+                {previewRow.dateRows.map((dateRow) => (
+                  <div key={`preview-producer-date-${dateRow.dateKey}`} className="rounded-lg border border-clay/70 bg-stone/30 p-3">
+                    <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-sm font-semibold text-ink">{dateRow.dateLabel}</p>
+                      <p className="text-xs font-semibold text-ink/80">
+                        Commandes: {dateRow.ordersCount} · Quantite: {formatQuantity(dateRow.totalQuantity)} · Total: {formatMoney(dateRow.totalAmount)} EUR
+                      </p>
+                    </div>
+                    {dateRow.lines.length ? (
+                      <div className="overflow-x-auto border border-clay/70 bg-white">
+                        <table className="min-w-full text-left text-sm">
+                          <thead className="border-b border-clay/70 bg-stone/80">
+                            <tr>
+                              <th className="px-3 py-2 font-semibold text-ink">Produit</th>
+                              <th className="px-3 py-2 font-semibold text-ink">Variante</th>
+                              <th className="px-3 py-2 font-semibold text-ink">Quantite</th>
+                              <th className="px-3 py-2 font-semibold text-ink">Prix unitaire</th>
+                              <th className="px-3 py-2 font-semibold text-ink">Total</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {dateRow.lines.map((line) => (
+                              <tr key={`${dateRow.dateKey}-${line.key}`} className="border-b border-clay/50">
+                                <td className="px-3 py-2">{line.label}</td>
+                                <td className="px-3 py-2">{line.variantLabel || "-"}</td>
+                                <td className="px-3 py-2">{formatQuantity(line.quantity)}</td>
+                                <td className="px-3 py-2">{formatMoney(line.unitPrice)} EUR</td>
+                                <td className="px-3 py-2">{formatMoney(line.lineTotal)} EUR</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : (
+                      <p className="text-sm text-ink/65">Aucune commande sur cette date.</p>
+                    )}
+                  </div>
+                ))}
               </div>
             </div>
           </div>

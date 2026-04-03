@@ -4,7 +4,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Timestamp, collection, doc, getDoc, getDocs, setDoc, writeBatch } from "firebase/firestore";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { firebaseDb } from "@/lib/firebase/client";
-import { distributionLabel } from "@/lib/distributions";
+import {
+  distributionLabel,
+  distributionStatusLabel,
+  distributionStatusSelectValue,
+  isArchivedStatus,
+} from "@/lib/distributions";
 
 type FieldType = "text" | "number" | "boolean" | "date" | "datetime";
 
@@ -63,20 +68,6 @@ function formatShortDateKey(key: string) {
   return formatDate(fromDateKey(key));
 }
 
-function statusSelectValue(status?: string): "planned" | "open" | "finished" {
-  const value = String(status ?? "").toLowerCase().trim();
-  if (value === "open" || value === "ouverte" || value === "ouvertes") return "open";
-  if (value === "finished" || value === "fermee" || value === "ferme" || value === "closed") return "finished";
-  return "planned";
-}
-
-function statusLabel(status?: string) {
-  const value = statusSelectValue(status);
-  if (value === "open") return "Ouverte";
-  if (value === "finished") return "Finie";
-  return "Planifiee";
-}
-
 function plusDays(date: Date, days: number) {
   const next = new Date(date);
   next.setUTCDate(next.getUTCDate() + days);
@@ -123,6 +114,7 @@ export default function DistributionsEditor({ title, description }: EditorProps)
     const distributions = distSnap.docs
       .map((docSnap) => ({ id: docSnap.id, ...(docSnap.data() as Omit<DistributionDoc, "id">) }))
       .filter((distribution) => {
+        if (isArchivedStatus(distribution.status)) return false;
         const firstDate = toDate(distribution.dates?.[0]);
         if (!firstDate) return false;
         return firstDate >= now && firstDate <= oneYearLater;
@@ -416,7 +408,7 @@ export default function DistributionsEditor({ title, description }: EditorProps)
                       {isAdmin ? (
                         <select
                           className="min-w-[130px] rounded-md border border-ink/20 bg-white px-2 py-1 text-xs"
-                          value={statusSelectValue(row.distribution.status)}
+                          value={distributionStatusSelectValue(row.distribution.status)}
                           onChange={(event) =>
                             updateDistributionStatus(
                               row.distribution.id,
@@ -430,7 +422,7 @@ export default function DistributionsEditor({ title, description }: EditorProps)
                           <option value="finished">Finie</option>
                         </select>
                       ) : (
-                        statusLabel(row.distribution.status)
+                        distributionStatusLabel(row.distribution.status)
                       )}
                     </td>
                     <td className="px-3 py-2 text-xs text-ink/70">

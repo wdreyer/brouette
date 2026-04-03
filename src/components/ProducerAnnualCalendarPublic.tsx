@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { collection, getDocs } from "firebase/firestore";
 import { firebaseDb } from "@/lib/firebase/client";
-import { distributionLabel } from "@/lib/distributions";
+import { distributionLabel, resolveDistributionStatus, type DistributionStatusKey } from "@/lib/distributions";
 
 type FireDate = { toDate?: () => Date };
 
@@ -34,7 +34,7 @@ type DateColumn = {
 type DistributionView = {
   id: string;
   label: string;
-  status: string;
+  status: DistributionStatusKey;
   dateKeys: string[];
 };
 
@@ -61,7 +61,7 @@ function formatDateLabel(value: Date) {
 }
 
 function isUpcomingOrCurrentDistribution(distribution: DistributionDoc, now: Date) {
-  const status = String(distribution.status ?? "").toLowerCase();
+  const status = resolveDistributionStatus(distribution.status);
   if (status === "open" || status === "planned") return true;
   const dates = (distribution.dates ?? [])
     .map((item) => item.toDate?.())
@@ -69,15 +69,14 @@ function isUpcomingOrCurrentDistribution(distribution: DistributionDoc, now: Dat
   return dates.some((date) => date.getTime() >= now.getTime());
 }
 
-function statusBadge(status: string) {
-  const normalized = status.toLowerCase();
-  if (normalized === "open") {
+function statusBadge(status: DistributionStatusKey) {
+  if (status === "open") {
     return {
       label: "Vente ouverte",
       className: "border border-moss/35 bg-moss/10 text-moss",
     };
   }
-  if (normalized === "planned") {
+  if (status === "planned") {
     return {
       label: "Preparation",
       className: "border border-honey/40 bg-honey/20 text-ink/75",
@@ -170,7 +169,7 @@ export default function ProducerAnnualCalendarPublic() {
           nextDistributions.push({
             id: distribution.id,
             label: distributionLabel(distribution),
-            status: String(distribution.status ?? "planned"),
+            status: resolveDistributionStatus(distribution.status),
             dateKeys: keys,
           });
         }),

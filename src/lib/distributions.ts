@@ -7,9 +7,59 @@ export type DistributionLike = {
 };
 
 const OPEN_STATUSES = new Set(["open", "ouverte", "ouvertes"]);
+const PLANNED_STATUSES = new Set(["planned", "planifiee"]);
+const FINISHED_STATUSES = new Set(["finished", "fermee", "ferme", "closed"]);
+const ARCHIVED_STATUSES = new Set(["archived", "archivee"]);
+
+export type DistributionStatusKey = "open" | "planned" | "finished" | "archived" | "unknown";
+
+export function normalizeDistributionStatus(status?: string) {
+  return String(status ?? "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim();
+}
+
+export function resolveDistributionStatus(status?: string): DistributionStatusKey {
+  const value = normalizeDistributionStatus(status);
+  if (OPEN_STATUSES.has(value)) return "open";
+  if (PLANNED_STATUSES.has(value) || value === "") return "planned";
+  if (FINISHED_STATUSES.has(value)) return "finished";
+  if (ARCHIVED_STATUSES.has(value)) return "archived";
+  return "unknown";
+}
 
 export function isOpenStatus(status?: string) {
-  return OPEN_STATUSES.has(String(status ?? ""));
+  return resolveDistributionStatus(status) === "open";
+}
+
+export function isPlannedStatus(status?: string) {
+  return resolveDistributionStatus(status) === "planned";
+}
+
+export function isFinishedStatus(status?: string) {
+  return resolveDistributionStatus(status) === "finished";
+}
+
+export function isArchivedStatus(status?: string) {
+  return resolveDistributionStatus(status) === "archived";
+}
+
+export function distributionStatusLabel(status?: string) {
+  const resolved = resolveDistributionStatus(status);
+  if (resolved === "open") return "Ouverte";
+  if (resolved === "planned") return "Planifiee";
+  if (resolved === "finished") return "Fermee";
+  if (resolved === "archived") return "Archivee";
+  return "Inconnu";
+}
+
+export function distributionStatusSelectValue(status?: string): "planned" | "open" | "finished" {
+  const resolved = resolveDistributionStatus(status);
+  if (resolved === "open") return "open";
+  if (resolved === "finished") return "finished";
+  return "planned";
 }
 
 export function isDistributionExpired(item?: DistributionLike | null, now = new Date()) {

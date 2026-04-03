@@ -12,6 +12,7 @@ import {
   writeBatch,
 } from "firebase/firestore";
 import { firebaseDb } from "@/lib/firebase/client";
+import { isOpenStatus, isPlannedStatus } from "@/lib/distributions";
 
 type Distribution = {
   id: string;
@@ -103,11 +104,11 @@ export default function OpenSalesPanel() {
     [distributions, selectedId],
   );
   const openDistribution = useMemo(
-    () => distributions.find((dist) => dist.status === "open"),
+    () => distributions.find((dist) => isOpenStatus(dist.status)),
     [distributions],
   );
   const plannedDistributions = useMemo(
-    () => distributions.filter((dist) => dist.status === "planned"),
+    () => distributions.filter((dist) => isPlannedStatus(dist.status)),
     [distributions],
   );
 
@@ -186,12 +187,12 @@ export default function OpenSalesPanel() {
     setVariants(variantItems);
 
     if (!selectedId && items.length > 0) {
-      const openDist = items.find((dist) => dist.status === "open");
+      const openDist = items.find((dist) => isOpenStatus(dist.status));
       if (openDist) {
         setSelectedId(openDist.id);
         setShowConfig(true);
       } else {
-        const firstPlanned = items.find((dist) => dist.status === "planned");
+        const firstPlanned = items.find((dist) => isPlannedStatus(dist.status));
         if (firstPlanned) {
           setSelectedId(firstPlanned.id);
           setShowConfig(true);
@@ -418,7 +419,7 @@ export default function OpenSalesPanel() {
       if (openAfter) {
         const openSnap = await getDocs(query(collection(firebaseDb, "distributionDates")));
         openSnap.docs.forEach((docSnap) => {
-          if (docSnap.id !== selectedId && docSnap.data().status === "open") {
+          if (docSnap.id !== selectedId && isOpenStatus(docSnap.data().status)) {
             batch.update(docSnap.ref, { status: "finished" });
           }
         });

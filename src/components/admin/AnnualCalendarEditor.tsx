@@ -1,9 +1,17 @@
-"use client";
+﻿"use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Timestamp, collection, doc, getDocs, setDoc, writeBatch } from "firebase/firestore";
 import { firebaseDb } from "@/lib/firebase/client";
-import { distributionLabel } from "@/lib/distributions";
+import {
+  distributionLabel,
+  distributionStatusLabel,
+  distributionStatusSelectValue,
+  isArchivedStatus,
+  isOpenStatus,
+  normalizeDistributionStatus,
+  resolveDistributionStatus,
+} from "@/lib/distributions";
 
 type FireDate = { toDate?: () => Date };
 
@@ -52,34 +60,6 @@ function sortDateKeys(keys: string[]) {
 
 function formatDateLabel(value: Date) {
   return value.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" });
-}
-
-function normalizeStatus(value?: string) {
-  return String(value ?? "").toLowerCase().trim();
-}
-
-function isArchivedStatus(value?: string) {
-  const status = normalizeStatus(value);
-  return status === "archived" || status === "archivee" || status === "archivée";
-}
-
-function isOpenStatus(value?: string) {
-  const status = normalizeStatus(value);
-  return status === "open" || status === "ouverte" || status === "ouvertes";
-}
-
-function statusSelectValue(status?: string): "planned" | "open" | "finished" {
-  const value = normalizeStatus(status);
-  if (value === "open" || value === "ouverte" || value === "ouvertes") return "open";
-  if (value === "finished" || value === "fermee" || value === "ferme" || value === "closed") return "finished";
-  return "planned";
-}
-
-function statusLabel(status?: string) {
-  const value = statusSelectValue(status);
-  if (value === "open") return "Ouverte";
-  if (value === "finished") return "Finie";
-  return "Planifiee";
 }
 
 export default function AnnualCalendarEditor() {
@@ -297,7 +277,7 @@ export default function AnnualCalendarEditor() {
         {
           status: "archived",
           archivedAt: Timestamp.now(),
-          archivedFromStatus: normalizeStatus(distribution.status) || "planned",
+          archivedFromStatus: normalizeDistributionStatus(distribution.status) || "planned",
         },
         { merge: true },
       );
@@ -319,8 +299,8 @@ export default function AnnualCalendarEditor() {
     setSaving(true);
     setMessage("");
     try {
-      const restoredStatus = normalizeStatus(distribution.archivedFromStatus ?? "") || "planned";
-      const allowedStatus = restoredStatus === "open" ? "planned" : restoredStatus;
+      const restoredStatus = resolveDistributionStatus(distribution.archivedFromStatus ?? "");
+      const allowedStatus: "planned" | "finished" = restoredStatus === "finished" ? "finished" : "planned";
       await setDoc(
         doc(firebaseDb, "distributionDates", distribution.id),
         {
@@ -478,7 +458,7 @@ export default function AnnualCalendarEditor() {
     }
 
     setSaving(false);
-    setMessage("Calendrier enregistré.");
+    setMessage("Calendrier enregistrÃ©.");
     await load();
   };
 
@@ -495,7 +475,7 @@ export default function AnnualCalendarEditor() {
       <section className="rounded-[10px] border border-clay/90 bg-stone p-4">
         <h2 className="font-serif text-3xl">Calendrier annuel producteurs</h2>
         <p className="mt-2 text-sm text-ink/70">
-          Tu ajoutes uniquement des distributions complètes (3 dates), puis tu coches les producteurs par date.
+          Tu ajoutes uniquement des distributions complÃ¨tes (3 dates), puis tu coches les producteurs par date.
         </p>
         <p className="mt-2 text-xs text-ink/60">Producteurs sans produits inclus: {producersWithoutProductsCount}</p>
       </section>
@@ -539,7 +519,7 @@ export default function AnnualCalendarEditor() {
                       <span>Statut</span>
                       <select
                         className="rounded-md border border-ink/20 bg-white px-2 py-1 text-xs font-semibold text-ink"
-                        value={statusSelectValue(distribution.status)}
+                        value={distributionStatusSelectValue(distribution.status)}
                         onChange={(event) =>
                           updateDistributionStatus(
                             distribution,
@@ -558,7 +538,7 @@ export default function AnnualCalendarEditor() {
                     </div>
                   </div>
                   <div className="flex flex-col items-end gap-1">
-                    <span className="text-[11px] font-semibold text-ink/60">{statusLabel(distribution.status)}</span>
+                    <span className="text-[11px] font-semibold text-ink/60">{distributionStatusLabel(distribution.status)}</span>
                     <button
                       className="rounded-md border border-ink/20 bg-stone px-2 py-1 text-xs font-semibold text-ink disabled:opacity-50"
                       onClick={() => archiveDistribution(distribution)}
@@ -605,7 +585,7 @@ export default function AnnualCalendarEditor() {
                           Archivee {archivedAt ? `le ${archivedAt.toLocaleDateString("fr-FR")}` : ""}
                         </p>
                         <p className="text-[11px] text-ink/55">
-                          Ancien statut: {statusLabel(distribution.archivedFromStatus ?? distribution.status)}
+                          Ancien statut: {distributionStatusLabel(distribution.archivedFromStatus ?? distribution.status)}
                         </p>
                       </div>
                       <button
@@ -754,3 +734,4 @@ export default function AnnualCalendarEditor() {
     </div>
   );
 }
+

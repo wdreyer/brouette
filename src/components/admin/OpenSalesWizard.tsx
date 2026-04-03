@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -21,8 +21,11 @@ import { useAuth } from "@/components/auth/AuthProvider";
 import { firebaseDb } from "@/lib/firebase/client";
 import {
   distributionLabel,
+  isArchivedStatus,
   isDistributionExpired,
+  isFinishedStatus,
   isOpenStatus,
+  isPlannedStatus,
   pickOpenDistribution,
 } from "@/lib/distributions";
 
@@ -99,10 +102,6 @@ type ProductDraft = {
 
 type SalesViewMode = "overview" | "current" | "next" | "history";
 
-const FINISHED = new Set(["finished", "fermee", "ferme", "closed"]);
-const PLANNED = new Set(["planned", "planifiee", "planifiée"]);
-const ARCHIVED = new Set(["archived", "archivee", "archivée"]);
-
 const toDate = (value?: FireDate) => value?.toDate?.() ?? null;
 const dateKey = (value: Date) => value.toISOString().slice(0, 10);
 const formatDate = (value?: Date | null) =>
@@ -125,12 +124,6 @@ const distributionDateBadges = (distribution?: Distribution | null) =>
     .map((date) => formatBadgeDate(toDate(date)))
     .filter((label) => label !== "-");
 const money = (value: number) => value.toFixed(2).replace(".", ",");
-const normalizedStatus = (status?: string) => String(status ?? "").toLowerCase().trim();
-const isPlanned = (status?: string) => {
-  const value = normalizedStatus(status);
-  return value === "" || PLANNED.has(value);
-};
-const isArchived = (status?: string) => ARCHIVED.has(normalizedStatus(status));
 const fullName = (m?: Member | null) => `${m?.firstName ?? ""} ${m?.lastName ?? ""}`.trim();
 const newId = () =>
   typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -182,8 +175,8 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
   const plannedDistributions = useMemo(
     () =>
       distributions
-        .filter((distribution) => !isArchived(distribution.status))
-        .filter((distribution) => isPlanned(distribution.status))
+        .filter((distribution) => !isArchivedStatus(distribution.status))
+        .filter((distribution) => isPlannedStatus(distribution.status))
         .sort(
           (left, right) =>
             (toDate(left.dates?.[0]) ?? new Date(0)).getTime() -
@@ -258,11 +251,9 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
           : [];
         calendarByProducer.set(producerId, activeDateKeys);
       });
-      const useCalendar = calendarSnap.size > 0;
 
       const producerIds = Object.keys(productMap).filter((id) => {
         if ((productMap[id] ?? []).length === 0 || !producerById[id]) return false;
-        if (!useCalendar) return true;
         const activeDateKeys = calendarByProducer.get(id) ?? [];
         return activeDateKeys.some((key) => distributionDateKeys.includes(key));
       });
@@ -294,11 +285,9 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
       const nextRows = producerIds.map((producerId) => {
         const producer = producerById[producerId];
         const dbRow = existing.get(producerId);
-        const activeDateKeys = (
-          useCalendar
-            ? (calendarByProducer.get(producerId) ?? []).filter((key) => distributionDateKeys.includes(key))
-            : [...distributionDateKeys]
-        ).sort();
+        const activeDateKeys = (calendarByProducer.get(producerId) ?? [])
+          .filter((key) => distributionDateKeys.includes(key))
+          .sort();
         const referentId = producer?.referentId ?? dbRow?.referentId ?? null;
         const referentName =
           fullName(referentId ? memberMap[referentId] : null) ||
@@ -483,9 +472,9 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
           const activeDateKeys = Array.isArray(data.activeDateKeys)
             ? data.activeDateKeys.filter((key): key is string => typeof key === "string")
             : [];
-          const constrainedDateKeys = (
-            activeDateKeys.length > 0 ? activeDateKeys : distributionDateKeys
-          ).filter((key) => distributionDateKeys.includes(key));
+          const constrainedDateKeys = activeDateKeys.filter((key) =>
+            distributionDateKeys.includes(key),
+          );
           const isEffectivelyActive = data.active !== false && constrainedDateKeys.length > 0;
           if (!isEffectivelyActive) return;
           producersActive += 1;
@@ -511,7 +500,7 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
                 ? distributionDateKeys[data.dateIndex] ?? ""
                 : "";
           if (!resolvedSaleDateKey || !distributionDateKeys.includes(resolvedSaleDateKey)) return false;
-          if (!hasProducerLinks) return true;
+          if (!hasProducerLinks) return false;
           const producerId = String(data.producerId ?? "");
           if (!producerId) return false;
           const allowedDateKeys = validatedProducerDateKeys.get(producerId);
@@ -544,7 +533,7 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
     setDistributionMetrics(Object.fromEntries(metricsEntries));
 
     const open = pickOpenDistribution(distItems);
-    const plannedDist = distItems.filter((d) => isPlanned(d.status));
+    const plannedDist = distItems.filter((d) => isPlannedStatus(d.status));
     const defaultTarget = plannedDist[0]?.id ?? "";
 
     const defaultTargetDateKeys = (
@@ -581,9 +570,9 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
         const activeDateKeys = Array.isArray(data.activeDateKeys)
           ? data.activeDateKeys.filter((key): key is string => typeof key === "string")
           : [];
-        const constrainedDateKeys = (
-          activeDateKeys.length > 0 ? activeDateKeys : overviewDistributionDateKeys
-        ).filter((key) => overviewDistributionDateKeys.includes(key));
+        const constrainedDateKeys = activeDateKeys.filter((key) =>
+          overviewDistributionDateKeys.includes(key),
+        );
         if (!constrainedDateKeys.length) return;
         validatedProducerDateKeys.set(producerId, new Set(constrainedDateKeys));
       });
@@ -602,7 +591,7 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
               ? overviewDistributionDateKeys[data.dateIndex] ?? ""
               : "";
         if (!resolvedSaleDateKey || !overviewDistributionDateKeys.includes(resolvedSaleDateKey)) return false;
-        if (!hasProducerLinks) return true;
+        if (!hasProducerLinks) return false;
         const producerId = String(data.producerId ?? "");
         if (!producerId) return false;
         const allowedDateKeys = validatedProducerDateKeys.get(producerId);
@@ -690,7 +679,7 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
     canManageLifecycle &&
     !openDistribution &&
     Boolean(targetDistribution) &&
-    isPlanned(targetDistribution?.status) &&
+    isPlannedStatus(targetDistribution?.status) &&
     rows.length > 0 &&
     validatedCount === rows.length;
   const saleLocked = isOpenStatus(targetDistribution?.status);
@@ -734,7 +723,7 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
   const historicalDistributions = useMemo(
     () =>
       distributions
-        .filter((distribution) => FINISHED.has(String(distribution.status ?? "").toLowerCase()))
+        .filter((distribution) => isFinishedStatus(distribution.status))
         .sort(
           (left, right) =>
             (toDate(right.dates?.[0]) ?? new Date(0)).getTime() -
@@ -766,7 +755,7 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
       return;
     }
     if (!producerIds.length) {
-      setMessage("Aucun producteur à gérer pour cette vue.");
+      setMessage("Aucun producteur Ã  gÃ©rer pour cette vue.");
       return;
     }
     setMessage("");
@@ -1097,9 +1086,9 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
         const activeDateKeys = Array.isArray(data.activeDateKeys)
           ? data.activeDateKeys.filter((key): key is string => typeof key === "string")
           : [];
-        const constrainedDateKeys = (
-          activeDateKeys.length > 0 ? activeDateKeys : distributionDateKeys
-        ).filter((key) => distributionDateKeys.includes(key));
+        const constrainedDateKeys = activeDateKeys.filter((key) =>
+          distributionDateKeys.includes(key),
+        );
         producerRules.set(producerId, {
           active: data.active !== false,
           validated: data.validatedByReferent === true,
@@ -1165,12 +1154,14 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
           ops.push({ type: "delete", ref: offerDoc.ref });
           return;
         }
-        if (hasProducerLinks) {
-          const rule = producerRules.get(meta.producerId);
-          if (!rule || !rule.active || !rule.validated || !rule.allowedDateKeys.has(resolvedSaleDateKey)) {
-            ops.push({ type: "delete", ref: offerDoc.ref });
-            return;
-          }
+        if (!hasProducerLinks) {
+          ops.push({ type: "delete", ref: offerDoc.ref });
+          return;
+        }
+        const rule = producerRules.get(meta.producerId);
+        if (!rule || !rule.active || !rule.validated || !rule.allowedDateKeys.has(resolvedSaleDateKey)) {
+          ops.push({ type: "delete", ref: offerDoc.ref });
+          return;
         }
         const dedupeKey = `${meta.producerId}|${productId}|${variantId}|${resolvedSaleDateKey}`;
         if (seen.has(dedupeKey)) {
@@ -1345,7 +1336,7 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
             Commandes: <span className="font-semibold">{saleOverview.orderCount}</span>
           </div>
           <div className="rounded-sm border border-forest/30 bg-forest/10 px-3 py-2 text-sm">
-            Adhérents: <span className="font-semibold">{saleOverview.memberCount}</span>
+            AdhÃ©rents: <span className="font-semibold">{saleOverview.memberCount}</span>
           </div>
           <div className="rounded-sm border border-forest/30 bg-forest/10 px-3 py-2 text-sm">
             CA: <span className="font-semibold">{money(saleOverview.revenue)} EUR</span>
@@ -1550,7 +1541,7 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
           <table className="min-w-full text-left text-sm">
             <thead className="border-b border-ink/20 bg-ink text-xs uppercase tracking-[0.18em] text-stone">
               <tr>
-                <th className="px-3 py-2">Référent</th>
+                <th className="px-3 py-2">RÃ©fÃ©rent</th>
                 <th className="px-3 py-2">Producteur</th>
                 <th className="px-3 py-2">Produits</th>
                 <th className="px-3 py-2">Validation</th>
@@ -1575,7 +1566,7 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
                               : "border border-ink/20 bg-ink/5 text-ink/70"
                           }`}
                         >
-                          {row.validatedByReferent ? "Validé" : "À valider"}
+                          {row.validatedByReferent ? "ValidÃ©" : "Ã€ valider"}
                         </span>
                       </td>
                       <td className="px-3 py-2 text-xs text-ink/60">{row.validatedAtLabel}</td>
@@ -1586,7 +1577,7 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
                             onClick={() => openFlow([row.producerId])}
                             disabled={editingLocked}
                           >
-                            Gérer
+                            GÃ©rer
                           </button>
                           {canEdit ? (
                             <button
@@ -1662,7 +1653,7 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
                         </span>
                       ))
                     ) : (
-                      <span className="text-xs text-ink/65">📅 Dates non renseignées</span>
+                      <span className="text-xs text-ink/65">ðŸ“… Dates non renseignÃ©es</span>
                     )}
                   </div>
                   <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
@@ -1888,6 +1879,7 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
     </div>
   );
 }
+
 
 
 
