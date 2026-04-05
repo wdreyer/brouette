@@ -80,7 +80,9 @@ type ProducerRow = {
   activeDateKeys: string[];
   validatedByReferent: boolean;
   validatedAtLabel: string;
+  validatedByName: string;
   productCount: number;
+  validatedProductCount: number;
 };
 
 type CalendarProducerLink = {
@@ -271,6 +273,7 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
         {
           validatedByReferent?: boolean;
           validatedAt?: FireDate;
+          validatedByMemberId?: string | null;
           referentId?: string | null;
           referentName?: string | null;
           activeDateKeys?: string[];
@@ -323,6 +326,21 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
           changed = true;
         }
 
+        const validatedByMemberId = dbRow?.validatedByMemberId ?? null;
+        const validatedByMember = validatedByMemberId ? memberMap[validatedByMemberId] : null;
+        const validatedByName = validatedByMember
+          ? fullName(validatedByMember)
+          : validatedByMemberId
+            ? "Inconnu"
+            : "";
+        const allowedDateSet = new Set(activeDateKeys);
+        const validatedProductCount = dbRow?.validatedByReferent === true
+          ? (productMap[producerId] ?? []).filter((product) =>
+              product.variants.some((variant) =>
+                variant.activeDates.some((dateKey) => allowedDateSet.has(dateKey)),
+              ),
+            ).length
+          : 0;
         return {
           producerId,
           producerName: producer?.name ?? "Producteur",
@@ -331,7 +349,9 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
           activeDateKeys,
           validatedByReferent: dbRow?.validatedByReferent === true,
           validatedAtLabel: formatLongDate(toDate(dbRow?.validatedAt)),
+          validatedByName,
           productCount: (productMap[producerId] ?? []).length,
+          validatedProductCount,
         } satisfies ProducerRow;
       });
 
@@ -616,12 +636,18 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
     rows
       .filter((row) => row.validatedByReferent)
       .forEach((row) => {
+        const allowedDates = new Set(
+          row.activeDateKeys.filter((key) => saleDateKeys.includes(key)),
+        );
         (productsByProducer[row.producerId] ?? []).forEach((product) => {
-          productIds.add(product.id);
+          const hasActiveVariant = product.variants.some((variant) =>
+            variant.activeDates.some((dateKey) => allowedDates.has(dateKey)),
+          );
+          if (hasActiveVariant) productIds.add(product.id);
         });
       });
     return productIds.size;
-  }, [rows, productsByProducer]);
+  }, [rows, productsByProducer, saleDateKeys]);
   const canOpen =
     canManageLifecycle &&
     !openDistribution &&
@@ -832,9 +858,10 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
         (productsByProducer[row.producerId] ?? []).forEach((product) => {
           const limitTotal = Number(product.saleLimit ?? 0);
           product.variants.forEach((variant) => {
-            const sourceDates = Array.isArray(variant.activeDates) ? variant.activeDates : [];
+            const hasStoredDates = Array.isArray(variant.activeDates);
+            const sourceDates = hasStoredDates ? variant.activeDates : [];
             const activeDates = (
-              sourceDates.length > 0 ? sourceDates : saleDateKeys
+              hasStoredDates ? sourceDates : saleDateKeys
             ).filter((key) => saleDateKeys.includes(key) && row.activeDateKeys.includes(key));
             Array.from(new Set(activeDates)).forEach((saleDateKey) => {
               ops.push({
@@ -973,9 +1000,10 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
         (productsByProducer[producerId] ?? []).forEach((product) => {
           const limitTotal = Number(product.saleLimit ?? 0);
           product.variants.forEach((variant) => {
-            const sourceDates = Array.isArray(variant.activeDates) ? variant.activeDates : [];
+            const hasStoredDates = Array.isArray(variant.activeDates);
+            const sourceDates = hasStoredDates ? variant.activeDates : [];
             const activeDates = (
-              sourceDates.length > 0 ? sourceDates : distributionDateKeys
+              hasStoredDates ? sourceDates : distributionDateKeys
             ).filter((key) => distributionDateKeys.includes(key) && row.activeDateKeys.includes(key));
             Array.from(new Set(activeDates)).forEach((saleDateKey) => {
               const offerRef = doc(offerItemsRef);
@@ -1472,7 +1500,7 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
           <div className="flex flex-wrap gap-2" />
         </div>
 
-        <div className="mt-3 grid gap-2 md:grid-cols-3">
+        <div className="mt-3 grid gap-2 md:grid-cols-4">
           <div className="rounded-sm border border-clay/70 bg-clay/10 px-3 py-2 text-sm">
             Producteurs total : <span className="font-semibold">{rows.length}</span>
           </div>
@@ -1481,6 +1509,9 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
           </div>
           <div className="rounded-sm border border-clay/70 bg-clay/10 px-3 py-2 text-sm">
             Producteurs a valider : <span className="font-semibold">{pendingCount}</span>
+          </div>
+          <div className="rounded-sm border border-clay/70 bg-clay/10 px-3 py-2 text-sm">
+            Produits validés : <span className="font-semibold">{targetValidatedProductsCount}</span>
           </div>
         </div>
 
@@ -1491,8 +1522,8 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
                 <th className="px-3 py-2">Référent</th>
                 <th className="px-3 py-2">Producteur</th>
                 <th className="px-3 py-2">Produits</th>
-                <th className="px-3 py-2">Validation</th>
-                <th className="px-3 py-2">Date validation</th>
+                <th className="px-3 py-2">Validés</th>
+                <th className="px-3 py-2">Statut</th>
                 <th className="px-3 py-2">Actions</th>
               </tr>
             </thead>
@@ -1504,18 +1535,28 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
                       <td className="px-3 py-2 text-xs text-ink/70">{index === 0 ? group.referentName : null}</td>
                       <td className="px-3 py-2 font-semibold text-ink">{row.producerName}</td>
                       <td className="px-3 py-2 text-xs text-ink/70">{row.productCount}</td>
-                      <td className="px-3 py-2">
-                        <span
-                          className={`rounded-sm px-2 py-1 text-xs font-semibold ${
-                            row.validatedByReferent
-                              ? "border border-forest/40 bg-forest/15 text-forest"
-                              : "border border-ink/20 bg-ink/5 text-ink/70"
-                          }`}
-                        >
-                          {row.validatedByReferent ? "Validé" : "À valider"}
-                        </span>
+                      <td className="px-3 py-2 text-xs text-ink/70">
+                        {row.validatedByReferent ? row.validatedProductCount : "—"}
                       </td>
-                      <td className="px-3 py-2 text-xs text-ink/60">{row.validatedAtLabel}</td>
+                      <td className="px-3 py-2">
+                        {row.validatedByReferent ? (
+                          <div className="flex flex-col gap-0.5">
+                            <span className="inline-flex w-fit rounded-sm border border-forest/40 bg-forest/15 px-2 py-0.5 text-xs font-semibold text-forest">
+                              Validé
+                            </span>
+                            {row.validatedByName ? (
+                              <span className="text-[11px] text-ink/60">par {row.validatedByName}</span>
+                            ) : null}
+                            {row.validatedAtLabel !== "-" ? (
+                              <span className="text-[11px] text-ink/50">le {row.validatedAtLabel}</span>
+                            ) : null}
+                          </div>
+                        ) : (
+                          <span className="inline-flex w-fit rounded-sm border border-ink/20 bg-ink/5 px-2 py-0.5 text-xs font-semibold text-ink/70">
+                            À valider
+                          </span>
+                        )}
+                      </td>
                       <td className="px-3 py-2">
                         <div className="flex flex-wrap gap-2">
                           <button
@@ -1525,6 +1566,15 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
                           >
                             Gérer
                           </button>
+                          {row.validatedByReferent && !editingLocked ? (
+                            <button
+                              className="rounded-md border border-ember/40 bg-ember/10 px-3 py-1 text-xs font-semibold text-ember disabled:opacity-50"
+                              onClick={() => setValidation(row, false)}
+                              disabled={saving}
+                            >
+                              Retirer validation
+                            </button>
+                          ) : null}
                         </div>
                       </td>
                     </tr>

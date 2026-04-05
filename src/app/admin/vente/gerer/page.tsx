@@ -111,7 +111,7 @@ function createDraftProductWithDates(activeDateKeys: string[]): ProductDraft {
 export default function AdminSaleProducerManagerPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { effectiveRole } = useAuth();
+  const { effectiveRole, effectiveMemberId } = useAuth();
 
   const distributionId = searchParams.get("distributionId") ?? "";
   const producerIds = useMemo(
@@ -339,12 +339,13 @@ export default function AdminSaleProducerManagerPage() {
             offersByVariant.get(`${productId}:${variantDoc.id}`)?.filter((key) =>
               nextEditableDateKeys.includes(key),
             ) ?? [];
-          const activeDatesFromVariant = Array.isArray(variantData.activeDates)
-            ? variantData.activeDates.filter((key) => nextEditableDateKeys.includes(key))
+          const hasStoredActiveDates = Array.isArray(variantData.activeDates);
+          const activeDatesFromVariant = hasStoredActiveDates
+            ? variantData.activeDates!.filter((key) => nextEditableDateKeys.includes(key))
             : [];
           const activeDates = hasProducerOffers
             ? activeDatesFromOffers
-            : activeDatesFromVariant.length > 0
+            : hasStoredActiveDates
               ? activeDatesFromVariant
               : [...nextEditableDateKeys];
           return {
@@ -530,7 +531,7 @@ export default function AdminSaleProducerManagerPage() {
   };
 
   const saveProducerDraft = useCallback(
-    async (producerId: string, producerDrafts: ProductDraft[], producerEditableDateKeys: string[]) => {
+    async (producerId: string, producerDrafts: ProductDraft[], producerEditableDateKeys: string[], validatedByMemberId?: string | null) => {
       const savedProducts: Array<{
         id: string;
         name: string;
@@ -655,6 +656,7 @@ export default function AdminSaleProducerManagerPage() {
               activeDateKeys: selectedDateKeys,
               validatedByReferent: true,
               validatedAt: now,
+              validatedByMemberId: validatedByMemberId ?? null,
             },
             { merge: true },
           ),
@@ -777,7 +779,7 @@ export default function AdminSaleProducerManagerPage() {
         dirtyProducerIds.includes(currentProducerId) || drafts.length > 0
           ? drafts
           : await loadProducerDraftsFromDb(currentProducerId, producerDateKeys);
-      await saveProducerDraft(currentProducerId, producerDrafts, producerDateKeys);
+      await saveProducerDraft(currentProducerId, producerDrafts, producerDateKeys, effectiveMemberId);
 
       setDirtyProducerIds((prev) => prev.filter((id) => id !== currentProducerId));
       setMessage("Producteur enregistre et valide.");
