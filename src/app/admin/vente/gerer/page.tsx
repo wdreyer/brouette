@@ -279,51 +279,14 @@ export default function AdminSaleProducerManagerPage() {
         ? (calendarSnap.data() as { activeDateKeys?: string[] })
         : null;
       const allowedFromCalendar = Array.isArray(calendarData?.activeDateKeys)
-        ? (calendarData?.activeDateKeys ?? []).filter((key) => loadedSaleDateKeys.includes(key))
-        : loadedSaleDateKeys;
-      const nextEditableDateKeys = calendarData ? allowedFromCalendar : loadedSaleDateKeys;
+        ? (calendarData.activeDateKeys ?? []).filter((key) => loadedSaleDateKeys.includes(key))
+        : [];
+      const nextEditableDateKeys = distributionId ? allowedFromCalendar : loadedSaleDateKeys;
       setAllowedDateKeys(nextEditableDateKeys);
       setEditableDateKeysByProducer((prev) => ({
         ...prev,
         [currentProducerId]: nextEditableDateKeys,
       }));
-
-      const offersByVariant = new Map<string, string[]>();
-      let hasProducerOffers = false;
-      if (distributionId) {
-        const offerSnap = await getDocs(
-          query(
-            collection(firebaseDb, "distributionDates", distributionId, "offerItems"),
-            where("producerId", "==", currentProducerId),
-          ),
-        );
-        hasProducerOffers = offerSnap.size > 0;
-        offerSnap.docs.forEach((offerDoc) => {
-          const data = offerDoc.data() as {
-            productId?: string;
-            variantId?: string;
-            saleDateKey?: string;
-            dateIndex?: number;
-            active?: boolean;
-          };
-          if (data.active === false) return;
-          const productId = String(data.productId ?? "");
-          const variantId = String(data.variantId ?? "");
-          if (!productId || !variantId) return;
-          const resolvedDateKey =
-            typeof data.saleDateKey === "string" && data.saleDateKey
-              ? data.saleDateKey
-              : typeof data.dateIndex === "number"
-                ? loadedSaleDateKeys[data.dateIndex] ?? ""
-                : "";
-          if (!resolvedDateKey) return;
-          const mapKey = `${productId}:${variantId}`;
-          const current = offersByVariant.get(mapKey) ?? [];
-          if (!current.includes(resolvedDateKey)) {
-            offersByVariant.set(mapKey, [...current, resolvedDateKey]);
-          }
-        });
-      }
 
       const variantsByProduct = new Map<string, VariantDraft[]>();
       const variantSnaps = await Promise.all(
@@ -334,26 +297,13 @@ export default function AdminSaleProducerManagerPage() {
         const productId = productSnap.docs[index]?.id;
         if (!productId) return;
         const variants = variantSnap.docs.map((variantDoc) => {
-          const variantData = variantDoc.data() as { label?: string; price?: number; activeDates?: string[] };
-          const activeDatesFromOffers =
-            offersByVariant.get(`${productId}:${variantDoc.id}`)?.filter((key) =>
-              nextEditableDateKeys.includes(key),
-            ) ?? [];
-          const hasStoredActiveDates = Array.isArray(variantData.activeDates);
-          const activeDatesFromVariant = hasStoredActiveDates
-            ? variantData.activeDates!.filter((key) => nextEditableDateKeys.includes(key))
-            : [];
-          const activeDates = hasProducerOffers
-            ? activeDatesFromOffers
-            : hasStoredActiveDates
-              ? activeDatesFromVariant
-              : [...nextEditableDateKeys];
+          const variantData = variantDoc.data() as { label?: string; price?: number };
           return {
             id: variantDoc.id,
             tempId: variantDoc.id,
             label: String(variantData.label ?? "Variante"),
             price: Number(variantData.price ?? 0),
-            activeDates,
+            activeDates: [...nextEditableDateKeys],
           } satisfies VariantDraft;
         });
         variantsByProduct.set(productId, variants);
@@ -703,17 +653,13 @@ export default function AdminSaleProducerManagerPage() {
           const variantData = variantDoc.data() as {
             label?: string;
             price?: number;
-            activeDates?: string[];
           };
-          const activeDates = Array.isArray(variantData.activeDates)
-            ? variantData.activeDates.filter((key) => selectedDateKeys.includes(key))
-            : [...selectedDateKeys];
           return {
             id: variantDoc.id,
             tempId: variantDoc.id,
             label: String(variantData.label ?? "Variante"),
             price: Number(variantData.price ?? 0),
-            activeDates,
+            activeDates: [...selectedDateKeys],
           } satisfies VariantDraft;
         });
 
@@ -752,9 +698,9 @@ export default function AdminSaleProducerManagerPage() {
       const calendarSnap = await getDoc(
         doc(firebaseDb, "distributionDates", distributionId, "calendarProducers", producerId),
       );
-      if (!calendarSnap.exists()) return [...saleDateKeys];
+      if (!calendarSnap.exists()) return [];
       const calendarData = calendarSnap.data() as { activeDateKeys?: string[] };
-      if (!Array.isArray(calendarData.activeDateKeys)) return [...saleDateKeys];
+      if (!Array.isArray(calendarData.activeDateKeys)) return [];
       return calendarData.activeDateKeys.filter(
         (key): key is string => typeof key === "string" && saleDateKeys.includes(key),
       );
@@ -1378,4 +1324,3 @@ export default function AdminSaleProducerManagerPage() {
     </div>
   );
 }
-

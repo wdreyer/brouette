@@ -44,6 +44,10 @@ type DateColumn = {
   isStart: boolean;
 };
 
+function selectionKey(distributionId: string, dateKeyValue: string) {
+  return `${distributionId}::${dateKeyValue}`;
+}
+
 function dateKey(date: Date) {
   return date.toISOString().slice(0, 10);
 }
@@ -147,7 +151,7 @@ export default function AnnualCalendarEditor() {
       nextProducers.forEach((producer) => {
         const producerKeys = rows[producer.id] ?? [];
         keys.forEach((key) => {
-          selected[producer.id][key] = producerKeys.includes(key);
+          selected[producer.id][selectionKey(distribution.id, key)] = producerKeys.includes(key);
         });
       });
     }
@@ -199,7 +203,9 @@ export default function AnnualCalendarEditor() {
       const keys = sortDateKeys(distributionDateKeys[distribution.id] ?? []);
       let count = 0;
       producers.forEach((producer) => {
-        const isChecked = keys.some((key) => Boolean(selectedByProducer[producer.id]?.[key]));
+        const isChecked = keys.some((key) =>
+          Boolean(selectedByProducer[producer.id]?.[selectionKey(distribution.id, key)]),
+        );
         if (isChecked) count += 1;
       });
       next[distribution.id] = count;
@@ -363,12 +369,13 @@ export default function AnnualCalendarEditor() {
   };
 
   const toggleDate = (producerId: string, date: DateColumn) => {
-    const nextValue = !Boolean(selectedByProducer[producerId]?.[date.dateKey]);
+    const key = selectionKey(date.distributionId, date.dateKey);
+    const nextValue = !Boolean(selectedByProducer[producerId]?.[key]);
     setSelectedByProducer((prev) => ({
       ...prev,
       [producerId]: {
         ...(prev[producerId] ?? {}),
-        [date.dateKey]: nextValue,
+        [key]: nextValue,
       },
     }));
   };
@@ -395,7 +402,9 @@ export default function AnnualCalendarEditor() {
       );
 
       producers.forEach((producer) => {
-        const activeDateKeys = keys.filter((key) => selectedByProducer[producer.id]?.[key]);
+        const activeDateKeys = keys.filter(
+          (key) => selectedByProducer[producer.id]?.[selectionKey(distribution.id, key)],
+        );
         const calendarRef = doc(
           firebaseDb,
           "distributionDates",
@@ -462,7 +471,9 @@ export default function AnnualCalendarEditor() {
     activeDistributions.forEach((distribution) => {
       const keys = sortDateKeys(distributionDateKeys[distribution.id] ?? []);
       nextExisting[distribution.id] = producers
-        .filter((producer) => keys.some((key) => selectedByProducer[producer.id]?.[key]))
+        .filter((producer) =>
+          keys.some((key) => selectedByProducer[producer.id]?.[selectionKey(distribution.id, key)]),
+        )
         .map((producer) => producer.id);
     });
     setExistingCalendarDocs(nextExisting);
@@ -726,7 +737,11 @@ export default function AnnualCalendarEditor() {
                     >
                       <input
                         type="checkbox"
-                        checked={Boolean(selectedByProducer[producer.id]?.[column.dateKey])}
+                        checked={Boolean(
+                          selectedByProducer[producer.id]?.[
+                            selectionKey(column.distributionId, column.dateKey)
+                          ],
+                        )}
                         onChange={() => toggleDate(producer.id, column)}
                       />
                     </td>
