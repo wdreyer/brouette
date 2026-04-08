@@ -458,9 +458,16 @@ export default function AnnualCalendarEditor() {
       await batch.commit();
     }
 
+    const nextExisting: Record<string, string[]> = { ...existingCalendarDocs };
+    activeDistributions.forEach((distribution) => {
+      const keys = sortDateKeys(distributionDateKeys[distribution.id] ?? []);
+      nextExisting[distribution.id] = producers
+        .filter((producer) => keys.some((key) => selectedByProducer[producer.id]?.[key]))
+        .map((producer) => producer.id);
+    });
+    setExistingCalendarDocs(nextExisting);
     setSaving(false);
-    setMessage("Calendrier enregistrÃ©.");
-    await load();
+    setMessage("Calendrier enregistré.");
   };
 
   const producersWithoutProductsCount = producers.filter(
