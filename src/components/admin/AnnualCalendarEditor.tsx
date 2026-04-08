@@ -363,11 +363,12 @@ export default function AnnualCalendarEditor() {
   };
 
   const toggleDate = (producerId: string, date: DateColumn) => {
+    const nextValue = !Boolean(selectedByProducer[producerId]?.[date.dateKey]);
     setSelectedByProducer((prev) => ({
       ...prev,
       [producerId]: {
         ...(prev[producerId] ?? {}),
-        [date.dateKey]: !Boolean(prev[producerId]?.[date.dateKey]),
+        [date.dateKey]: nextValue,
       },
     }));
   };
