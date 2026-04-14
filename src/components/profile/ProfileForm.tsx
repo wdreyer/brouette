@@ -1,8 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { updateEmail } from "firebase/auth";
-import { deleteField, doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
+import {
+  EmailAuthProvider,
+  reauthenticateWithCredential,
+  updateEmail,
+  updatePassword,
+} from "firebase/auth";
+import { deleteField, doc, getDoc, serverTimestamp, setDoc, updateDoc } from "firebase/firestore";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { firebaseAuth, firebaseDb } from "@/lib/firebase/client";
 
@@ -86,6 +91,11 @@ export default function ProfileForm({
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
   const [editing, setEditing] = useState(startInEdit || !requireEditToggle);
+  const [passwordCurrent, setPasswordCurrent] = useState("");
+  const [passwordNext, setPasswordNext] = useState("");
+  const [passwordConfirm, setPasswordConfirm] = useState("");
+  const [passwordMessage, setPasswordMessage] = useState("");
+  const [passwordSaving, setPasswordSaving] = useState(false);
 
   const editable = useMemo(() => (!requireEditToggle ? true : editing), [editing, requireEditToggle]);
   const isOwnProfile = useMemo(() => {
@@ -260,6 +270,58 @@ export default function ProfileForm({
     setDraft(initialDraft);
     setEditing(false);
     setMessage("");
+  };
+
+  const savePassword = async () => {
+    setPasswordMessage("");
+    if (!isOwnProfile) return;
+    if (!passwordCurrent.trim()) {
+      setPasswordMessage("Renseigne ton mot de passe actuel.");
+      return;
+    }
+    if (passwordNext.trim().length < 8) {
+      setPasswordMessage("Le nouveau mot de passe doit contenir au moins 8 caracteres.");
+      return;
+    }
+    if (passwordNext !== passwordConfirm) {
+      setPasswordMessage("La confirmation ne correspond pas.");
+      return;
+    }
+
+    const currentUser = firebaseAuth.currentUser;
+    const currentEmail = String(currentUser?.email ?? "").trim();
+    if (!currentUser || !currentEmail) {
+      setPasswordMessage("Session invalide. Reconnecte-toi.");
+      return;
+    }
+
+    try {
+      setPasswordSaving(true);
+      const credential = EmailAuthProvider.credential(currentEmail, passwordCurrent);
+      await reauthenticateWithCredential(currentUser, credential);
+      await updatePassword(currentUser, passwordNext);
+      await updateDoc(doc(firebaseDb, "members", userId), {
+        "auth.mustChangePassword": false,
+        "auth.passwordUpdatedAt": serverTimestamp(),
+      });
+      setPasswordCurrent("");
+      setPasswordNext("");
+      setPasswordConfirm("");
+      setPasswordMessage("Mot de passe mis a jour.");
+    } catch (error) {
+      const code = (error as { code?: string } | undefined)?.code ?? "";
+      if (code === "auth/wrong-password" || code === "auth/invalid-credential") {
+        setPasswordMessage("Mot de passe actuel incorrect.");
+        return;
+      }
+      if (code === "auth/weak-password") {
+        setPasswordMessage("Nouveau mot de passe trop faible.");
+        return;
+      }
+      setPasswordMessage("Impossible de modifier le mot de passe. Reessaie.");
+    } finally {
+      setPasswordSaving(false);
+    }
   };
 
   return (
@@ -474,6 +536,52 @@ export default function ProfileForm({
               </div>
             </>
           )}
+
+          {isOwnProfile ? (
+            <div className="rounded-xl border border-clay/70 bg-stone/50 p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">Securite</p>
+              <p className="mt-1 text-sm text-ink/70">Changer mon mot de passe</p>
+              <div className="mt-3 grid gap-3 md:grid-cols-3">
+                <label className="flex flex-col gap-1 text-xs font-semibold text-ink/70">
+                  Mot de passe actuel
+                  <input
+                    className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
+                    type="password"
+                    value={passwordCurrent}
+                    onChange={(event) => setPasswordCurrent(event.target.value)}
+                  />
+                </label>
+                <label className="flex flex-col gap-1 text-xs font-semibold text-ink/70">
+                  Nouveau mot de passe
+                  <input
+                    className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
+                    type="password"
+                    value={passwordNext}
+                    onChange={(event) => setPasswordNext(event.target.value)}
+                  />
+                </label>
+                <label className="flex flex-col gap-1 text-xs font-semibold text-ink/70">
+                  Confirmer
+                  <input
+                    className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
+                    type="password"
+                    value={passwordConfirm}
+                    onChange={(event) => setPasswordConfirm(event.target.value)}
+                  />
+                </label>
+              </div>
+              <div className="mt-3 flex flex-wrap items-center gap-3">
+                <button
+                  className="w-fit rounded-full border border-ink/20 px-4 py-2 text-sm font-semibold text-ink"
+                  onClick={savePassword}
+                  disabled={passwordSaving}
+                >
+                  {passwordSaving ? "Mise a jour..." : "Mettre a jour le mot de passe"}
+                </button>
+                {passwordMessage ? <p className="text-sm text-moss">{passwordMessage}</p> : null}
+              </div>
+            </div>
+          ) : null}
 
           <div className="grid gap-4 rounded-xl border border-clay/70 bg-stone/50 p-4 md:grid-cols-2">
             <div>

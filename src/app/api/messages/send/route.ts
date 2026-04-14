@@ -295,12 +295,12 @@ async function listMembersRecipients(options: {
 }
 
 function targetLabel(target: TargetKind, listName?: string) {
-  if (target === "all-members-and-coop") return "Tous les adherents et membres coop";
-  if (target === "adherents-only") return "Adherents uniquement";
-  if (target === "recent-buyers") return "Commandeurs recents";
+  if (target === "all-members-and-coop") return "Tous les adhérents et membres Coop";
+  if (target === "adherents-only") return "Adhérents uniquement";
+  if (target === "recent-buyers") return "Adhérents ayant commandé récemment";
   if (target === "coop-only") return "Membres coop";
-  if (target === "contact-list") return listName ? `Liste: ${listName}` : "Liste de contacts";
-  return "Selection d'adherents";
+  if (target === "contact-list") return listName ? `Liste : ${listName}` : "Liste de diffusion";
+  return "Sélection d'adhérents";
 }
 
 export async function POST(request: Request) {

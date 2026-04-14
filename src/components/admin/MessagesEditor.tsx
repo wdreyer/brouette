@@ -90,17 +90,17 @@ const BUILTIN_TEMPLATES = [
     name: "Rappel retrait (J-1/J-2)",
     subject: "Rappel retrait de commande",
     content:
-      "Bonjour,\n\nPetit rappel: ta commande est a recuperer tres bientot. Pense a verifier ton recap par date et par producteur.\n\nA bientot,\nLa Brouette",
+      "Bonjour,\n\nPetit rappel : ta commande est a recuperer tres bientot. Pense a verifier ton recap par date et par producteur.\n\nA bientot,\nLa Brouette",
   },
 ];
 
 const TARGET_OPTIONS: { value: TargetKind; label: string; desc: string }[] = [
-  { value: "all-members-and-coop", label: "Tous", desc: "Adherents + membres coop" },
+  { value: "all-members-and-coop", label: "Tous", desc: "Tous les adherents et membres Coop" },
   { value: "adherents-only", label: "Adherents", desc: "Membres avec role adherent" },
-  { value: "recent-buyers", label: "Commandeurs recents", desc: "Personnes ayant commande recemment" },
-  { value: "coop-only", label: "Equipe coop", desc: "Admins et referents" },
+  { value: "recent-buyers", label: "Commandes recentes", desc: "Personnes ayant commande recemment" },
+  { value: "coop-only", label: "Membres Coop", desc: "Admins et referents" },
   { value: "selected-adherents", label: "Selection manuelle", desc: "Choisir les adherents un par un" },
-  { value: "contact-list", label: "Liste de contacts", desc: "Utiliser une liste enregistree" },
+  { value: "contact-list", label: "Liste de diffusion", desc: "Utiliser une liste enregistree" },
 ];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -136,7 +136,7 @@ function fmtDate(ts?: Timestamp) {
 }
 
 function getTargetLabel(target: TargetKind, listName?: string) {
-  if (target === "contact-list" && listName) return `Liste: ${listName}`;
+  if (target === "contact-list" && listName) return `Liste : ${listName}`;
   return TARGET_OPTIONS.find((o) => o.value === target)?.label ?? target;
 }
 
@@ -299,7 +299,7 @@ export default function MessagesEditor() {
   const applyTemplate = (tmpl: { subject?: string; content?: string; name?: string } | null) => {
     if (!tmpl) return;
     setDraft((prev) => ({ ...prev, subject: tmpl.subject ?? "", content: tmpl.content ?? "" }));
-    setStatusMsg({ type: "info", text: "Template applique." });
+    setStatusMsg({ type: "info", text: "Modele applique." });
   };
 
   const toggleManualMember = (memberId: string) => {
@@ -321,7 +321,7 @@ export default function MessagesEditor() {
       return;
     }
     if (mode === "send" && draft.target === "contact-list" && !draft.contactListId) {
-      setStatusMsg({ type: "error", text: "Selectionne une liste de contacts." });
+      setStatusMsg({ type: "error", text: "Selectionne une liste de diffusion." });
       return;
     }
     if (mode === "test" && !draft.testEmail.trim()) {
@@ -402,7 +402,7 @@ export default function MessagesEditor() {
         updatedAt: serverTimestamp(),
       });
       setQuickTemplateName("");
-      setStatusMsg({ type: "success", text: "Template enregistre." });
+      setStatusMsg({ type: "success", text: "Modele enregistre." });
       await load();
     } catch (err) {
       setStatusMsg({ type: "error", text: err instanceof Error ? err.message : "Erreur." });
@@ -427,7 +427,7 @@ export default function MessagesEditor() {
           { name, subject, content, updatedAt: serverTimestamp() },
           { merge: true },
         );
-        setStatusMsg({ type: "success", text: "Template mis a jour." });
+        setStatusMsg({ type: "success", text: "Modele mis a jour." });
       } else {
         await addDoc(collection(firebaseDb, "messageTemplates"), {
           name,
@@ -436,7 +436,7 @@ export default function MessagesEditor() {
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
         });
-        setStatusMsg({ type: "success", text: "Template cree." });
+        setStatusMsg({ type: "success", text: "Modele cree." });
       }
       setEditingTemplate(null);
       await load();
@@ -450,7 +450,7 @@ export default function MessagesEditor() {
     try {
       await deleteDoc(doc(firebaseDb, "messageTemplates", deleteTemplateId));
       setDeleteTemplateId(null);
-      setStatusMsg({ type: "success", text: "Template supprime." });
+      setStatusMsg({ type: "success", text: "Modele supprime." });
       await load();
     } catch (err) {
       setStatusMsg({ type: "error", text: err instanceof Error ? err.message : "Erreur." });
@@ -525,8 +525,8 @@ export default function MessagesEditor() {
 
   const tabs: { key: ActiveTab; label: string; count?: number }[] = [
     { key: "composer", label: "Composer" },
-    { key: "templates", label: "Templates", count: templates.length },
-    { key: "lists", label: "Listes de contacts", count: contactLists.length },
+    { key: "templates", label: "Modeles", count: templates.length },
+    { key: "lists", label: "Listes de diffusion", count: contactLists.length },
     { key: "history", label: "Historique", count: messages.length },
   ];
 
@@ -537,7 +537,7 @@ export default function MessagesEditor() {
         <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-ink/55">Messagerie</p>
         <h2 className="mt-2 font-serif text-3xl">Envoi de messages</h2>
         <p className="mt-3 max-w-3xl text-sm leading-7 text-ink/70">
-          Composez et envoyez des emails, gerez vos templates et listes de contacts.
+          Composez et envoyez des emails, gerez vos modeles et vos listes de diffusion.
         </p>
       </div>
 
@@ -627,7 +627,7 @@ export default function MessagesEditor() {
               {/* Count + filters */}
               <div className="mt-3 rounded-[12px] bg-stone/50 px-3 py-2.5">
                 <p className="text-xs text-ink/60">
-                  Destinataires estimes:{" "}
+                  Destinataires estimes :{" "}
                   <span className="font-bold text-ink">
                     {typeof estimatedTargetCount === "number" ? estimatedTargetCount : "?"}
                   </span>
@@ -669,7 +669,7 @@ export default function MessagesEditor() {
                     className="text-[11px] font-semibold text-forest hover:underline"
                     onClick={() => setActiveTab("lists")}
                   >
-                    Gerer →
+                    Gerer
                   </button>
                 </div>
                 {contactLists.length === 0 ? (
@@ -679,7 +679,7 @@ export default function MessagesEditor() {
                       onClick={() => setActiveTab("lists")}
                       className="mt-1 text-sm font-semibold text-forest hover:underline"
                     >
-                      Creer une liste →
+                      Creer une liste
                     </button>
                   </div>
                 ) : (
@@ -769,12 +769,12 @@ export default function MessagesEditor() {
             {/* Template quick-pick */}
             <div className="rounded-[24px] border border-clay/60 bg-white/90 p-5 shadow-card">
               <div className="flex items-center justify-between">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-ink/50">Template</p>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-ink/50">Modele</p>
                 <button
                   className="text-[11px] font-semibold text-forest hover:underline"
                   onClick={() => setActiveTab("templates")}
                 >
-                  Gerer →
+                  Gerer
                 </button>
               </div>
               <select
@@ -783,7 +783,7 @@ export default function MessagesEditor() {
                 onChange={(e) => setSelectedTemplateKey(e.target.value)}
               >
                 <option value="">Aucun (message libre)</option>
-                <optgroup label="Templates integres">
+                <optgroup label="Modeles integres">
                   {BUILTIN_TEMPLATES.map((t) => (
                     <option key={t.id} value={`builtin:${t.id}`}>
                       {t.name}
@@ -791,10 +791,10 @@ export default function MessagesEditor() {
                   ))}
                 </optgroup>
                 {templates.length > 0 && (
-                  <optgroup label="Templates personnalises">
+                  <optgroup label="Modeles personnalises">
                     {templates.map((t) => (
                       <option key={t.id} value={`custom:${t.id}`}>
-                        {t.name ?? "Template"}
+                        {t.name ?? "Modele"}
                       </option>
                     ))}
                   </optgroup>
@@ -851,7 +851,7 @@ export default function MessagesEditor() {
 
               {/* Test */}
               <div className="mt-4 rounded-[16px] border border-ink/8 bg-stone/30 p-4">
-                <p className="text-xs font-semibold text-ink/55">Test — envoyer a une seule adresse</p>
+                <p className="text-xs font-semibold text-ink/55">Test - envoyer a une seule adresse</p>
                 <div className="mt-2 flex gap-2">
                   <input
                     className="min-w-0 flex-1 rounded-[12px] border border-ink/15 bg-white px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-forest/30"
@@ -899,12 +899,12 @@ export default function MessagesEditor() {
               {/* Save as template shortcut */}
               <div className="mt-4 border-t border-ink/8 pt-4">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.15em] text-ink/45">
-                  Sauvegarder comme template
+                  Sauvegarder comme modele
                 </p>
                 <div className="mt-2 flex gap-2">
                   <input
                     className="min-w-0 flex-1 rounded-[12px] border border-ink/15 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-forest/30"
-                    placeholder="Nom du template..."
+                    placeholder="Nom du modele..."
                     value={quickTemplateName}
                     onChange={(e) => setQuickTemplateName(e.target.value)}
                   />
@@ -929,14 +929,14 @@ export default function MessagesEditor() {
         <div className="flex flex-col gap-5">
           <div className="flex items-center justify-between">
             <div>
-              <h3 className="font-serif text-xl">Templates de messages</h3>
-              <p className="mt-0.5 text-sm text-ink/60">{templates.length} template(s) personnalise(s)</p>
+              <h3 className="font-serif text-xl">Modeles de message</h3>
+              <p className="mt-0.5 text-sm text-ink/60">{templates.length} modele(s) personnalise(s)</p>
             </div>
             <button
               className="rounded-full bg-forest px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-forest/90"
               onClick={() => setEditingTemplate({ id: null, name: "", subject: "", content: "" })}
             >
-              + Nouveau template
+              + Nouveau modele
             </button>
           </div>
 
@@ -944,11 +944,11 @@ export default function MessagesEditor() {
           {editingTemplate && (
             <div className="rounded-[24px] border-2 border-forest/30 bg-white/90 p-6 shadow-card">
               <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-forest/70">
-                {editingTemplate.id ? "Modifier le template" : "Nouveau template"}
+                {editingTemplate.id ? "Modifier le modele" : "Nouveau modele"}
               </p>
               <div className="mt-4 flex flex-col gap-4">
                 <div className="flex flex-col gap-1.5">
-                  <label className="text-xs font-semibold text-ink/60">Nom du template</label>
+                  <label className="text-xs font-semibold text-ink/60">Nom du modele</label>
                   <input
                     className="rounded-[14px] border border-ink/15 bg-white px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-forest/30"
                     placeholder="Ex: Rappel retrait ete"
@@ -998,7 +998,7 @@ export default function MessagesEditor() {
           {/* Built-in templates */}
           <div>
             <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.2em] text-ink/40">
-              Templates integres
+              Modeles integres
             </p>
             <div className="grid gap-4 sm:grid-cols-2">
               {BUILTIN_TEMPLATES.map((tmpl) => (
@@ -1028,14 +1028,14 @@ export default function MessagesEditor() {
           {templates.length > 0 && (
             <div>
               <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.2em] text-ink/40">
-                Templates personnalises
+                Modeles personnalises
               </p>
               <div className="grid gap-4 sm:grid-cols-2">
                 {templates.map((tmpl) => (
                   <div key={tmpl.id} className="rounded-[20px] border border-clay/60 bg-white/90 p-5 shadow-card">
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
-                        <p className="font-semibold text-ink">{tmpl.name ?? "Template"}</p>
+                        <p className="font-semibold text-ink">{tmpl.name ?? "Modele"}</p>
                         <p className="mt-0.5 text-xs text-ink/55">{tmpl.subject}</p>
                       </div>
                       <div className="flex shrink-0 gap-1.5">
@@ -1080,12 +1080,12 @@ export default function MessagesEditor() {
 
           {templates.length === 0 && !editingTemplate && (
             <div className="rounded-[20px] border border-clay/40 bg-white/70 p-10 text-center">
-              <p className="text-sm text-ink/60">Aucun template personnalise.</p>
+              <p className="text-sm text-ink/60">Aucun modele personnalise.</p>
               <button
                 className="mt-3 rounded-full bg-forest px-5 py-2 text-sm font-semibold text-white"
                 onClick={() => setEditingTemplate({ id: null, name: "", subject: "", content: "" })}
               >
-                Creer mon premier template
+                Creer mon premier modele
               </button>
             </div>
           )}
@@ -1094,7 +1094,7 @@ export default function MessagesEditor() {
           {deleteTemplateId && (
             <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm">
               <div className="mx-4 w-full max-w-sm rounded-[24px] bg-white p-6 shadow-2xl">
-                <p className="font-semibold text-ink">Supprimer ce template ?</p>
+                <p className="font-semibold text-ink">Supprimer ce modele ?</p>
                 <p className="mt-1 text-sm text-ink/60">Cette action est irreversible.</p>
                 <div className="mt-4 flex gap-3">
                   <button
@@ -1123,7 +1123,7 @@ export default function MessagesEditor() {
         <div className="flex flex-col gap-5">
           <div className="flex items-center justify-between">
             <div>
-              <h3 className="font-serif text-xl">Listes de contacts</h3>
+              <h3 className="font-serif text-xl">Listes de diffusion</h3>
               <p className="mt-0.5 text-sm text-ink/60">{contactLists.length} liste(s) enregistree(s)</p>
             </div>
             <button
@@ -1295,7 +1295,7 @@ export default function MessagesEditor() {
           {/* List cards */}
           {contactLists.length === 0 && !editingList ? (
             <div className="rounded-[20px] border border-clay/40 bg-white/70 p-10 text-center">
-              <p className="text-sm text-ink/60">Aucune liste de contacts.</p>
+              <p className="text-sm text-ink/60">Aucune liste de diffusion.</p>
               <p className="mt-1 text-xs text-ink/40">
                 Les listes permettent de cibler des groupes specifiques pour vos envois.
               </p>

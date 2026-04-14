@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import HeaderBar from "@/components/HeaderBar";
 import { AuthProvider } from "@/components/auth/AuthProvider";
 import AuthGate from "@/components/auth/AuthGate";
+import PasswordChangeRequiredModal from "@/components/auth/PasswordChangeRequiredModal";
 import ProfileGate from "@/components/profile/ProfileGate";
 import { Toaster } from "sonner";
 import "./globals.css";
@@ -31,6 +32,7 @@ export default function RootLayout({
             <HeaderBar />
             <AuthGate>
               <ProfileGate>
+                <PasswordChangeRequiredModal />
                 <main className="relative z-10">{children}</main>
               </ProfileGate>
             </AuthGate>
