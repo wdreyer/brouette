@@ -350,33 +350,40 @@ export async function POST(request: Request) {
       mode,
     });
 
-    const db = getAdminDb();
-    const now = Timestamp.now();
-    await db.collection("messages").add({
-      target: mode === "test" ? "test" : target,
-      targetLabel: mode === "test" ? "Envoi test" : targetLabel(target, body.contactListName ?? undefined),
-      subject,
-      content,
-      status: "sent",
-      filters: {
-        includeInactive,
-        recentDays: target === "recent-buyers" ? recentDays : null,
-        selectedCount: target === "selected-adherents" ? selectedMemberIds.length : null,
-      },
-      template: {
-        id: body.templateId ?? null,
-        name: body.templateName ?? null,
-      },
-      stats: {
-        recipients: sendResult.sent,
-        sentAt: now,
-        recipientsPreview: recipients.slice(0, 25).map((row) => row.email),
-        provider: "brevo",
-        providerMessageIds: sendResult.providerMessageIds,
-      },
-      createdAt: now,
-      updatedAt: now,
-    });
+    let archiveWarning: string | null = null;
+    try {
+      const db = getAdminDb();
+      const now = Timestamp.now();
+      await db.collection("messages").add({
+        target: mode === "test" ? "test" : target,
+        targetLabel: mode === "test" ? "Envoi test" : targetLabel(target, body.contactListName ?? undefined),
+        subject,
+        content,
+        status: "sent",
+        filters: {
+          includeInactive,
+          recentDays: target === "recent-buyers" ? recentDays : null,
+          selectedCount: target === "selected-adherents" ? selectedMemberIds.length : null,
+        },
+        template: {
+          id: body.templateId ?? null,
+          name: body.templateName ?? null,
+        },
+        stats: {
+          recipients: sendResult.sent,
+          sentAt: now,
+          recipientsPreview: recipients.slice(0, 25).map((row) => row.email),
+          provider: "brevo",
+          providerMessageIds: sendResult.providerMessageIds,
+        },
+        createdAt: now,
+        updatedAt: now,
+      });
+    } catch (archiveError) {
+      const archiveMessage =
+        archiveError instanceof Error ? archiveError.message : "Archivage impossible.";
+      archiveWarning = `Envoi effectue mais archivage impossible: ${archiveMessage}`;
+    }
 
     return NextResponse.json({
       ok: true,
@@ -384,6 +391,7 @@ export async function POST(request: Request) {
       mode,
       target,
       providerMessageIds: sendResult.providerMessageIds,
+      warning: archiveWarning,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Erreur inconnue.";

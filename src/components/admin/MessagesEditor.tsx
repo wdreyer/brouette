@@ -356,6 +356,7 @@ export default function MessagesEditor() {
         error?: string;
         sent?: number;
         providerMessageIds?: string[];
+        warning?: string | null;
       };
       if (!response.ok || !result.ok) {
         setStatusMsg({ type: "error", text: result.error ?? "Erreur d'envoi." });
@@ -372,6 +373,12 @@ export default function MessagesEditor() {
             ? `Test envoye a ${draft.testEmail}.${ref}`
             : `Message envoye a ${result.sent ?? 0} destinataires.${ref}`,
       });
+      if (result.warning) {
+        setStatusMsg({
+          type: "info",
+          text: `${mode === "test" ? "Test envoye." : "Message envoye."} ${result.warning}`,
+        });
+      }
       await load();
     } catch (err) {
       setStatusMsg({ type: "error", text: err instanceof Error ? err.message : "Erreur d'envoi." });
