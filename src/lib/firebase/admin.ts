@@ -1,5 +1,5 @@
 import fs from "node:fs";
-import { cert, getApps, initializeApp } from "firebase-admin/app";
+import { applicationDefault, cert, getApps, initializeApp } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
 
 function getServiceAccount() {
@@ -14,16 +14,39 @@ function getServiceAccount() {
     return JSON.parse(raw);
   }
 
-  throw new Error(
-    "Missing Firebase admin credentials. Set FIREBASE_SERVICE_ACCOUNT or GOOGLE_APPLICATION_CREDENTIALS.",
-  );
+  const projectId = process.env.FIREBASE_PROJECT_ID || process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
+  const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
+  const privateKeyRaw = process.env.FIREBASE_PRIVATE_KEY;
+  if (projectId && clientEmail && privateKeyRaw) {
+    return {
+      project_id: projectId,
+      client_email: clientEmail,
+      private_key: privateKeyRaw.replace(/\\n/g, "\n"),
+    };
+  }
+
+  return null;
 }
 
 export function getAdminDb() {
   if (!getApps().length) {
-    initializeApp({
-      credential: cert(getServiceAccount()),
-    });
+    const serviceAccount = getServiceAccount();
+    if (serviceAccount) {
+      initializeApp({
+        credential: cert(serviceAccount),
+      });
+    } else {
+      // Last fallback for environments with ADC configured (e.g. GCP runtime).
+      try {
+        initializeApp({
+          credential: applicationDefault(),
+        });
+      } catch {
+        throw new Error(
+          "Missing Firebase admin credentials. Set FIREBASE_SERVICE_ACCOUNT or GOOGLE_APPLICATION_CREDENTIALS or FIREBASE_PROJECT_ID/FIREBASE_CLIENT_EMAIL/FIREBASE_PRIVATE_KEY.",
+        );
+      }
+    }
   }
   return getFirestore();
 }
