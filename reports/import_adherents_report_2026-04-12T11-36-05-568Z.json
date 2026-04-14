@@ -1,0 +1,11 @@
+{
+  "csvPath": "C:\\Users\\dreye\\Downloads\\adhérents.csv",
+  "totalRows": 117,
+  "groupedCandidates": 114,
+  "skippedRowsNoIdentity": 0,
+  "toCreate": 99,
+  "skippedExisting": 14,
+  "skippedForced": 1,
+  "ambiguous": 0,
+  "ambiguousDetails": []
+}

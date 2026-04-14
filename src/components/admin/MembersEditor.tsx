@@ -212,6 +212,7 @@ export default function MembersEditor({
   const [ledgerNote, setLedgerNote] = useState("");
 
   const tableFields = useMemo(() => fields.filter((field) => field.table), [fields]);
+  const showAssignedProducersColumn = viewMode !== "adherents";
   const formFields = useMemo(
     () =>
       fields.filter(
@@ -257,7 +258,7 @@ export default function MembersEditor({
   const load = async () => {
     setLoading(true);
     const [membersSnap, producersSnap, nextBalanceTrackingEnabled] = await Promise.all([
-      getDocs(query(collection(firebaseDb, collectionName), limit(50))),
+      getDocs(collection(firebaseDb, collectionName)),
       getDocs(collection(firebaseDb, "producers")),
       readBalanceTrackingEnabled(firebaseDb),
     ]);
@@ -688,12 +689,45 @@ export default function MembersEditor({
 
   const viewingLedger = viewingEntry ? (ledgerByMemberId[viewingEntry.id] ?? []) : [];
   const viewingBalance = viewingLedger.reduce((sum, entry) => sum + Number(entry.amount ?? 0), 0);
+  const roleCounts = useMemo(() => {
+    return docs.reduce(
+      (acc, entry) => {
+        const entryRole = String(getByPath(entry.data, "auth.role") ?? "member").toLowerCase();
+        if (entryRole === "admin") {
+          acc.admin += 1;
+        } else if (entryRole === "referent") {
+          acc.referent += 1;
+        } else {
+          acc.member += 1;
+        }
+        return acc;
+      },
+      { member: 0, referent: 0, admin: 0 },
+    );
+  }, [docs]);
 
   return (
     <div className="flex flex-col gap-6">
       <div className="rounded-3xl border border-clay/70 bg-white/80 p-6 shadow-card">
         <h2 className="font-serif text-2xl">{title}</h2>
         {description ? <p className="mt-2 text-sm text-ink/70">{description}</p> : null}
+        <div className="mt-4 flex flex-wrap items-center gap-2 text-sm">
+          {viewMode === "adherents" ? (
+            <span className="rounded-full border border-ink/20 bg-white px-3 py-1 font-semibold text-ink/80">
+              Membres: {roleCounts.member}
+            </span>
+          ) : null}
+          {viewMode === "coopMembers" ? (
+            <>
+              <span className="rounded-full border border-ink/20 bg-white px-3 py-1 font-semibold text-ink/80">
+                Referents: {roleCounts.referent}
+              </span>
+              <span className="rounded-full border border-ink/20 bg-white px-3 py-1 font-semibold text-ink/80">
+                Admins: {roleCounts.admin}
+              </span>
+            </>
+          ) : null}
+        </div>
       </div>
 
       <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-clay/70 bg-white/80 p-4 shadow-card">
@@ -767,7 +801,9 @@ export default function MembersEditor({
                   {balanceTrackingEnabled ? (
                     <th className="px-3 py-1.5 text-xs font-semibold text-ink">Solde</th>
                   ) : null}
-                  <th className="px-3 py-1.5 text-xs font-semibold text-ink">Producteurs</th>
+                  {showAssignedProducersColumn ? (
+                    <th className="px-3 py-1.5 text-xs font-semibold text-ink">Producteurs</th>
+                  ) : null}
                 </tr>
               </thead>
               <tbody>
@@ -808,9 +844,11 @@ export default function MembersEditor({
                         })()}
                       </td>
                     ) : null}
-                    <td className="px-3 py-1.5 text-xs text-ink/70">
-                      {producers.filter((producer) => producer.referentId === entry.id).length}
-                    </td>
+                    {showAssignedProducersColumn ? (
+                      <td className="px-3 py-1.5 text-xs text-ink/70">
+                        {producers.filter((producer) => producer.referentId === entry.id).length}
+                      </td>
+                    ) : null}
                   </tr>
                 ))}
               </tbody>

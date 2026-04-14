@@ -1,0 +1,131 @@
+{
+  "csvPath": "C:\\Users\\dreye\\Downloads\\adhérents.csv",
+  "totalRows": 117,
+  "groupedCandidates": 114,
+  "skippedRowsNoIdentity": 0,
+  "toCreate": 95,
+  "skippedExisting": 14,
+  "ambiguous": 5,
+  "ambiguousDetails": [
+    {
+      "candidate": {
+        "firstName": "Jean Marc",
+        "lastName": "REBOUL",
+        "fullName": "Jean Marc REBOUL",
+        "normalizedFullName": "jean marc reboul",
+        "emails": [
+          "jmr@pallaz.eu"
+        ],
+        "phones": [],
+        "address": {
+          "street": "958 Rte d'Agy",
+          "city": "Saint-Sigismond",
+          "postalCode": "74300"
+        },
+        "sourceRows": 1
+      },
+      "reason": "missing_email_or_phone",
+      "matches": []
+    },
+    {
+      "candidate": {
+        "firstName": "Jérôme",
+        "lastName": "Pezet",
+        "fullName": "Jérôme Pezet",
+        "normalizedFullName": "jerome pezet",
+        "emails": [
+          "jerome_pezet@hotmail.com"
+        ],
+        "phones": [],
+        "address": {
+          "street": "",
+          "city": "",
+          "postalCode": ""
+        },
+        "sourceRows": 1
+      },
+      "reason": "missing_email_or_phone",
+      "matches": []
+    },
+    {
+      "candidate": {
+        "firstName": "Ludovic",
+        "lastName": "LECUYER",
+        "fullName": "Ludovic LECUYER",
+        "normalizedFullName": "ludovic lecuyer",
+        "emails": [
+          "ludo2703@hotmail.com",
+          "ludovic.lecuyer@somfy.com"
+        ],
+        "phones": [
+          "06 85 52 14 84"
+        ],
+        "address": {
+          "street": "1 Imp. du Grand Massif",
+          "city": "Taninges",
+          "postalCode": "74440"
+        },
+        "sourceRows": 1
+      },
+      "reason": "multiple_existing_matches",
+      "matches": [
+        {
+          "id": "xSsDncjxbiV6v3sptEDjmh6goKB3",
+          "role": "member",
+          "nameKey": "ludovic lecuyer",
+          "emails": [
+            "ludo2703@hotmail.com"
+          ]
+        },
+        {
+          "id": "y8gSTdcn7QWYtiEYSg17",
+          "role": "referent",
+          "nameKey": "ludovic lecuyer",
+          "emails": [
+            "ludo2703@hotmail.com"
+          ]
+        }
+      ]
+    },
+    {
+      "candidate": {
+        "firstName": "Michel",
+        "lastName": "PISTIAUX",
+        "fullName": "Michel PISTIAUX",
+        "normalizedFullName": "michel pistiaux",
+        "emails": [
+          "patou_pistiaux@hotmail.com"
+        ],
+        "phones": [],
+        "address": {
+          "street": "",
+          "city": "",
+          "postalCode": ""
+        },
+        "sourceRows": 1
+      },
+      "reason": "missing_email_or_phone",
+      "matches": []
+    },
+    {
+      "candidate": {
+        "firstName": "Severine (1)",
+        "lastName": "MULATIER",
+        "fullName": "Severine (1) MULATIER",
+        "normalizedFullName": "severine (1) mulatier",
+        "emails": [
+          "mulatiers@yahoo.fr"
+        ],
+        "phones": [],
+        "address": {
+          "street": "",
+          "city": "",
+          "postalCode": ""
+        },
+        "sourceRows": 1
+      },
+      "reason": "missing_email_or_phone",
+      "matches": []
+    }
+  ]
+}
