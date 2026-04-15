@@ -117,7 +117,7 @@ export default function ProducersEditor({
     setLoading(true);
     const [snapshot, referentSnap, productsSnap] = await Promise.all([
       getDocs(query(collection(firebaseDb, collectionName), limit(200))),
-      getDocs(query(collection(firebaseDb, "members"), where("auth.role", "==", "referent"))),
+      getDocs(query(collection(firebaseDb, "members"), where("auth.role", "in", ["referent", "admin"]))),
       getDocs(collection(firebaseDb, "products")),
     ]);
     const items = snapshot.docs.map((docSnap) => ({

@@ -132,7 +132,7 @@ export default function ProducerPage() {
       setLoading(true);
       const [producerSnap, referentSnap, productsSnap, ordersSnap, distributionsSnap] = await Promise.all([
         getDoc(doc(firebaseDb, "producers", producerId)),
-        getDocs(query(collection(firebaseDb, "members"), where("auth.role", "==", "referent"))),
+        getDocs(query(collection(firebaseDb, "members"), where("auth.role", "in", ["referent", "admin"]))),
         getDocs(query(collection(firebaseDb, "products"), where("producerId", "==", producerId))),
         getDocs(collection(firebaseDb, "orders")),
         getDocs(collection(firebaseDb, "distributionDates")),
