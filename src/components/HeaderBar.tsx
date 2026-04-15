@@ -3,188 +3,18 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useMemo, useState } from "react";
-import { signInWithEmailAndPassword, signOut } from "firebase/auth";
+import { signOut } from "firebase/auth";
 import CartButton from "@/components/CartButton";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { firebaseAuth } from "@/lib/firebase/client";
-
-type TestAccount = {
-  key: string;
-  label: string;
-  emails: string[];
-  passwords: string[];
-};
-
-const QUICK_LOGIN_BYPASS_KEY = "brouette:skipMustChangePasswordForEmail";
-
-function uniquePasswords(values: Array<string | undefined>) {
-  return Array.from(new Set(values.map((value) => String(value ?? "").trim()).filter(Boolean)));
-}
-
-function uniqueEmails(values: Array<string | undefined>) {
-  return Array.from(
-    new Set(
-      values
-        .map((value) => String(value ?? "").trim().toLowerCase())
-        .filter(Boolean),
-    ),
-  );
-}
-
-function parseEnvEmailList(value: string | undefined) {
-  return String(value ?? "")
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
-function buildTestAccounts(): TestAccount[] {
-  const globalPassword =
-    process.env.NEXT_PUBLIC_TEST_AUTH_PASSWORD ??
-    process.env.NEXT_PUBLIC_DEFAULT_LOGIN_PASSWORD ??
-    "brouette2026";
-
-  return [
-    {
-      key: "referent",
-      label: "Référent",
-      emails: uniqueEmails([
-        process.env.NEXT_PUBLIC_TEST_AUTH_REFERENT_EMAIL,
-        ...parseEnvEmailList(process.env.NEXT_PUBLIC_TEST_AUTH_REFERENT_EMAILS),
-        "referent.test@brouette.local",
-        "referent@referent.com",
-        "adherent3.test@brouette.local",
-        "sylvie.duplan@wanadoo.fr",
-      ]),
-      passwords: uniquePasswords([
-        process.env.NEXT_PUBLIC_TEST_AUTH_REFERENT_PASSWORD,
-        globalPassword,
-        "brouette2026",
-      ]),
-    },
-    {
-      key: "admin",
-      label: "Admin",
-      emails: uniqueEmails([
-        process.env.NEXT_PUBLIC_TEST_AUTH_ADMIN_EMAIL,
-        "admin.test@brouette.local",
-        "brouette@test.com",
-        "dreyer.wil@gmail.com",
-      ]),
-      passwords: uniquePasswords([
-        process.env.NEXT_PUBLIC_TEST_AUTH_ADMIN_PASSWORD,
-        globalPassword,
-        "brouette2026",
-      ]),
-    },
-    {
-      key: "member1",
-      label: "Adhérent 1",
-      emails: uniqueEmails([
-        process.env.NEXT_PUBLIC_TEST_AUTH_MEMBER1_EMAIL,
-        "adherent1.test@brouette.local",
-      ]),
-      passwords: uniquePasswords([
-        process.env.NEXT_PUBLIC_TEST_AUTH_MEMBER1_PASSWORD,
-        globalPassword,
-        "Test123456!",
-      ]),
-    },
-    {
-      key: "member2",
-      label: "Adhérent 2",
-      emails: uniqueEmails([
-        process.env.NEXT_PUBLIC_TEST_AUTH_MEMBER2_EMAIL,
-        "adherent2.test@brouette.local",
-      ]),
-      passwords: uniquePasswords([
-        process.env.NEXT_PUBLIC_TEST_AUTH_MEMBER2_PASSWORD,
-        globalPassword,
-        "Test123456!",
-      ]),
-    },
-    {
-      key: "member3",
-      label: "Adhérent 3",
-      emails: uniqueEmails([
-        process.env.NEXT_PUBLIC_TEST_AUTH_MEMBER3_EMAIL,
-        "adherent3.test@brouette.local",
-      ]),
-      passwords: uniquePasswords([
-        process.env.NEXT_PUBLIC_TEST_AUTH_MEMBER3_PASSWORD,
-        globalPassword,
-        "Test123456!",
-      ]),
-    },
-  ];
-}
 
 export default function HeaderBar() {
   const pathname = usePathname();
   const isAdmin = pathname?.startsWith("/admin");
   const { role, user, effectiveRole } = useAuth();
-  const [testKey, setTestKey] = useState("referent");
-  const [testLoading, setTestLoading] = useState(false);
-  const [testError, setTestError] = useState("");
-
-  const testAccounts = useMemo(() => buildTestAccounts(), []);
-  const selectedTestAccount = testAccounts.find((account) => account.key === testKey) ?? testAccounts[0];
 
   const roleBadgeLabel =
     effectiveRole === "admin" ? "Rôle : Admin" : effectiveRole === "referent" ? "Rôle : Référent" : null;
-
-  const loginAsTest = async () => {
-    setTestError("");
-    if (!selectedTestAccount?.emails?.length || !selectedTestAccount?.passwords?.length) {
-      setTestError("Configure les comptes de test dans .env.local.");
-      return;
-    }
-    setTestLoading(true);
-    try {
-      if (firebaseAuth.currentUser) {
-        await signOut(firebaseAuth);
-      }
-      let lastError: unknown = null;
-      let successEmail = "";
-      for (const candidateEmail of selectedTestAccount.emails) {
-        for (const candidatePassword of selectedTestAccount.passwords) {
-          try {
-            await signInWithEmailAndPassword(
-              firebaseAuth,
-              candidateEmail.trim(),
-              candidatePassword,
-            );
-            successEmail = candidateEmail.trim().toLowerCase();
-            lastError = null;
-            break;
-          } catch (error) {
-            lastError = error;
-          }
-        }
-        if (!lastError) break;
-      }
-
-      if (successEmail && typeof window !== "undefined") {
-        window.sessionStorage.setItem(QUICK_LOGIN_BYPASS_KEY, successEmail);
-      }
-
-      if (lastError) {
-        if (typeof window !== "undefined") {
-          window.sessionStorage.removeItem(QUICK_LOGIN_BYPASS_KEY);
-        }
-        throw lastError;
-      }
-    } catch (error) {
-      if (typeof window !== "undefined") {
-        window.sessionStorage.removeItem(QUICK_LOGIN_BYPASS_KEY);
-      }
-      const message = error instanceof Error ? error.message : "Erreur de connexion test.";
-      setTestError(message);
-    } finally {
-      setTestLoading(false);
-    }
-  };
 
   return (
     <header className="relative z-10 border-b border-clay/90 bg-stone/95 backdrop-blur">
@@ -201,28 +31,6 @@ export default function HeaderBar() {
         </Link>
 
         <div className="flex flex-wrap items-center justify-end gap-2">
-          <div className="flex items-center gap-2 rounded border border-ink/20 bg-white px-2 py-1.5">
-            <span className="text-[11px] font-semibold text-ink/70">Se connecter comme</span>
-            <select
-              className="rounded border border-ink/20 bg-white px-2 py-1 text-xs"
-              value={testKey}
-              onChange={(event) => setTestKey(event.target.value)}
-            >
-              {testAccounts.map((account) => (
-                <option key={account.key} value={account.key}>
-                  {account.label}
-                </option>
-              ))}
-            </select>
-            <button
-              className="rounded border border-ink/25 bg-white px-2 py-1 text-xs font-semibold text-ink disabled:opacity-60"
-              onClick={() => loginAsTest().catch(() => undefined)}
-              disabled={testLoading}
-            >
-              {testLoading ? "Connexion..." : "OK"}
-            </button>
-          </div>
-
           {user && roleBadgeLabel ? (
             <span className="rounded border border-forest/40 bg-forest/10 px-3 py-2 text-xs font-semibold text-forest">
               {roleBadgeLabel}
@@ -270,19 +78,13 @@ export default function HeaderBar() {
               className="rounded border border-ink/25 bg-white px-4 py-2 text-xs font-semibold text-ink"
               onClick={() => signOut(firebaseAuth)}
             >
-              Se deconnecter
+              Se déconnecter
             </button>
           ) : null}
 
           {!isAdmin && user ? <CartButton /> : null}
         </div>
       </div>
-
-      {testError ? (
-        <div className="mx-auto w-full max-w-[1600px] px-4 pb-2 md:px-6">
-          <p className="text-xs text-ember">{testError}</p>
-        </div>
-      ) : null}
     </header>
   );
 }
