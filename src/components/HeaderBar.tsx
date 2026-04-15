@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import Image from "next/image";
 import Link from "next/link";
@@ -12,43 +12,110 @@ import { firebaseAuth } from "@/lib/firebase/client";
 type TestAccount = {
   key: string;
   label: string;
-  email: string;
-  password: string;
+  emails: string[];
+  passwords: string[];
 };
 
+const QUICK_LOGIN_BYPASS_KEY = "brouette:skipMustChangePasswordForEmail";
+
+function uniquePasswords(values: Array<string | undefined>) {
+  return Array.from(new Set(values.map((value) => String(value ?? "").trim()).filter(Boolean)));
+}
+
+function uniqueEmails(values: Array<string | undefined>) {
+  return Array.from(
+    new Set(
+      values
+        .map((value) => String(value ?? "").trim().toLowerCase())
+        .filter(Boolean),
+    ),
+  );
+}
+
+function parseEnvEmailList(value: string | undefined) {
+  return String(value ?? "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 function buildTestAccounts(): TestAccount[] {
-  const globalPassword = process.env.NEXT_PUBLIC_TEST_AUTH_PASSWORD ?? "Test123456!";
-  const withPassword = (password?: string) => password ?? globalPassword;
+  const globalPassword =
+    process.env.NEXT_PUBLIC_TEST_AUTH_PASSWORD ??
+    process.env.NEXT_PUBLIC_DEFAULT_LOGIN_PASSWORD ??
+    "brouette2026";
+
   return [
     {
       key: "referent",
       label: "Référent",
-      email: process.env.NEXT_PUBLIC_TEST_AUTH_REFERENT_EMAIL ?? "referent.test@brouette.local",
-      password: withPassword(process.env.NEXT_PUBLIC_TEST_AUTH_REFERENT_PASSWORD),
+      emails: uniqueEmails([
+        process.env.NEXT_PUBLIC_TEST_AUTH_REFERENT_EMAIL,
+        ...parseEnvEmailList(process.env.NEXT_PUBLIC_TEST_AUTH_REFERENT_EMAILS),
+        "referent.test@brouette.local",
+        "referent@referent.com",
+        "adherent3.test@brouette.local",
+        "sylvie.duplan@wanadoo.fr",
+      ]),
+      passwords: uniquePasswords([
+        process.env.NEXT_PUBLIC_TEST_AUTH_REFERENT_PASSWORD,
+        globalPassword,
+        "brouette2026",
+      ]),
     },
     {
       key: "admin",
       label: "Admin",
-      email: process.env.NEXT_PUBLIC_TEST_AUTH_ADMIN_EMAIL ?? "admin.test@brouette.local",
-      password: withPassword(process.env.NEXT_PUBLIC_TEST_AUTH_ADMIN_PASSWORD),
+      emails: uniqueEmails([
+        process.env.NEXT_PUBLIC_TEST_AUTH_ADMIN_EMAIL,
+        "admin.test@brouette.local",
+        "brouette@test.com",
+        "dreyer.wil@gmail.com",
+      ]),
+      passwords: uniquePasswords([
+        process.env.NEXT_PUBLIC_TEST_AUTH_ADMIN_PASSWORD,
+        globalPassword,
+        "brouette2026",
+      ]),
     },
     {
       key: "member1",
       label: "Adhérent 1",
-      email: process.env.NEXT_PUBLIC_TEST_AUTH_MEMBER1_EMAIL ?? "adherent1.test@brouette.local",
-      password: withPassword(process.env.NEXT_PUBLIC_TEST_AUTH_MEMBER1_PASSWORD),
+      emails: uniqueEmails([
+        process.env.NEXT_PUBLIC_TEST_AUTH_MEMBER1_EMAIL,
+        "adherent1.test@brouette.local",
+      ]),
+      passwords: uniquePasswords([
+        process.env.NEXT_PUBLIC_TEST_AUTH_MEMBER1_PASSWORD,
+        globalPassword,
+        "Test123456!",
+      ]),
     },
     {
       key: "member2",
       label: "Adhérent 2",
-      email: process.env.NEXT_PUBLIC_TEST_AUTH_MEMBER2_EMAIL ?? "adherent2.test@brouette.local",
-      password: withPassword(process.env.NEXT_PUBLIC_TEST_AUTH_MEMBER2_PASSWORD),
+      emails: uniqueEmails([
+        process.env.NEXT_PUBLIC_TEST_AUTH_MEMBER2_EMAIL,
+        "adherent2.test@brouette.local",
+      ]),
+      passwords: uniquePasswords([
+        process.env.NEXT_PUBLIC_TEST_AUTH_MEMBER2_PASSWORD,
+        globalPassword,
+        "Test123456!",
+      ]),
     },
     {
       key: "member3",
       label: "Adhérent 3",
-      email: process.env.NEXT_PUBLIC_TEST_AUTH_MEMBER3_EMAIL ?? "adherent3.test@brouette.local",
-      password: withPassword(process.env.NEXT_PUBLIC_TEST_AUTH_MEMBER3_PASSWORD),
+      emails: uniqueEmails([
+        process.env.NEXT_PUBLIC_TEST_AUTH_MEMBER3_EMAIL,
+        "adherent3.test@brouette.local",
+      ]),
+      passwords: uniquePasswords([
+        process.env.NEXT_PUBLIC_TEST_AUTH_MEMBER3_PASSWORD,
+        globalPassword,
+        "Test123456!",
+      ]),
     },
   ];
 }
@@ -69,7 +136,7 @@ export default function HeaderBar() {
 
   const loginAsTest = async () => {
     setTestError("");
-    if (!selectedTestAccount?.email || !selectedTestAccount?.password) {
+    if (!selectedTestAccount?.emails?.length || !selectedTestAccount?.passwords?.length) {
       setTestError("Configure les comptes de test dans .env.local.");
       return;
     }
@@ -78,12 +145,40 @@ export default function HeaderBar() {
       if (firebaseAuth.currentUser) {
         await signOut(firebaseAuth);
       }
-      await signInWithEmailAndPassword(
-        firebaseAuth,
-        selectedTestAccount.email.trim(),
-        selectedTestAccount.password,
-      );
+      let lastError: unknown = null;
+      let successEmail = "";
+      for (const candidateEmail of selectedTestAccount.emails) {
+        for (const candidatePassword of selectedTestAccount.passwords) {
+          try {
+            await signInWithEmailAndPassword(
+              firebaseAuth,
+              candidateEmail.trim(),
+              candidatePassword,
+            );
+            successEmail = candidateEmail.trim().toLowerCase();
+            lastError = null;
+            break;
+          } catch (error) {
+            lastError = error;
+          }
+        }
+        if (!lastError) break;
+      }
+
+      if (successEmail && typeof window !== "undefined") {
+        window.sessionStorage.setItem(QUICK_LOGIN_BYPASS_KEY, successEmail);
+      }
+
+      if (lastError) {
+        if (typeof window !== "undefined") {
+          window.sessionStorage.removeItem(QUICK_LOGIN_BYPASS_KEY);
+        }
+        throw lastError;
+      }
     } catch (error) {
+      if (typeof window !== "undefined") {
+        window.sessionStorage.removeItem(QUICK_LOGIN_BYPASS_KEY);
+      }
       const message = error instanceof Error ? error.message : "Erreur de connexion test.";
       setTestError(message);
     } finally {
@@ -175,7 +270,7 @@ export default function HeaderBar() {
               className="rounded border border-ink/25 bg-white px-4 py-2 text-xs font-semibold text-ink"
               onClick={() => signOut(firebaseAuth)}
             >
-              Se déconnecter
+              Se deconnecter
             </button>
           ) : null}
 

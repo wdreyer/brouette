@@ -6,6 +6,8 @@ import { doc, getDoc, serverTimestamp, updateDoc } from "firebase/firestore";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { firebaseAuth, firebaseDb } from "@/lib/firebase/client";
 
+const QUICK_LOGIN_BYPASS_KEY = "brouette:skipMustChangePasswordForEmail";
+
 export default function PasswordChangeRequiredModal() {
   const { user, memberId, role } = useAuth();
   const [open, setOpen] = useState(false);
@@ -31,7 +33,24 @@ export default function PasswordChangeRequiredModal() {
       try {
         const memberSnap = await getDoc(doc(firebaseDb, "members", memberId));
         const data = memberSnap.data() as { auth?: { mustChangePassword?: boolean } } | undefined;
-        setOpen(Boolean(data?.auth?.mustChangePassword));
+        const mustChange = Boolean(data?.auth?.mustChangePassword);
+        const currentEmail = String(user.email ?? "").trim().toLowerCase();
+        const quickLoginBypassEmail =
+          typeof window !== "undefined"
+            ? String(window.sessionStorage.getItem(QUICK_LOGIN_BYPASS_KEY) ?? "")
+                .trim()
+                .toLowerCase()
+            : "";
+
+        if (mustChange && currentEmail && quickLoginBypassEmail && quickLoginBypassEmail === currentEmail) {
+          if (typeof window !== "undefined") {
+            window.sessionStorage.removeItem(QUICK_LOGIN_BYPASS_KEY);
+          }
+          setOpen(false);
+          return;
+        }
+
+        setOpen(mustChange);
       } catch {
         setOpen(false);
       } finally {
@@ -150,4 +169,3 @@ export default function PasswordChangeRequiredModal() {
     </div>
   );
 }
-
