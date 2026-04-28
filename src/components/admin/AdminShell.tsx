@@ -200,7 +200,6 @@ const adminGroups: NavGroup[] = [
   {
     label: "Administration",
     items: [
-      { href: "/admin/invites", label: "Invitations", icon: "invites", roles: ["admin", "referent"] },
       { href: "/admin/messages", label: "Messages", icon: "messages", roles: ["admin", "referent"] },
       { href: "/admin/generations-pdf", label: "Générations PDF", icon: "pdfs", roles: ["admin", "referent"] },
       { href: "/admin/settings", label: "Paramètres", icon: "settings", roles: ["admin"] },
@@ -238,7 +237,7 @@ export default function AdminShell({ children }: { children: React.ReactNode }) 
       <div className="grid items-start gap-4 lg:grid-cols-[250px_minmax(0,1fr)]">
         <aside className="h-fit rounded-[10px] border border-clay/90 bg-stone p-3 shadow-sm lg:sticky lg:top-4">
           <nav className="flex flex-col gap-2">
-            {groups.map((group) => (
+{groups.map((group) => (
               <div key={group.label} className="rounded-[10px] border-b border-clay/60 pb-2 last:border-b-0">
                 <p className="px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-ink/60">
                   {group.label}

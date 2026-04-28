@@ -146,8 +146,8 @@ function formatMembershipStatus(value: unknown) {
 
 function formatMembershipPaymentStatus(value: unknown) {
   const normalized = String(value ?? "").toLowerCase();
-  if (["up_to_date", "a_jour", "a-jour", "paid", "ok"].includes(normalized)) return "A jour";
-  if (["to_pay", "a_payer", "a-payer", "unpaid", "due"].includes(normalized)) return "A payer";
+  if (["up_to_date", "a_jour", "a-jour", "paid", "ok"].includes(normalized)) return "Payé";
+  if (["to_pay", "a_payer", "a-payer", "unpaid", "due"].includes(normalized)) return "Non payé";
   return displayValue(value);
 }
 
@@ -1135,8 +1135,8 @@ export default function MembersEditor({
                           }}
                           disabled={fieldDisabled}
                         >
-                          <option value="up_to_date">A jour</option>
-                          <option value="to_pay">A payer</option>
+                          <option value="up_to_date">Payé</option>
+                          <option value="to_pay">Non payé</option>
                         </select>
                       ) : field.type === "boolean" ? (
                         <select
@@ -1336,8 +1336,8 @@ export default function MembersEditor({
                         }}
                         disabled={fieldDisabled}
                       >
-                        <option value="up_to_date">A jour</option>
-                        <option value="to_pay">A payer</option>
+                        <option value="up_to_date">Payé</option>
+                        <option value="to_pay">Non payé</option>
                       </select>
                     ) : field.type === "boolean" ? (
                       <select

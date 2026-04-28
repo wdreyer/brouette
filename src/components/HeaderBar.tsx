@@ -31,6 +31,15 @@ export default function HeaderBar() {
         </Link>
 
         <div className="flex flex-wrap items-center justify-end gap-2">
+          <a
+            href="https://labrouetteetlepanier.fr"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="rounded border border-ink/25 bg-white px-4 py-2 text-xs font-semibold text-ink"
+          >
+            Site de l&apos;association
+          </a>
+
           {user && roleBadgeLabel ? (
             <span className="rounded border border-forest/40 bg-forest/10 px-3 py-2 text-xs font-semibold text-forest">
               {roleBadgeLabel}

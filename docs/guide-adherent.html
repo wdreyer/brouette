@@ -1,0 +1,669 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Guide adhérent — La Brouette & Le Panier</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,600;1,400&family=Inter:wght@400;500;600&display=swap');
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --ink: #1a1a18;
+      --ink-light: #6b6b60;
+      --stone: #f5f2ec;
+      --clay: #d9d4c7;
+      --forest: #2d5a3d;
+      --white: #ffffff;
+    }
+
+    body {
+      font-family: 'Inter', system-ui, sans-serif;
+      font-size: 13px;
+      color: var(--ink);
+      background: var(--white);
+      line-height: 1.6;
+    }
+
+    /* ── COVER ── */
+    .cover {
+      width: 210mm;
+      min-height: 297mm;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: var(--stone);
+      page-break-after: always;
+      padding: 60px 40px;
+      text-align: center;
+    }
+
+    .cover-logo {
+      width: 180px;
+      margin-bottom: 48px;
+      opacity: 0.9;
+    }
+
+    .cover h1 {
+      font-family: 'EB Garamond', Georgia, serif;
+      font-size: 42px;
+      font-weight: 400;
+      color: var(--ink);
+      line-height: 1.2;
+      margin-bottom: 16px;
+    }
+
+    .cover .subtitle {
+      font-size: 14px;
+      color: var(--ink-light);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      font-weight: 500;
+      margin-bottom: 48px;
+    }
+
+    .cover .toc {
+      background: var(--white);
+      border: 1px solid var(--clay);
+      border-radius: 16px;
+      padding: 32px 40px;
+      text-align: left;
+      width: 100%;
+      max-width: 420px;
+    }
+
+    .cover .toc-title {
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      color: var(--ink-light);
+      margin-bottom: 16px;
+    }
+
+    .cover .toc ol {
+      padding-left: 18px;
+    }
+
+    .cover .toc li {
+      font-size: 13px;
+      color: var(--ink);
+      padding: 5px 0;
+      border-bottom: 1px solid var(--clay);
+      font-weight: 500;
+    }
+
+    .cover .toc li:last-child { border-bottom: none; }
+
+    .cover .toc li span {
+      font-weight: 400;
+      color: var(--ink-light);
+      font-size: 12px;
+    }
+
+    /* ── PAGE ── */
+    .page {
+      width: 210mm;
+      min-height: 297mm;
+      padding: 14mm 16mm 14mm 16mm;
+      page-break-after: always;
+      background: var(--white);
+    }
+
+    /* ── SECTION HEADER ── */
+    .section-label {
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: 0.28em;
+      text-transform: uppercase;
+      color: var(--forest);
+      margin-bottom: 6px;
+    }
+
+    h2 {
+      font-family: 'EB Garamond', Georgia, serif;
+      font-size: 28px;
+      font-weight: 400;
+      color: var(--ink);
+      line-height: 1.2;
+      margin-bottom: 6px;
+    }
+
+    .page-intro {
+      font-size: 13px;
+      color: var(--ink-light);
+      margin-bottom: 24px;
+      line-height: 1.6;
+      border-bottom: 1px solid var(--clay);
+      padding-bottom: 16px;
+    }
+
+    /* ── STEP ── */
+    .step {
+      display: flex;
+      gap: 14px;
+      margin-bottom: 22px;
+      align-items: flex-start;
+    }
+
+    .step-num {
+      flex-shrink: 0;
+      width: 26px;
+      height: 26px;
+      border-radius: 50%;
+      background: var(--forest);
+      color: var(--white);
+      font-size: 12px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-top: 1px;
+    }
+
+    .step-content h3 {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--ink);
+      margin-bottom: 3px;
+    }
+
+    .step-content p {
+      font-size: 12.5px;
+      color: var(--ink-light);
+      line-height: 1.6;
+    }
+
+    .step-content strong {
+      color: var(--ink);
+      font-weight: 600;
+    }
+
+    /* ── SCREENSHOT ── */
+    .screenshot-wrap {
+      margin: 18px 0 24px 0;
+      text-align: center;
+    }
+
+    .screenshot-wrap img {
+      max-width: 100%;
+      height: auto;
+      border: 1px solid var(--clay);
+      border-radius: 10px;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.07);
+      display: block;
+      margin: 0 auto;
+    }
+
+    .screenshot-wrap.small img  { max-width: 320px; }
+    .screenshot-wrap.medium img { max-width: 480px; }
+    .screenshot-wrap.large img  { max-width: 100%; }
+
+    .caption {
+      font-size: 11px;
+      color: var(--ink-light);
+      margin-top: 7px;
+      font-style: italic;
+    }
+
+    /* ── INLINE 2 SCREENSHOTS ── */
+    .two-col {
+      display: flex;
+      gap: 16px;
+      margin: 18px 0 24px 0;
+      align-items: flex-start;
+    }
+
+    .two-col .screenshot-wrap {
+      flex: 1;
+      margin: 0;
+    }
+
+    /* ── NOTE / TIP ── */
+    .note {
+      background: #f0f5f1;
+      border-left: 3px solid var(--forest);
+      border-radius: 0 8px 8px 0;
+      padding: 10px 14px;
+      font-size: 12px;
+      color: var(--ink);
+      line-height: 1.6;
+      margin: 16px 0;
+    }
+
+    .note strong { color: var(--forest); }
+
+    /* ── PRINT ── */
+    @media print {
+      body { background: white; }
+      .page, .cover { page-break-after: always; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════
+     COUVERTURE
+════════════════════════════════════════════ -->
+<div class="cover">
+  <img class="cover-logo" src="img/logo.png" alt="La Brouette & Le Panier"
+       onerror="this.style.display='none'" />
+  <h1>Guide de l'adhérent</h1>
+  <p class="subtitle">La Brouette &amp; Le Panier</p>
+
+  <div class="toc">
+    <p class="toc-title">Sommaire</p>
+    <ol>
+      <li>Se connecter <span>— accéder à la boutique</span></li>
+      <li>Mot de passe oublié <span>— réinitialiser son mot de passe</span></li>
+      <li>Changer son mot de passe <span>— depuis son profil</span></li>
+      <li>Gérer ses emails <span>— ajouter une adresse secondaire</span></li>
+      <li>Notifications <span>— emails automatiques reçus</span></li>
+      <li>Passer une commande <span>— boutique, panier, validation</span></li>
+      <li>Voir ses commandes <span>— historique depuis le profil</span></li>
+    </ol>
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════
+     1 — SE CONNECTER
+════════════════════════════════════════════ -->
+<div class="page">
+  <p class="section-label">1 — Accès</p>
+  <h2>Se connecter</h2>
+  <p class="page-intro">
+    La boutique est réservée aux adhérents. Pour y accéder, tu dois te connecter avec l'adresse email et le mot de passe de ton compte.
+  </p>
+
+  <div class="step">
+    <div class="step-num">1</div>
+    <div class="step-content">
+      <h3>Rends-toi sur la page de connexion</h3>
+      <p>Va sur <strong>brouette-186e6.web.app</strong> (ou l'adresse communiquée par l'équipe). Tu arrives directement sur la page de connexion.</p>
+    </div>
+  </div>
+
+  <div class="screenshot-wrap medium">
+    <img src="img/01-connexion.png" alt="Page de connexion" />
+    <p class="caption">La page de connexion avec les champs Email et Mot de passe</p>
+  </div>
+
+  <div class="step">
+    <div class="step-num">2</div>
+    <div class="step-content">
+      <h3>Saisis ton adresse email</h3>
+      <p>Utilise l'adresse email avec laquelle tu as été inscrit(e). C'est l'<strong>email principal</strong> visible dans ton profil.</p>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num">3</div>
+    <div class="step-content">
+      <h3>Saisis ton mot de passe et clique sur "Se connecter"</h3>
+      <p>Si c'est ta première connexion, le mot de passe t'a été communiqué par l'équipe. Tu pourras le modifier depuis ton profil (voir section 3).</p>
+    </div>
+  </div>
+
+  <div class="note">
+    <strong>Conseil :</strong> si ton navigateur te propose d'enregistrer le mot de passe, accepte — ça t'évitera de le ressaisir à chaque visite.
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════
+     2 — MOT DE PASSE OUBLIÉ
+════════════════════════════════════════════ -->
+<div class="page">
+  <p class="section-label">2 — Mot de passe</p>
+  <h2>Mot de passe oublié</h2>
+  <p class="page-intro">
+    Si tu ne te souviens plus de ton mot de passe, tu peux en recevoir un nouveau par email en quelques secondes.
+  </p>
+
+  <div class="step">
+    <div class="step-num">1</div>
+    <div class="step-content">
+      <h3>Clique sur "Mot de passe oublié ?"</h3>
+      <p>Ce lien se trouve juste sous le champ "Mot de passe" sur la page de connexion.</p>
+    </div>
+  </div>
+
+  <div class="screenshot-wrap small">
+    <img src="img/02-mdp-oublie-lien.png" alt="Lien mot de passe oublié" />
+    <p class="caption">Le lien "Mot de passe oublié ?" sous le champ mot de passe</p>
+  </div>
+
+  <div class="step">
+    <div class="step-num">2</div>
+    <div class="step-content">
+      <h3>Saisis ton email et valide</h3>
+      <p>Entre ton adresse email et confirme. Un email de réinitialisation t'est envoyé en quelques instants.</p>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num">3</div>
+    <div class="step-content">
+      <h3>Ouvre l'email reçu et clique sur le lien</h3>
+      <p>L'email provient de <strong>noreply@brouette-186e6.firebaseapp.com</strong>. Vérifie tes spams si tu ne le reçois pas.</p>
+    </div>
+  </div>
+
+  <div class="screenshot-wrap large">
+    <img src="img/03-email-reinit.png" alt="Email de réinitialisation" />
+    <p class="caption">L'email de réinitialisation reçu dans ta boîte mail</p>
+  </div>
+
+  <div class="step">
+    <div class="step-num">4</div>
+    <div class="step-content">
+      <h3>Choisis ton nouveau mot de passe</h3>
+      <p>Une page s'ouvre pour saisir ton nouveau mot de passe. Choisis-en un d'au moins 8 caractères et clique sur <strong>Enregistrer</strong>.</p>
+    </div>
+  </div>
+
+  <div class="screenshot-wrap small">
+    <img src="img/04-nouveau-mdp.png" alt="Formulaire nouveau mot de passe" />
+    <p class="caption">La page de saisie du nouveau mot de passe</p>
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════
+     3 — CHANGER SON MOT DE PASSE
+════════════════════════════════════════════ -->
+<div class="page">
+  <p class="section-label">3 — Mot de passe</p>
+  <h2>Changer son mot de passe</h2>
+  <p class="page-intro">
+    Une fois connecté(e), tu peux modifier ton mot de passe à tout moment depuis ton profil.
+  </p>
+
+  <div class="step">
+    <div class="step-num">1</div>
+    <div class="step-content">
+      <h3>Accède à ton profil</h3>
+      <p>Clique sur <strong>"Mon profil"</strong> dans le menu en haut à droite de la page.</p>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num">2</div>
+    <div class="step-content">
+      <h3>Clique sur "Modifier"</h3>
+      <p>Le bouton <strong>Modifier</strong> se trouve en haut de la section avec tes informations personnelles. Il passe le formulaire en mode édition.</p>
+    </div>
+  </div>
+
+  <div class="screenshot-wrap medium">
+    <img src="img/05-profil-infos.png" alt="Page profil avec bouton Modifier" />
+    <p class="caption">La page profil avec le bouton "Modifier" en haut</p>
+  </div>
+
+  <div class="step">
+    <div class="step-num">3</div>
+    <div class="step-content">
+      <h3>Saisis ton nouveau mot de passe</h3>
+      <p>Fais défiler jusqu'à la section <strong>"Changer mon mot de passe"</strong>. Saisis ton mot de passe actuel, puis le nouveau deux fois. Clique sur <strong>Enregistrer</strong>.</p>
+    </div>
+  </div>
+
+  <div class="note">
+    <strong>Remarque :</strong> si tu as oublié ton mot de passe actuel et que tu ne peux pas te connecter, utilise la procédure "Mot de passe oublié ?" décrite à la section 2.
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════
+     4 — GÉRER SES EMAILS
+════════════════════════════════════════════ -->
+<div class="page">
+  <p class="section-label">4 — Profil</p>
+  <h2>Gérer ses adresses email</h2>
+  <p class="page-intro">
+    Tu peux avoir plusieurs adresses email associées à ton compte. C'est utile si tu veux être joignable sur plusieurs boîtes, ou si tu changes d'adresse principale.
+  </p>
+
+  <div class="step">
+    <div class="step-num">1</div>
+    <div class="step-content">
+      <h3>Va dans ton profil et clique sur "Modifier"</h3>
+      <p>Accède à <strong>"Mon profil"</strong> depuis le menu, puis clique sur <strong>Modifier</strong> pour passer en mode édition.</p>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num">2</div>
+    <div class="step-content">
+      <h3>Trouve la section "Emails"</h3>
+      <p>Tu vois ton adresse principale marquée <strong>Email principal</strong>. C'est cette adresse que tu utilises pour te connecter. Clique sur <strong>+ Ajouter un email</strong> pour en ajouter une seconde.</p>
+    </div>
+  </div>
+
+  <div class="screenshot-wrap medium">
+    <img src="img/06-emails-ajouter.png" alt="Section emails avec bouton ajouter" />
+    <p class="caption">La section Emails avec le bouton "+ Ajouter un email"</p>
+  </div>
+
+  <div class="step">
+    <div class="step-num">3</div>
+    <div class="step-content">
+      <h3>Saisis la nouvelle adresse</h3>
+      <p>Un nouveau champ apparaît. Saisis la deuxième adresse email. Tu peux en ajouter autant que nécessaire. Pour en supprimer une, clique sur <strong>Retirer</strong>.</p>
+    </div>
+  </div>
+
+  <div class="screenshot-wrap medium">
+    <img src="img/07-emails-deuxieme.png" alt="Deuxième email ajouté" />
+    <p class="caption">Un second email ajouté avec la possibilité de le retirer</p>
+  </div>
+
+  <div class="step">
+    <div class="step-num">4</div>
+    <div class="step-content">
+      <h3>Enregistre les modifications</h3>
+      <p>Clique sur <strong>Enregistrer</strong> en bas du formulaire pour sauvegarder.</p>
+    </div>
+  </div>
+
+  <div class="note">
+    <strong>Important :</strong> tous les emails enregistrés recevront les messages de la coopérative (ouverture des ventes, rappels de retrait, informations…). Assure-toi que les adresses saisies sont actives.
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════
+     5 — NOTIFICATIONS
+════════════════════════════════════════════ -->
+<div class="page">
+  <p class="section-label">5 — Notifications</p>
+  <h2>Les emails automatiques</h2>
+  <p class="page-intro">
+    Il n'y a pas de réglage de notifications à configurer. La coopérative t'envoie des emails directement sur toutes les adresses enregistrées dans ton profil.
+  </p>
+
+  <div class="step">
+    <div class="step-num">1</div>
+    <div class="step-content">
+      <h3>Ouverture de la vente</h3>
+      <p>Quand une nouvelle vente est ouverte, tu reçois un email t'informant que tu peux préparer ton panier. La boutique est accessible dès réception.</p>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num">2</div>
+    <div class="step-content">
+      <h3>Rappel de retrait (J-1 / J-2)</h3>
+      <p>Un ou deux jours avant chaque date de retrait, tu reçois un rappel pour que tu n'oublies pas de valider ta commande avant la fermeture de la vente.</p>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num">3</div>
+    <div class="step-content">
+      <h3>Autres communications</h3>
+      <p>L'équipe peut également envoyer des informations générales sur la vie de la coopérative : événements, actualités, changements de fonctionnement.</p>
+    </div>
+  </div>
+
+  <div class="note">
+    <strong>Conseil :</strong> si tu ne reçois pas les emails, vérifie ton dossier <strong>Spams</strong> et ajoute l'adresse de la coopérative à tes contacts. Tu peux aussi vérifier que ton adresse email est bien enregistrée dans ton profil.
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════
+     6 — PASSER UNE COMMANDE
+════════════════════════════════════════════ -->
+<div class="page">
+  <p class="section-label">6 — Commander</p>
+  <h2>Passer une commande</h2>
+  <p class="page-intro">
+    Quand une vente est ouverte, tu peux parcourir le catalogue et ajouter des produits à ton panier pour une ou plusieurs dates de retrait.
+  </p>
+
+  <div class="step">
+    <div class="step-num">1</div>
+    <div class="step-content">
+      <h3>Accède au catalogue</h3>
+      <p>Connecte-toi et tu arrives directement sur la boutique. Tu vois le bandeau <strong>"Vente ouverte"</strong> avec les dates disponibles. Le catalogue liste tous les produits de la vente en cours.</p>
+    </div>
+  </div>
+
+  <div class="screenshot-wrap large">
+    <img src="img/08-boutique.png" alt="Page boutique" />
+    <p class="caption">Le catalogue avec les filtres à gauche et les dates de retrait disponibles en haut</p>
+  </div>
+
+  <div class="step">
+    <div class="step-num">2</div>
+    <div class="step-content">
+      <h3>Filtre par date si besoin</h3>
+      <p>Les boutons de dates à gauche (ex : <strong>28 oct. · 11 nov. · 25 nov.</strong>) te permettent d'afficher uniquement les produits disponibles pour une date précise. Par défaut toutes les dates sont affichées.</p>
+    </div>
+  </div>
+</div>
+
+<div class="page">
+  <p class="section-label">6 — Commander (suite)</p>
+  <h2>Choisir un produit</h2>
+
+  <div class="step">
+    <div class="step-num">3</div>
+    <div class="step-content">
+      <h3>Clique sur "Voir le produit"</h3>
+      <p>Ouvre la fiche produit pour voir le détail. Tu y trouves la description, le producteur, et la section <strong>"Variantes &amp; dates"</strong> qui montre les formats disponibles et pour quelle(s) date(s) de retrait.</p>
+    </div>
+  </div>
+
+  <div class="screenshot-wrap large">
+    <img src="img/09-produit-variantes.png" alt="Fiche produit variantes et dates" />
+    <p class="caption">La section "Variantes & dates" : chaque ligne correspond à un format, avec la date de retrait et la quantité souhaitée</p>
+  </div>
+
+  <div class="step">
+    <div class="step-num">4</div>
+    <div class="step-content">
+      <h3>Choisis la quantité et clique sur "Ajouter"</h3>
+      <p>Utilise les boutons <strong>−</strong> et <strong>+</strong> pour choisir la quantité, puis clique sur <strong>Ajouter</strong>. Le produit est ajouté au panier pour la date indiquée.</p>
+    </div>
+  </div>
+
+  <div class="note">
+    <strong>Dates multiples :</strong> tu peux commander le même produit pour deux dates de retrait différentes — il suffit d'ajouter la quantité sur chaque ligne correspondante. Ta commande contiendra alors des articles pour chaque date.
+  </div>
+</div>
+
+<div class="page">
+  <p class="section-label">6 — Commander (suite)</p>
+  <h2>Le panier et la validation</h2>
+
+  <div class="step">
+    <div class="step-num">5</div>
+    <div class="step-content">
+      <h3>Consulte ton panier</h3>
+      <p>Clique sur l'icône panier en haut à droite. Un panneau s'ouvre avec tous tes articles, <strong>groupés par date de retrait</strong> puis par producteur. Tu peux modifier les quantités ou retirer des articles.</p>
+    </div>
+  </div>
+
+  <div class="screenshot-wrap small">
+    <img src="img/10-panier.png" alt="Panier ouvert" />
+    <p class="caption">Le panier avec les articles groupés par date de retrait (ici deux dates différentes)</p>
+  </div>
+
+  <div class="step">
+    <div class="step-num">6</div>
+    <div class="step-content">
+      <h3>Clique sur "Récapitulatif de la commande"</h3>
+      <p>Cette page te montre le détail complet avant de confirmer. Vérifie les dates, les produits et les quantités.</p>
+    </div>
+  </div>
+
+  <div class="screenshot-wrap large">
+    <img src="img/11-checkout.png" alt="Page récapitulatif" />
+    <p class="caption">La page "Relecture de la commande" avec le total et le bouton de validation</p>
+  </div>
+
+  <div class="step">
+    <div class="step-num">7</div>
+    <div class="step-content">
+      <h3>Clique sur "Valider la commande"</h3>
+      <p>Ta commande est enregistrée. Tu es redirigé(e) vers ton profil où tu la retrouveras dans l'historique. <strong>Le paiement se fait sur place lors du retrait</strong>, pas en ligne.</p>
+    </div>
+  </div>
+
+  <div class="note">
+    <strong>Important :</strong> pense à valider ta commande <strong>avant la fermeture de la vente</strong>. Un panier non validé ne compte pas comme une commande.
+  </div>
+</div>
+
+
+<!-- ═══════════════════════════════════════════
+     7 — HISTORIQUE DES COMMANDES
+════════════════════════════════════════════ -->
+<div class="page">
+  <p class="section-label">7 — Historique</p>
+  <h2>Voir ses commandes passées</h2>
+  <p class="page-intro">
+    Toutes tes commandes validées sont consultables à tout moment depuis ton profil.
+  </p>
+
+  <div class="step">
+    <div class="step-num">1</div>
+    <div class="step-content">
+      <h3>Accède à ton profil</h3>
+      <p>Clique sur <strong>"Mon profil"</strong> dans le menu en haut à droite.</p>
+    </div>
+  </div>
+
+  <div class="step">
+    <div class="step-num">2</div>
+    <div class="step-content">
+      <h3>Fais défiler jusqu'à "Mes commandes"</h3>
+      <p>La section <strong>Historique — Mes commandes</strong> liste toutes tes commandes, de la plus récente à la plus ancienne.</p>
+    </div>
+  </div>
+
+  <div class="screenshot-wrap large">
+    <img src="img/12-historique.png" alt="Historique des commandes" />
+    <p class="caption">L'historique des commandes avec le détail par date de retrait et par producteur</p>
+  </div>
+
+  <div class="step">
+    <div class="step-num">3</div>
+    <div class="step-content">
+      <h3>Consulte le détail d'une commande</h3>
+      <p>Chaque commande affiche la date, le nombre d'articles et le total. Le détail est visible directement : articles groupés par <strong>date de retrait</strong> puis par <strong>producteur</strong>, avec les quantités et les prix.</p>
+    </div>
+  </div>
+
+  <div class="note">
+    <strong>Rappel :</strong> les commandes ne peuvent pas être modifiées une fois validées. Si tu as une erreur, contacte l'équipe de la coopérative.
+  </div>
+</div>
+
+</body>
+</html>

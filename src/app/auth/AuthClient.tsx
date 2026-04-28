@@ -350,18 +350,6 @@ export default function AuthClient() {
               Retour à la connexion
             </button>
           )}
-          {mode !== "forgot" ? (
-            <button
-              className="rounded-full border border-ink/20 px-4 py-2 text-sm font-semibold text-ink"
-              onClick={() => {
-                setMode(mode === "login" ? "signup" : "login");
-                setMessage("");
-                setResetSent(false);
-              }}
-            >
-              {mode === "login" ? "J'ai une invitation" : "J'ai déjà un compte"}
-            </button>
-          ) : null}
         </div>
       </section>
 
@@ -383,9 +371,11 @@ export default function AuthClient() {
           </a>
           <a
             className="rounded-full border border-ink/20 bg-white px-4 py-2 text-sm font-semibold text-ink"
-            href="/"
+            href="https://labrouetteetlepanier.fr"
+            target="_blank"
+            rel="noopener noreferrer"
           >
-            Voir la boutique
+            Site de l&apos;association
           </a>
         </div>
       </section>
