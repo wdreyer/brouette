@@ -202,8 +202,9 @@ const adminGroups: NavGroup[] = [
     items: [
       { href: "/admin/messages", label: "Messages", icon: "messages", roles: ["admin", "referent"] },
       { href: "/admin/generations-pdf", label: "Générations PDF", icon: "pdfs", roles: ["admin", "referent"] },
+      { href: "/admin/exports", label: "Export commandes", icon: "stats", roles: ["admin", "referent"] },
       { href: "/admin/settings", label: "Paramètres", icon: "settings", roles: ["admin"] },
-      { href: "/admin/stats", label: "Stats", icon: "stats", roles: ["admin", "referent"] },
+      { href: "/admin/stats", label: "Stats", icon: "stats", roles: ["admin"] },
     ],
   },
 ];

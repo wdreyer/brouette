@@ -11,7 +11,8 @@ type TargetKind =
   | "recent-buyers"
   | "coop-only"
   | "selected-adherents"
-  | "contact-list";
+  | "contact-list"
+  | "producers";
 
 type SendPayload = {
   mode?: SendMode;
@@ -254,6 +255,18 @@ async function listMembersRecipients(options: {
     );
   }
 
+  if (options.target === "producers") {
+    const producersSnap = await db.collection("producers").get();
+    const recipients: Recipient[] = [];
+    producersSnap.docs.forEach((docSnap) => {
+      const data = docSnap.data() as { name?: string; email?: string };
+      const email = normalizeEmail(data.email);
+      if (!email) return;
+      recipients.push({ email, name: String(data.name ?? "").trim() || undefined });
+    });
+    return uniqueRecipients(recipients);
+  }
+
   const since = new Date();
   since.setDate(since.getDate() - options.recentDays);
   const sinceTs = Timestamp.fromDate(since);
@@ -300,6 +313,7 @@ function targetLabel(target: TargetKind, listName?: string) {
   if (target === "recent-buyers") return "Adhérents ayant commandé récemment";
   if (target === "coop-only") return "Membres coop";
   if (target === "contact-list") return listName ? `Liste : ${listName}` : "Liste de diffusion";
+  if (target === "producers") return "Producteurs";
   return "Sélection d'adhérents";
 }
 

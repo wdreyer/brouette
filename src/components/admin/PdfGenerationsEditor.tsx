@@ -30,6 +30,7 @@ type OrderItem = {
 type Producer = {
   id: string;
   name?: string;
+  email?: string;
 };
 
 type Distribution = {
@@ -199,6 +200,8 @@ export default function PdfGenerationsEditor() {
   const [loading, setLoading] = useState(true);
   const [exportingProducerId, setExportingProducerId] = useState<string | null>(null);
   const [exportingBdcDateKey, setExportingBdcDateKey] = useState<string | null>(null);
+  const [sendingEmailProducerId, setSendingEmailProducerId] = useState<string | null>(null);
+  const [emailSentProducerIds, setEmailSentProducerIds] = useState<Set<string>>(new Set());
   const [message, setMessage] = useState("");
 
   const [orders, setOrders] = useState<Order[]>([]);
@@ -629,7 +632,7 @@ export default function PdfGenerationsEditor() {
     [previewBdcDateOption, producerAggByDate, producersById, orders, orderItemsByOrder, membersById],
   );
 
-  const exportProducerDistributionPdf = async (
+  const buildProducerPdf = async (
     distribution: Distribution,
     distributionDates: DateOption[],
     row: ProducerDistributionRow,
@@ -757,6 +760,16 @@ export default function PdfGenerationsEditor() {
       : "";
     const fileNameSuffix = firstDate && lastDate && firstDate !== lastDate ? `${firstDate} - ${lastDate}` : firstDate || distributionLabel(distribution);
     const fileName = `Commandes producteurs ${producerName} ${sanitizeFileNamePart(fileNameSuffix)}.pdf`;
+
+    return { pdf, fileName };
+  };
+
+  const exportProducerDistributionPdf = async (
+    distribution: Distribution,
+    distributionDates: DateOption[],
+    row: ProducerDistributionRow,
+  ) => {
+    const { pdf, fileName } = await buildProducerPdf(distribution, distributionDates, row);
     pdf.save(fileName);
   };
 
@@ -771,6 +784,57 @@ export default function PdfGenerationsEditor() {
       setMessage("Erreur pendant la generation du PDF.");
     } finally {
       setExportingProducerId(null);
+    }
+  };
+
+  const handleSendProducerEmail = async (row: ProducerDistributionRow) => {
+    const producer = producersById[row.producerId];
+    const producerEmail = String(producer?.email ?? "").trim().toLowerCase();
+    if (!producerEmail) {
+      setMessage(`Aucun email renseigné pour ${row.producerName}. Ajoutez-le dans la fiche producteur.`);
+      return;
+    }
+
+    if (!selectedDistribution) return;
+    setSendingEmailProducerId(row.producerId);
+    setMessage("");
+
+    try {
+      const distName = distributionLabel(selectedDistribution);
+
+      const { pdf, fileName } = await buildProducerPdf(selectedDistribution, selectedDistributionDates, row);
+      const pdfBase64 = pdf.output("datauristring").split(",")[1];
+
+      const content = [
+        "Bonjour,",
+        "",
+        `Veuillez trouver en pièce jointe le récapitulatif de vos commandes pour la ${distName}.`,
+        "",
+        "Merci et à bientôt,",
+        "La Brouette & Le Panier",
+      ].join("\n");
+
+      const response = await fetch("/api/messages/send-producer", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          producerId: row.producerId,
+          producerName: row.producerName,
+          producerEmail,
+          subject: `Vos commandes – ${distName}`,
+          content,
+          pdfBase64,
+          pdfFileName: fileName,
+        }),
+      });
+      const data = (await response.json()) as { ok: boolean; error?: string };
+      if (!data.ok) throw new Error(data.error ?? "Erreur inconnue.");
+      setEmailSentProducerIds((prev) => new Set([...prev, row.producerId]));
+      setMessage(`Email envoyé à ${row.producerName} (${producerEmail}).`);
+    } catch (error) {
+      setMessage(`Erreur envoi email ${row.producerName} : ${error instanceof Error ? error.message : "inconnu"}`);
+    } finally {
+      setSendingEmailProducerId(null);
     }
   };
 
@@ -1088,6 +1152,33 @@ export default function PdfGenerationsEditor() {
                           <path d="M7 10l5 5 5-5" />
                           <path d="M4 20h16" />
                         </svg>
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={`Envoyer email ${row.producerName}`}
+                        title={emailSentProducerIds.has(row.producerId) ? "Email déjà envoyé" : "Envoyer la commande par email"}
+                        className={`inline-flex h-8 w-8 items-center justify-center rounded-full border bg-white text-ink transition disabled:opacity-50 ${
+                          emailSentProducerIds.has(row.producerId)
+                            ? "border-forest/60 text-forest"
+                            : "border-ink/20 hover:border-forest/60 hover:text-forest"
+                        }`}
+                        onClick={() => handleSendProducerEmail(row).catch(() => undefined)}
+                        disabled={Boolean(sendingEmailProducerId)}
+                      >
+                        {sendingEmailProducerId === row.producerId ? (
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 animate-spin">
+                            <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+                          </svg>
+                        ) : emailSentProducerIds.has(row.producerId) ? (
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
+                            <path d="M20 6L9 17l-5-5" />
+                          </svg>
+                        ) : (
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
+                            <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
+                            <polyline points="22,6 12,13 2,6" />
+                          </svg>
+                        )}
                       </button>
                     </div>
                   </td>

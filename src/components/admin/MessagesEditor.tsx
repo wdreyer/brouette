@@ -71,7 +71,8 @@ type TargetKind =
   | "recent-buyers"
   | "coop-only"
   | "selected-adherents"
-  | "contact-list";
+  | "contact-list"
+  | "producers";
 
 type ActiveTab = "composer" | "templates" | "lists" | "history";
 
@@ -101,6 +102,7 @@ const TARGET_OPTIONS: { value: TargetKind; label: string; desc: string }[] = [
   { value: "coop-only", label: "Membres Coop", desc: "Admins et referents" },
   { value: "selected-adherents", label: "Selection manuelle", desc: "Choisir les adherents un par un" },
   { value: "contact-list", label: "Liste de diffusion", desc: "Utiliser une liste enregistree" },
+  { value: "producers", label: "Producteurs", desc: "Tous les producteurs (email de la fiche producteur)" },
 ];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
