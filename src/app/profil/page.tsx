@@ -77,7 +77,7 @@ export default function ProfilePage() {
   if (!user) {
     return (
       <div className="mx-auto w-full max-w-6xl px-6 py-12">
-        <p className="text-sm text-ink/70">Connecte-toi pour acceder a ton profil.</p>
+        <p className="text-sm text-ink/70">Connecte-toi pour accéder à ton profil.</p>
       </div>
     );
   }

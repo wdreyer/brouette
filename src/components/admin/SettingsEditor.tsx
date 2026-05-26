@@ -26,7 +26,7 @@ export default function SettingsEditor({
         const enabled = await readBalanceTrackingEnabled(firebaseDb);
         setBalanceTrackingEnabled(enabled);
       } catch {
-        setMessage("Impossible de charger le parametre.");
+        setMessage("Impossible de charger le paramètre.");
       } finally {
         setLoading(false);
       }
@@ -40,9 +40,9 @@ export default function SettingsEditor({
       setMessage("");
       await writeBalanceTrackingEnabled(firebaseDb, next);
       setBalanceTrackingEnabled(next);
-      setMessage("Parametre enregistre.");
+      setMessage("Paramètre enregistré.");
     } catch {
-      setMessage("Impossible d'enregistrer le parametre.");
+      setMessage("Impossible d'enregistrer le paramètre.");
     } finally {
       setSaving(false);
     }
@@ -116,7 +116,7 @@ export default function SettingsEditor({
           <div>
             <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-ink/55">Module</p>
             <h3 className="mt-1 text-lg font-semibold text-ink">Suivi des soldes</h3>
-            <p className="mt-1 text-sm text-ink/65">Comptabilite des soldes des adherents.</p>
+            <p className="mt-1 text-sm text-ink/65">Comptabilité des soldes des adhérents.</p>
             {message ? <p className="mt-2 text-xs text-ink/70">{message}</p> : null}
           </div>
 

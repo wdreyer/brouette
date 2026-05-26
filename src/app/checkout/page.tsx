@@ -38,8 +38,8 @@ function formatEstimatedRange(min?: number | null, max?: number | null) {
       ? `Estimatif: ${min.toFixed(2)} EUR`
       : `Estimatif: ${min.toFixed(2)} EUR - ${max.toFixed(2)} EUR`;
   }
-  if (hasMin) return `Estimatif: a partir de ${min!.toFixed(2)} EUR`;
-  return `Estimatif: jusqu'a ${max!.toFixed(2)} EUR`;
+  if (hasMin) return `Estimatif : à partir de ${min!.toFixed(2)} EUR`;
+  return `Estimatif : jusqu'à ${max!.toFixed(2)} EUR`;
 }
 
 function groupByDateThenProducer(
@@ -141,7 +141,7 @@ export default function CheckoutPage() {
       const freshItems = getCart();
       setItems(freshItems);
       if (freshItems.length === 0) {
-        setMessage("Panier vide ou vente fermee. Ajoute de nouveaux produits.");
+        setMessage("Panier vide ou vente fermée. Ajoute de nouveaux produits.");
         return;
       }
 
@@ -236,7 +236,7 @@ export default function CheckoutPage() {
         <p className="text-[11px] font-semibold uppercase tracking-[0.32em] text-ink/60">Panier</p>
         <h1 className="font-serif text-4xl">Relecture de la commande</h1>
         <p className="text-sm text-ink/70">
-          Verifie les dates, les producteurs et les quantites avant de valider.
+          Vérifie les dates, les producteurs et les quantités avant de valider.
         </p>
       </section>
 

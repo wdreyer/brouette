@@ -227,7 +227,7 @@ export default function ProducerAnnualCalendarPublic() {
   if (!distributions.length || !producerRows.length || !dateColumns.length) {
     return (
       <div className="rounded-xl border border-clay/70 bg-white/90 p-6 shadow-card">
-        <p className="text-sm text-ink/70">Aucun producteur coche sur les distributions a venir.</p>
+        <p className="text-sm text-ink/70">Aucun producteur coché sur les distributions à venir.</p>
       </div>
     );
   }
@@ -237,10 +237,10 @@ export default function ProducerAnnualCalendarPublic() {
       <div className="rounded-[10px] border border-clay/90 bg-stone p-4">
         <h2 className="font-serif text-3xl">Calendrier annuel producteurs</h2>
         <p className="mt-2 text-sm text-ink/70">
-          Vue lecture seule des producteurs coches, sous forme chronologique.
+          Vue lecture seule des producteurs cochés, sous forme chronologique.
         </p>
         <p className="mt-2 text-xs text-ink/60">
-          {distributions.length} distributions · {producerRows.length} producteurs · {totalChecked} presences
+          {distributions.length} distributions · {producerRows.length} producteurs · {totalChecked} présences
         </p>
       </div>
 

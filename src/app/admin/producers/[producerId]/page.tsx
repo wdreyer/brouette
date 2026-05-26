@@ -401,9 +401,9 @@ export default function ProducerPage() {
                       {String(producer.contact?.lastName ?? "").trim() || "-"}
                     </p>
                     <p><span className="text-ink/60">Téléphone :</span> {producer.phone || "-"}</p>
-                    <p><span className="text-ink/60">Email:</span> {producer.email || "-"}</p>
+                    <p><span className="text-ink/60">Email :</span> {producer.email || "-"}</p>
                     <p>
-                      <span className="text-ink/60">Adresse:</span>{" "}
+                      <span className="text-ink/60">Adresse :</span>{" "}
                       {[producer.address?.street, producer.address?.postalCode, producer.address?.city]
                         .map((value) => String(value ?? "").trim())
                         .filter(Boolean)
@@ -504,7 +504,7 @@ export default function ProducerPage() {
             </div>
 
             <RevenueBars title="Evolution CA / mois" points={monthlyRevenue} />
-            <RevenueBars title="Evolution CA / annee" points={yearlyRevenue} />
+            <RevenueBars title="Évolution CA / année" points={yearlyRevenue} />
 
             <div className="border border-clay/70 bg-white/90 p-6">
               <h3 className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">Top 3 ventes</h3>
@@ -514,7 +514,7 @@ export default function ProducerPage() {
                     <div key={item.label} className="flex items-center justify-between border-b border-clay/40 pb-3 text-sm">
                       <div>
                         <p className="font-semibold text-ink">{index + 1}. {item.label}</p>
-                        <p className="text-ink/60">{item.quantity} unite(s)</p>
+                        <p className="text-ink/60">{item.quantity} unité(s)</p>
                       </div>
                       <span className="font-semibold text-ink">{item.total.toFixed(2).replace(".", ",")} EUR</span>
                     </div>

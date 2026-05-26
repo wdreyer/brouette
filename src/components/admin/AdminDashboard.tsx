@@ -610,7 +610,7 @@ export default function AdminDashboard({
               <p className="mt-1 text-sm text-ink/80">
                 {activeDistribution
                   ? `${distributionLabel(activeDistribution)} - ${distributionStatusLabel(activeDistribution.status)}`
-                  : "Aucune distribution planifiee."}
+                  : "Aucune distribution planifiée."}
               </p>
             </div>
             {referentManageHref ? (
@@ -669,11 +669,11 @@ export default function AdminDashboard({
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-ink/60">🛒 Menu vente</p>
-            <h2 className="mt-1 font-serif text-3xl">{openDistribution ? "Vente ouverte" : "Vente fermee"}</h2>
+            <h2 className="mt-1 font-serif text-3xl">{openDistribution ? "Vente ouverte" : "Vente fermée"}</h2>
             <p className="mt-2 text-sm text-ink/75">
               {activeDistribution
                 ? `${distributionLabel(activeDistribution)} - ${distributionStatusLabel(activeDistribution.status)}`
-                : "Aucune distribution planifiee."}
+                : "Aucune distribution planifiée."}
             </p>
             {openDistribution ? (
               <p className="mt-1 text-sm text-ink/75">
@@ -801,7 +801,7 @@ export default function AdminDashboard({
             ))}
           </div>
         ) : (
-          <p className="mt-3 text-sm text-ink/70">Aucune distribution planifiee.</p>
+          <p className="mt-3 text-sm text-ink/70">Aucune distribution planifiée.</p>
         )}
       </section>
 

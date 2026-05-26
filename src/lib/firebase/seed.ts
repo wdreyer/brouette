@@ -27,7 +27,7 @@ export async function seedDatabase() {
   const members = [
     {
       id: "m1",
-      firstName: "Lea",
+      firstName: "Léa",
       lastName: "Martin",
       email: "lea.martin@example.com",
       phone: "0612345678",
@@ -69,7 +69,7 @@ export async function seedDatabase() {
         startDate: t("2022-02-10"),
         endDate: t("2023-02-10"),
         paymentMode: "cash",
-        internalNote: "A suspendu son adhesion.",
+        internalNote: "A suspendu son adhésion.",
       },
       auth: { uid: "uid_m3", role: "member" },
     },
@@ -85,7 +85,7 @@ export async function seedDatabase() {
         startDate: t("2024-05-01"),
         endDate: t("2025-05-01"),
         paymentMode: "card",
-        internalNote: "Aime les paniers legumes.",
+        internalNote: "Aime les paniers légumes.",
       },
       auth: { uid: "uid_m4", role: "member" },
     },
@@ -117,7 +117,7 @@ export async function seedDatabase() {
         startDate: t("2021-06-05"),
         endDate: t("2022-06-05"),
         paymentMode: "card",
-        internalNote: "Plus a jour.",
+        internalNote: "Plus à jour.",
       },
       auth: { uid: "uid_m6", role: "member" },
     },
@@ -155,7 +155,7 @@ export async function seedDatabase() {
     },
     {
       id: "m9",
-      firstName: "Zoe",
+      firstName: "Zoé",
       lastName: "Petit",
       email: "zoe.petit@example.com",
       phone: "0690123456",
@@ -205,7 +205,7 @@ export async function seedDatabase() {
       phone: "0411223344",
       address: { street: "10 route du Lac", postalCode: "34000", city: "Montpellier" },
       coopStatus: "active",
-      notes: "Fruits d'ete.",
+      notes: "Fruits d'été.",
     },
     {
       id: "p3",
@@ -223,7 +223,7 @@ export async function seedDatabase() {
       contact: { firstName: "Claire", lastName: "Petit" },
       email: "claire@verger.example.com",
       phone: "0511223344",
-      address: { street: "8 allee des Pommiers", postalCode: "49200", city: "Angers" },
+      address: { street: "8 allée des Pommiers", postalCode: "49200", city: "Angers" },
       coopStatus: "active",
       notes: "Pommes et poires.",
     },
@@ -265,7 +265,7 @@ export async function seedDatabase() {
       phone: "0311334455",
       address: { street: "2 chemin des Granges", postalCode: "72000", city: "Le Mans" },
       coopStatus: "active",
-      notes: "Oeufs plein air.",
+      notes: "Œufs plein air.",
     },
     {
       id: "p9",
@@ -273,14 +273,14 @@ export async function seedDatabase() {
       contact: { firstName: "Romain", lastName: "Colin" },
       email: "romain@fermebleue.example.com",
       phone: "0411334455",
-      address: { street: "12 route du Bois", postalCode: "25000", city: "Besancon" },
+      address: { street: "12 route du Bois", postalCode: "25000", city: "Besançon" },
       coopStatus: "active",
       notes: "Herbes aromatiques.",
     },
     {
       id: "p10",
       name: "Maraichage du Nord",
-      contact: { firstName: "Helene", lastName: "Fontaine" },
+      contact: { firstName: "Hélène", lastName: "Fontaine" },
       email: "helene@nord.example.com",
       phone: "0511334455",
       address: { street: "9 avenue des Champs", postalCode: "59100", city: "Roubaix" },
@@ -312,7 +312,7 @@ export async function seedDatabase() {
       imageUrl: "/images/pdt.jpg",
       isOrganic: true,
       status: "active",
-      tags: ["legume"],
+      tags: ["légume"],
       variants: [
         { id: "v1", label: "2kg", type: "Monalisa", unit: "kg", price: 4.2, status: "active" },
         { id: "v2", label: "5kg", type: "Monalisa", unit: "kg", price: 9.5, status: "active" },
@@ -321,29 +321,29 @@ export async function seedDatabase() {
     {
       id: "pr3",
       producerId: "p8",
-      name: "Oeufs",
-      description: "Oeufs plein air calibre M.",
+      name: "Œufs",
+      description: "Œufs plein air calibre M.",
       imageUrl: "/images/oeufs.jpg",
       isOrganic: false,
       status: "active",
       tags: ["oeufs"],
       variants: [
-        { id: "v1", label: "Boite de 6", type: "M", unit: "boite", price: 3.2, status: "active" },
-        { id: "v2", label: "Boite de 12", type: "M", unit: "boite", price: 5.9, status: "active" },
+        { id: "v1", label: "Boîte de 6", type: "M", unit: "boite", price: 3.2, status: "active" },
+        { id: "v2", label: "Boîte de 12", type: "M", unit: "boite", price: 5.9, status: "active" },
       ],
     },
     {
       id: "pr4",
       producerId: "p7",
-      name: "Fromage de chevre",
-      description: "Fromage frais affine.",
+      name: "Fromage de chèvre",
+      description: "Fromage frais affiné.",
       imageUrl: "/images/chevre.jpg",
       isOrganic: true,
       status: "active",
       tags: ["fromage"],
       variants: [
-        { id: "v1", label: "120g", type: "Frais", unit: "piece", price: 2.8, status: "active" },
-        { id: "v2", label: "180g", type: "Affinee", unit: "piece", price: 3.6, status: "active" },
+        { id: "v1", label: "120g", type: "Frais", unit: "pièce", price: 2.8, status: "active" },
+        { id: "v2", label: "180g", type: "Affinée", unit: "pièce", price: 3.6, status: "active" },
       ],
     },
     {
@@ -354,7 +354,7 @@ export async function seedDatabase() {
       imageUrl: "/images/tomates.jpg",
       isOrganic: true,
       status: "active",
-      tags: ["legume", "ete"],
+      tags: ["légume", "été"],
       variants: [
         { id: "v1", label: "1kg", type: "Ronde", unit: "kg", price: 4.8, status: "active" },
         { id: "v2", label: "2kg", type: "Ronde", unit: "kg", price: 8.9, status: "active" },
@@ -382,7 +382,7 @@ export async function seedDatabase() {
       imageUrl: "/images/carottes.jpg",
       isOrganic: false,
       status: "active",
-      tags: ["legume"],
+      tags: ["légume"],
       variants: [
         { id: "v1", label: "1kg", type: "Nantaise", unit: "kg", price: 3.1, status: "active" },
         { id: "v2", label: "2kg", type: "Nantaise", unit: "kg", price: 5.8, status: "active" },
@@ -410,7 +410,7 @@ export async function seedDatabase() {
       imageUrl: "/images/poireaux.jpg",
       isOrganic: true,
       status: "inactive",
-      tags: ["legume", "hiver"],
+      tags: ["légume", "hiver"],
       variants: [
         { id: "v1", label: "1kg", type: "Long", unit: "kg", price: 2.9, status: "inactive" },
         { id: "v2", label: "2kg", type: "Long", unit: "kg", price: 5.4, status: "inactive" },
@@ -565,7 +565,7 @@ export async function seedDatabase() {
   const settings = {
     id: "defaults",
     texts: {
-      welcome: "Bienvenue a la cooperative.",
+      welcome: "Bienvenue à la coopérative.",
       footer: "Merci de soutenir les producteurs.",
     },
     emailTemplates: {
@@ -593,7 +593,7 @@ export async function seedDatabase() {
       totals: { totalAmount: 24.1, itemCount: 4 },
       createdAt: t("2026-02-01T10:00:00.000Z"),
       validatedAt: t("2026-02-01T10:30:00.000Z"),
-      memberSnapshot: { name: "Lea Martin", email: "lea.martin@example.com", phone: "0612345678" },
+      memberSnapshot: { name: "Léa Martin", email: "lea.martin@example.com", phone: "0612345678" },
       items: [
         {
           id: "i1",
@@ -615,7 +615,7 @@ export async function seedDatabase() {
           quantity: 1,
           unitPrice: 5.9,
           lineTotal: 5.9,
-          label: "Oeufs boite de 12",
+          label: "Œufs boîte de 12",
         },
         {
           id: "i3",
@@ -637,7 +637,7 @@ export async function seedDatabase() {
           quantity: 1,
           unitPrice: 2.8,
           lineTotal: 2.8,
-          label: "Fromage de chevre 120g",
+          label: "Fromage de chèvre 120g",
         },
       ],
     },
@@ -682,7 +682,7 @@ export async function seedDatabase() {
           quantity: 1,
           unitPrice: 3.2,
           lineTotal: 3.2,
-          label: "Oeufs boite de 6",
+          label: "Œufs boîte de 6",
         },
       ],
     },
@@ -795,7 +795,7 @@ export async function seedDatabase() {
           quantity: 1,
           unitPrice: 2.8,
           lineTotal: 2.8,
-          label: "Fromage de chevre 120g",
+          label: "Fromage de chèvre 120g",
         },
       ],
     },
@@ -875,7 +875,7 @@ export async function seedDatabase() {
           quantity: 1,
           unitPrice: 3.2,
           lineTotal: 3.2,
-          label: "Oeufs boite de 6",
+          label: "Œufs boîte de 6",
         },
         {
           id: "i2",
@@ -909,7 +909,7 @@ export async function seedDatabase() {
       totals: { totalAmount: 9.6, itemCount: 2 },
       createdAt: t("2026-03-25T10:00:00.000Z"),
       validatedAt: t("2026-03-25T10:20:00.000Z"),
-      memberSnapshot: { name: "Zoe Petit", email: "zoe.petit@example.com", phone: "0690123456" },
+      memberSnapshot: { name: "Zoé Petit", email: "zoe.petit@example.com", phone: "0690123456" },
       items: [
         {
           id: "i1",
@@ -993,9 +993,9 @@ export async function seedDatabase() {
 
     const offerItems = [
       { id: "oi1", producerId: "p4", productId: "pr1", variantId: "v1", title: "Pommes", variantLabel: "1kg", imageUrl: "/images/pommes.jpg", isOrganic: true, price: 3.5 },
-      { id: "oi2", producerId: "p8", productId: "pr3", variantId: "v1", title: "Oeufs", variantLabel: "Boite de 6", imageUrl: "/images/oeufs.jpg", isOrganic: false, price: 3.2 },
+      { id: "oi2", producerId: "p8", productId: "pr3", variantId: "v1", title: "Œufs", variantLabel: "Boîte de 6", imageUrl: "/images/oeufs.jpg", isOrganic: false, price: 3.2 },
       { id: "oi3", producerId: "p1", productId: "pr2", variantId: "v1", title: "Pommes de terre", variantLabel: "2kg", imageUrl: "/images/pdt.jpg", isOrganic: true, price: 4.2 },
-      { id: "oi4", producerId: "p7", productId: "pr4", variantId: "v1", title: "Fromage de chevre", variantLabel: "120g", imageUrl: "/images/chevre.jpg", isOrganic: true, price: 2.8 },
+      { id: "oi4", producerId: "p7", productId: "pr4", variantId: "v1", title: "Fromage de chèvre", variantLabel: "120g", imageUrl: "/images/chevre.jpg", isOrganic: true, price: 2.8 },
       { id: "oi5", producerId: "p2", productId: "pr5", variantId: "v1", title: "Tomates", variantLabel: "1kg", imageUrl: "/images/tomates.jpg", isOrganic: true, price: 4.8 },
       { id: "oi6", producerId: "p3", productId: "pr6", variantId: "v2", title: "Miel", variantLabel: "500g", imageUrl: "/images/miel.jpg", isOrganic: true, price: 9.0 },
       { id: "oi7", producerId: "p6", productId: "pr7", variantId: "v1", title: "Carottes", variantLabel: "1kg", imageUrl: "/images/carottes.jpg", isOrganic: false, price: 3.1 },

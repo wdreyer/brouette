@@ -307,7 +307,7 @@ export default function ProfileForm({
       setPasswordCurrent("");
       setPasswordNext("");
       setPasswordConfirm("");
-      setPasswordMessage("Mot de passe mis a jour.");
+      setPasswordMessage("Mot de passe mis à jour.");
     } catch (error) {
       const code = (error as { code?: string } | undefined)?.code ?? "";
       if (code === "auth/wrong-password" || code === "auth/invalid-credential") {
@@ -318,7 +318,7 @@ export default function ProfileForm({
         setPasswordMessage("Nouveau mot de passe trop faible.");
         return;
       }
-      setPasswordMessage("Impossible de modifier le mot de passe. Reessaie.");
+      setPasswordMessage("Impossible de modifier le mot de passe. Réessaie.");
     } finally {
       setPasswordSaving(false);
     }
@@ -576,7 +576,7 @@ export default function ProfileForm({
                   onClick={savePassword}
                   disabled={passwordSaving}
                 >
-                  {passwordSaving ? "Mise a jour..." : "Mettre a jour le mot de passe"}
+                  {passwordSaving ? "Mise à jour..." : "Mettre à jour le mot de passe"}
                 </button>
                 {passwordMessage ? <p className="text-sm text-moss">{passwordMessage}</p> : null}
               </div>
@@ -593,7 +593,7 @@ export default function ProfileForm({
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">Adhésion</p>
               <p className="mt-1 text-sm font-semibold text-ink">
-                {draft.membershipPaymentStatus === "up_to_date" ? "A jour" : "A payer"}
+                {draft.membershipPaymentStatus === "up_to_date" ? "À jour" : "À payer"}
               </p>
             </div>
             <div>

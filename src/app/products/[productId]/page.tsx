@@ -101,8 +101,8 @@ function formatEstimatedRange(min?: number | null, max?: number | null) {
       ? `Estimatif: ${min.toFixed(2)} EUR`
       : `Estimatif: ${min.toFixed(2)} EUR - ${max.toFixed(2)} EUR`;
   }
-  if (hasMin) return `Estimatif: a partir de ${min!.toFixed(2)} EUR`;
-  return `Estimatif: jusqu'a ${max!.toFixed(2)} EUR`;
+  if (hasMin) return `Estimatif : à partir de ${min!.toFixed(2)} EUR`;
+  return `Estimatif : jusqu'à ${max!.toFixed(2)} EUR`;
 }
 
 function sortProducts(
@@ -595,7 +595,7 @@ export default function ProductPage() {
               <div className="rounded-lg border border-ink/15 bg-stone px-4 py-3 text-sm text-ink/70">
                 <p className="font-semibold text-ink">Produit au poids</p>
                 <p className="text-xs">
-                  Prix final fixe apres pesee au retrait. {formatEstimatedRange(product.estimatedPriceMin, product.estimatedPriceMax)}
+                  Prix final fixe après pesée au retrait. {formatEstimatedRange(product.estimatedPriceMin, product.estimatedPriceMax)}
                 </p>
               </div>
             ) : null}

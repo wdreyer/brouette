@@ -221,7 +221,7 @@ export default function AnnualCalendarEditor() {
       nextStatus === "open" &&
       activeDistributions.some((item) => item.id !== distribution.id && isOpenStatus(item.status))
     ) {
-      setMessage("Une seule distribution peut etre ouverte a la fois.");
+      setMessage("Une seule distribution peut être ouverte à la fois.");
       return;
     }
 
@@ -245,9 +245,9 @@ export default function AnnualCalendarEditor() {
       setDistributions((prev) =>
         prev.map((item) => (item.id === distribution.id ? { ...item, status: nextStatus } : item)),
       );
-      setMessage("Statut de la distribution mis a jour.");
+      setMessage("Statut de la distribution mis à jour.");
     } catch {
-      setMessage("Impossible de mettre a jour le statut.");
+      setMessage("Impossible de mettre à jour le statut.");
     } finally {
       setUpdatingStatusId(null);
     }
@@ -343,7 +343,7 @@ export default function AnnualCalendarEditor() {
         return;
       }
       if (!(parsedDates[0] < parsedDates[1] && parsedDates[1] < parsedDates[2])) {
-        setMessage("Les dates doivent etre dans l'ordre croissant.");
+        setMessage("Les dates doivent être dans l'ordre croissant.");
         setSaving(false);
         return;
       }
@@ -494,9 +494,9 @@ export default function AnnualCalendarEditor() {
       <section className="rounded-[10px] border border-clay/90 bg-stone p-4">
         <h2 className="font-serif text-3xl">Calendrier annuel producteurs</h2>
         <p className="mt-2 text-sm text-ink/70">
-          Tu ajoutes uniquement des distributions complÃ¨tes (3 dates), puis tu coches les producteurs par date.
+          Tu ajoutes uniquement des distributions complètes (3 dates), puis tu coches les producteurs par date.
         </p>
-        <p className="mt-2 text-xs text-ink/60">Producteurs sans produits inclus: {producersWithoutProductsCount}</p>
+        <p className="mt-2 text-xs text-ink/60">Producteurs sans produits inclus : {producersWithoutProductsCount}</p>
       </section>
 
       <section className="rounded-[10px] border border-clay/90 bg-stone p-4">
@@ -552,7 +552,7 @@ export default function AnnualCalendarEditor() {
                         <option value="finished">Finie</option>
                       </select>
                       <span className="text-ink/55">
-                        Producteurs coches: {checkedProducersByDistribution[distribution.id] ?? 0}
+                        Producteurs cochés : {checkedProducersByDistribution[distribution.id] ?? 0}
                       </span>
                     </div>
                   </div>

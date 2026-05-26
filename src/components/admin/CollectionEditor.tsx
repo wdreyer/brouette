@@ -138,7 +138,7 @@ export default function CollectionEditor({
     if (!editingId) return;
     try {
       await setDoc(doc(firebaseDb, collectionName, editingId), editDraft, { merge: true });
-      setMessage("Document mis a jour.");
+      setMessage("Document mis à jour.");
       setEditingId(null);
       await load();
     } catch (error) {
@@ -150,7 +150,7 @@ export default function CollectionEditor({
   const saveRow = async (entry: DocEntry, rowDraft: Record<string, unknown>) => {
     try {
       await setDoc(doc(firebaseDb, collectionName, entry.id), rowDraft, { merge: true });
-      setMessage("Ligne mise a jour.");
+      setMessage("Ligne mise à jour.");
       await load();
     } catch (error) {
       const err = error instanceof Error ? error.message : "Erreur inconnue.";
@@ -175,7 +175,7 @@ export default function CollectionEditor({
     const label = String(getByPath(entry.data, "name") ?? entry.id);
     const isCategory = collectionName === "categories";
     const confirmMessage = isCategory
-      ? `Supprimer la categorie "${label}" ? Les produits relies seront remis sans categorie.`
+      ? `Supprimer la catégorie "${label}" ? Les produits reliés seront remis sans catégorie.`
       : `Supprimer "${label}" ?`;
     const confirmDelete =
       typeof window === "undefined" ? true : window.confirm(confirmMessage);
@@ -503,7 +503,7 @@ export default function CollectionEditor({
                 className="rounded-full bg-ink px-5 py-2 text-sm font-semibold text-stone"
                 onClick={handleCreate}
               >
-                Creer
+                Créer
               </button>
               <button
                 className="rounded-full border border-ink/20 px-4 py-2 text-sm font-semibold"

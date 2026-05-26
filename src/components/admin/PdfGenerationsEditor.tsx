@@ -160,7 +160,7 @@ function sanitizeFileNamePart(value: string) {
     .slice(0, 80);
 }
 
-function memberLabel(member?: Member | null, fallback = "Adherent inconnu") {
+function memberLabel(member?: Member | null, fallback = "Adhérent inconnu") {
   if (!member) return fallback;
   const first = String(member.firstName ?? "").trim();
   const last = String(member.lastName ?? "").trim();
@@ -781,7 +781,7 @@ export default function PdfGenerationsEditor() {
       await exportProducerDistributionPdf(selectedDistribution, selectedDistributionDates, row);
       setMessage(`PDF exporte: ${row.producerName} (${distributionLabel(selectedDistribution)})`);
     } catch {
-      setMessage("Erreur pendant la generation du PDF.");
+      setMessage("Erreur pendant la génération du PDF.");
     } finally {
       setExportingProducerId(null);
     }
@@ -1050,7 +1050,7 @@ export default function PdfGenerationsEditor() {
       <section className="rounded-2xl border border-clay/70 bg-white/90 p-5 shadow-card">
         <h2 className="font-serif text-3xl">Générations PDF</h2>
         <p className="mt-2 text-sm text-ink/70">
-          Selectionne une distribution, puis exporte producteur par producteur (un PDF avec les 3 dates).
+          Sélectionne une distribution, puis exporte producteur par producteur (un PDF avec les 3 dates).
         </p>
         <p className="mt-1 text-xs text-ink/60">Affichage limite aux distributions ouvertes ou finies.</p>
       </section>
@@ -1203,7 +1203,7 @@ export default function PdfGenerationsEditor() {
           <div>
             <h3 className="font-serif text-2xl">Bon de commande</h3>
             <p className="mt-1 text-sm text-ink/70">
-              Un PDF multi-pages par date: page 1 sommaire producteurs, puis recap produit x adherent par producteur.
+              Un PDF multi-pages par date : page 1 sommaire producteurs, puis récap produit x adhérent par producteur.
             </p>
           </div>
         </div>
@@ -1430,7 +1430,7 @@ export default function PdfGenerationsEditor() {
                       <table className="min-w-[900px] text-left text-sm">
                         <thead className="border-b border-clay/70 bg-stone/80">
                           <tr>
-                            <th className="px-2 py-2 font-semibold text-ink">Adherent</th>
+                            <th className="px-2 py-2 font-semibold text-ink">Adhérent</th>
                             {matrix.columns.map((column) => (
                               <th key={`head-${matrix.producerId}-${column.key}`} className="px-2 py-2 text-center font-semibold text-ink whitespace-pre-line">
                                 {column.title}

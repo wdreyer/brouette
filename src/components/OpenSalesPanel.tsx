@@ -445,7 +445,7 @@ export default function OpenSalesPanel() {
       setMessage("");
       await updateDoc(doc(firebaseDb, "distributionDates", openDistribution.id), { status: "finished" });
       await load();
-      setMessage("Vente fermee.");
+      setMessage("Vente fermée.");
     } catch (error) {
       const err = error instanceof Error ? error.message : "Erreur inconnue.";
       setStatus("error");
@@ -536,7 +536,7 @@ export default function OpenSalesPanel() {
           </div>
 
           <div className="rounded-2xl border border-clay/70 bg-white/90 p-4">
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">Producteurs presents</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">Producteurs présents</p>
             <div className="mt-3 flex flex-wrap gap-2">
               {producers.map((producer) => (
                 <label key={producer.id} className="flex items-center gap-2 rounded-full border border-ink/20 px-3 py-1 text-xs">

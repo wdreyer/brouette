@@ -302,7 +302,7 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
           fullName(referentId ? memberMap[referentId] : null) ||
           producer?.referentName ||
           dbRow?.referentName ||
-          "Sans referent";
+          "Sans référent";
 
         if (
           !dbRow ||
@@ -395,7 +395,7 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
       distSnap = await getDocs(collection(firebaseDb, "distributionDates"));
       distItems = distSnap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Distribution, "id">) }));
       setMessage(
-        `${autoClosed.length} vente(s) fermee(s) automatiquement (date limite depassee).`,
+        `${autoClosed.length} vente(s) fermée(s) automatiquement (date limite dépassée).`,
       );
     }
 
@@ -714,8 +714,8 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
     if (!targetDistribution?.id) {
       setMessage(
         isCurrentMode
-          ? "Aucune vente en cours a modifier."
-          : "Aucune distribution planifiee a preparer.",
+          ? "Aucune vente en cours à modifier."
+          : "Aucune distribution planifiée à préparer.",
       );
       return;
     }
@@ -960,7 +960,7 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
 
     await load();
     setSaving(false);
-    setMessage("Produits enregistres.");
+    setMessage("Produits enregistrés.");
   };
 
   const saveAndValidate = async () => {
@@ -1262,8 +1262,8 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
             </h2>
             <p className="mt-2 text-sm text-ink/70">
               {openDistribution
-                ? `Ouverte le ${formatLongDate(toDate(openDistribution.openedAt))}${toDate(openDistribution.closeAt) ? ` - fermeture auto le ${formatLongDate(toDate(openDistribution.closeAt))} a 22h` : ""}.`
-                : "La boutique est actuellement fermee."}
+                ? `Ouverte le ${formatLongDate(toDate(openDistribution.openedAt))}${toDate(openDistribution.closeAt) ? ` - fermeture auto le ${formatLongDate(toDate(openDistribution.closeAt))} à 22h` : ""}.`
+                : "La boutique est actuellement fermée."}
             </p>
             <div className="mt-3 flex flex-wrap items-center gap-2">
               {openDistributionDates.length ? (
@@ -1334,10 +1334,10 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.18em] text-ink/60">Historique des ventes</p>
-              <h3 className="mt-1 font-serif text-3xl">Ventes passees</h3>
+              <h3 className="mt-1 font-serif text-3xl">Ventes passées</h3>
             </div>
             <p className="text-xs text-ink/65">
-              {historicalDistributions.length} vente(s) cloturee(s)
+              {historicalDistributions.length} vente(s) clôturée(s)
             </p>
           </div>
 
@@ -1384,7 +1384,7 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
               })}
             </div>
           ) : (
-            <p className="mt-3 text-sm text-ink/70">Aucune vente cloturee pour le moment.</p>
+            <p className="mt-3 text-sm text-ink/70">Aucune vente clôturée pour le moment.</p>
           )}
         </section>
       ) : null}
@@ -1397,7 +1397,7 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
             <p className="mt-1 text-sm text-ink/70">
               {nextPlannedDistribution
                 ? `${distributionLabel(nextPlannedDistribution)}`
-                : "Aucune prochaine vente planifiee."}
+                : "Aucune prochaine vente planifiée."}
             </p>
             {nextPlannedDistribution ? (
               <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -1410,7 +1410,7 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
               </div>
             ) : null}
             <p className="mt-1 text-xs text-ink/60">
-              Tu peux preparer et pre-valider cette prochaine vente. Les effets boutique deviennent visibles uniquement quand elle est ouverte.
+              Tu peux préparer et prévalider cette prochaine vente. Les effets boutique deviennent visibles uniquement quand elle est ouverte.
             </p>
           </div>
           <div className="flex gap-2">
@@ -1434,15 +1434,15 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
         {nextPlannedDistribution ? (
           <div className="mt-3 grid gap-2 md:grid-cols-4">
             <div className="rounded-sm border border-clay/70 bg-clay/10 px-3 py-2 text-sm">
-              Producteurs inclus:{" "}
+              Producteurs inclus :{" "}
               <span className="font-semibold">{rows.length}</span>
             </div>
             <div className="rounded-sm border border-clay/70 bg-clay/10 px-3 py-2 text-sm">
-              Producteurs valides:{" "}
+              Producteurs validés :{" "}
               <span className="font-semibold">{validatedCount}</span>
             </div>
             <div className="rounded-sm border border-clay/70 bg-clay/10 px-3 py-2 text-sm">
-              Produits valides:{" "}
+              Produits validés :{" "}
               <span className="font-semibold">{targetValidatedProductsCount}</span>
             </div>
             <div className="rounded-sm border border-clay/70 bg-clay/10 px-3 py-2 text-sm">
@@ -1459,10 +1459,10 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-ink/60">
-              {isCurrentMode ? "Vente en cours" : "Validation referents"}
+              {isCurrentMode ? "Vente en cours" : "Validation référents"}
             </p>
             <h3 className="mt-1 font-serif text-3xl">
-              {isCurrentMode ? "Modifier la vente en cours" : "Producteurs a valider"}
+              {isCurrentMode ? "Modifier la vente en cours" : "Producteurs à valider"}
             </h3>
             <p className="mt-1 text-sm text-ink/70">
               {isCurrentMode
@@ -1505,10 +1505,10 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
             Producteurs total : <span className="font-semibold">{rows.length}</span>
           </div>
           <div className="rounded-sm border border-clay/70 bg-clay/10 px-3 py-2 text-sm">
-            Producteurs valides : <span className="font-semibold">{validatedCount}</span>
+            Producteurs validés : <span className="font-semibold">{validatedCount}</span>
           </div>
           <div className="rounded-sm border border-clay/70 bg-clay/10 px-3 py-2 text-sm">
-            Producteurs a valider : <span className="font-semibold">{pendingCount}</span>
+            Producteurs à valider : <span className="font-semibold">{pendingCount}</span>
           </div>
           <div className="rounded-sm border border-clay/70 bg-clay/10 px-3 py-2 text-sm">
             Produits validés : <span className="font-semibold">{targetValidatedProductsCount}</span>
@@ -1612,11 +1612,11 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
       <section className="rounded-md border border-ink/20 bg-white p-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-ink/60">Ventes a venir</p>
-            <h3 className="mt-1 font-serif text-3xl">Recap des prochaines distributions</h3>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-ink/60">Ventes à venir</p>
+            <h3 className="mt-1 font-serif text-3xl">Récap des prochaines distributions</h3>
           </div>
           <p className="text-xs text-ink/65">
-            {upcomingPlannedDistributions.length} distribution(s) planifiee(s)
+            {upcomingPlannedDistributions.length} distribution(s) planifiée(s)
           </p>
         </div>
 
@@ -1663,7 +1663,7 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
             })}
           </div>
         ) : (
-          <p className="mt-3 text-sm text-ink/70">Aucune distribution planifiee.</p>
+          <p className="mt-3 text-sm text-ink/70">Aucune distribution planifiée.</p>
         )}
       </section>
       ) : null}
@@ -1687,13 +1687,13 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
                 className="rounded-md border border-ink/25 px-3 py-1.5 text-sm font-semibold"
                 onClick={() => applyAllDates(true)}
               >
-                Tout selectionner
+                Tout sélectionner
               </button>
               <button
                 className="rounded-md border border-ink/25 px-3 py-1.5 text-sm font-semibold"
                 onClick={() => applyAllDates(false)}
               >
-                Tout deselectionner
+                Tout désélectionner
               </button>
               <button
                 className="rounded-md border border-ink/25 px-3 py-1.5 text-sm font-semibold"

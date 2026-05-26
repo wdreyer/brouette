@@ -564,8 +564,8 @@ export default function MembersEditor({
       "",
       "Cette action supprime aussi l'historique de solde (ledger).",
       assignedProducersCount > 0
-        ? `Les ${assignedProducersCount} producteur(s) relies a ce referent seront dissocies.`
-        : "Aucun producteur lie a ce membre.",
+        ? `Les ${assignedProducersCount} producteur(s) reliés à ce référent seront dissociés.`
+        : "Aucun producteur lié à ce membre.",
       "",
       "Action irreversible.",
     ].join("\n");

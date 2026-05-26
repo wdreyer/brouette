@@ -454,7 +454,7 @@ export default function ProductsEditor({
         }
       }
 
-      setMessage("Produit mis a jour.");
+      setMessage("Produit mis à jour.");
       setEditingId(null);
       await load();
     } catch (error) {
@@ -639,7 +639,7 @@ export default function ProductsEditor({
         <div className="flex flex-wrap items-center gap-3">
           <input
             className="w-full min-w-[220px] flex-1 rounded-full border border-ink/20 bg-white px-4 py-2 text-sm"
-            placeholder="Rechercher: nom, producteur, categorie..."
+            placeholder="Rechercher : nom, producteur, catégorie..."
             value={filter}
             onChange={(event) => setFilter(event.target.value)}
           />
@@ -660,7 +660,7 @@ export default function ProductsEditor({
             value={categoryFilter}
             onChange={(event) => setCategoryFilter(event.target.value)}
           >
-            <option value="all">Toutes les categories ({categoryTotalInScope})</option>
+            <option value="all">Toutes les catégories ({categoryTotalInScope})</option>
             {categoryOptions.map((category) => (
               <option key={category.id} value={category.id}>
                 {category.label} ({categoryCounts.get(category.id) ?? 0})
@@ -800,7 +800,7 @@ export default function ProductsEditor({
                             setEditDraft(next);
                           }}
                         >
-                          <option value="">Selectionner un producteur</option>
+                          <option value="">Sélectionner un producteur</option>
                           {producerOptions.map((producer) => (
                             <option key={producer.id} value={producer.id}>
                               {producer.label}
@@ -817,7 +817,7 @@ export default function ProductsEditor({
                             setEditDraft(next);
                           }}
                         >
-                          <option value="">Selectionner une categorie</option>
+                          <option value="">Sélectionner une catégorie</option>
                           {categoryOptions.map((category) => (
                             <option key={category.id} value={category.id}>
                               {category.label}
@@ -918,7 +918,7 @@ export default function ProductsEditor({
                           setEditDraft(next);
                         }}
                       />
-                      Produit au poids (prix final apres pesee)
+                      Produit au poids (prix final après pesée)
                     </label>
                     {Boolean(getByPath(editDraft, "isSoldByWeight")) ? (
                       <div className="mt-3 grid gap-3 md:grid-cols-2">
@@ -1111,7 +1111,7 @@ export default function ProductsEditor({
                             updateRowCategory(entry.id, event.target.value);
                           }}
                         >
-                          <option value="">{categoryLabel ? "Sans categorie" : "Selectionner"}</option>
+                          <option value="">{categoryLabel ? "Sans catégorie" : "Sélectionner"}</option>
                           {categoryOptions.map((category) => (
                             <option key={category.id} value={category.id}>
                               {category.label}
@@ -1223,7 +1223,7 @@ export default function ProductsEditor({
                         setCreateDraft(next);
                       }}
                     >
-                      <option value="">Selectionner un producteur</option>
+                      <option value="">Sélectionner un producteur</option>
                       {producerOptions.map((producer) => (
                         <option key={producer.id} value={producer.id}>
                           {producer.label}
@@ -1240,7 +1240,7 @@ export default function ProductsEditor({
                         setCreateDraft(next);
                       }}
                     >
-                      <option value="">Selectionner une categorie</option>
+                      <option value="">Sélectionner une catégorie</option>
                       {categoryOptions.map((category) => (
                         <option key={category.id} value={category.id}>
                           {category.label}
@@ -1341,7 +1341,7 @@ export default function ProductsEditor({
                       setCreateDraft(next);
                     }}
                   />
-                  Produit au poids (prix final apres pesee)
+                  Produit au poids (prix final après pesée)
                 </label>
                 {Boolean(getByPath(createDraft, "isSoldByWeight")) ? (
                   <div className="mt-3 grid gap-3 md:grid-cols-2">
@@ -1387,7 +1387,7 @@ export default function ProductsEditor({
                 className="rounded-full bg-ink px-5 py-2 text-sm font-semibold text-stone"
                 onClick={handleCreate}
               >
-                Creer
+                Créer
               </button>
               <button
                 className="rounded-full border border-ink/20 px-4 py-2 text-sm font-semibold"

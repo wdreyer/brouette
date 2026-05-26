@@ -81,8 +81,8 @@ function formatEstimatedRange(minValue: string, maxValue: string) {
       ? `Estimatif: ${min.toFixed(2)} EUR`
       : `Estimatif: ${min.toFixed(2)} - ${max.toFixed(2)} EUR`;
   }
-  if (min !== null) return `Estimatif a partir de ${min.toFixed(2)} EUR`;
-  return `Estimatif jusqu'a ${max!.toFixed(2)} EUR`;
+  if (min !== null) return `Estimatif à partir de ${min.toFixed(2)} EUR`;
+  return `Estimatif jusqu'à ${max!.toFixed(2)} EUR`;
 }
 
 function createDraftProductWithDates(activeDateKeys: string[]): ProductDraft {
@@ -778,8 +778,8 @@ export default function AdminSaleProducerManagerPage() {
 
       <section className="border border-ink/20 bg-stone/90 p-5">
         <div className="mb-4 flex flex-wrap gap-2">
-          <button className="rounded-md border border-ink/25 px-3 py-1.5 text-sm font-semibold disabled:opacity-50" onClick={() => applyAllDates(true)} disabled={saving || editingLocked}>Tout selectionner</button>
-          <button className="rounded-md border border-ink/25 px-3 py-1.5 text-sm font-semibold disabled:opacity-50" onClick={() => applyAllDates(false)} disabled={saving || editingLocked}>Tout deselectionner</button>
+          <button className="rounded-md border border-ink/25 px-3 py-1.5 text-sm font-semibold disabled:opacity-50" onClick={() => applyAllDates(true)} disabled={saving || editingLocked}>Tout sélectionner</button>
+          <button className="rounded-md border border-ink/25 px-3 py-1.5 text-sm font-semibold disabled:opacity-50" onClick={() => applyAllDates(false)} disabled={saving || editingLocked}>Tout désélectionner</button>
           <button className="rounded-md border border-ink/25 px-3 py-1.5 text-sm font-semibold disabled:opacity-50" onClick={openAddModal} disabled={saving || editingLocked}>Ajouter un produit</button>
         </div>
         {editingLocked ? (
@@ -1035,7 +1035,7 @@ export default function AdminSaleProducerManagerPage() {
                         })
                       }
                     />
-                    Produit au poids (prix final apres pesee)
+                    Produit au poids (prix final après pesée)
                   </label>
 
                   {editingProduct.isSoldByWeight ? (
@@ -1253,7 +1253,7 @@ export default function AdminSaleProducerManagerPage() {
                     }))
                   }
                 />
-                Produit au poids (prix final apres pesee)
+                Produit au poids (prix final après pesée)
               </label>
               {addDraft.isSoldByWeight ? (
                 <div className="grid gap-3 md:grid-cols-2">

@@ -39,8 +39,8 @@ function formatEstimatedRange(min?: number | null, max?: number | null) {
       ? `Estimatif: ${min.toFixed(2)} EUR`
       : `Estimatif: ${min.toFixed(2)} EUR - ${max.toFixed(2)} EUR`;
   }
-  if (hasMin) return `Estimatif: a partir de ${min!.toFixed(2)} EUR`;
-  return `Estimatif: jusqu'a ${max!.toFixed(2)} EUR`;
+  if (hasMin) return `Estimatif : à partir de ${min!.toFixed(2)} EUR`;
+  return `Estimatif : jusqu'à ${max!.toFixed(2)} EUR`;
 }
 
 function groupByDateThenProducer(
@@ -197,7 +197,7 @@ export default function CartDrawer({ open, onClose }: CartDrawerProps) {
                                 </p>
                               ) : null}
                               <p className={`text-xs ${item.isSoldByWeight ? "text-ink/50" : "text-ink/60"}`}>
-                                {item.isSoldByWeight ? "0,00 EUR / unite" : `${formatMoney(item.unitPrice)} EUR / unite`}
+                                {item.isSoldByWeight ? "0,00 EUR / unité" : `${formatMoney(item.unitPrice)} EUR / unité`}
                               </p>
                             </div>
                             <div className="flex flex-col items-end gap-2">
@@ -246,13 +246,13 @@ export default function CartDrawer({ open, onClose }: CartDrawerProps) {
             <span>{formatMoney(total)} EUR</span>
           </div>
           <p className="mt-2 text-xs text-ink/60">
-            Paiement sur place. Pense a valider ta commande avant la fermeture de la vente.
+            Paiement sur place. Pense à valider ta commande avant la fermeture de la vente.
           </p>
           <a
             href="/checkout"
             className="mt-3 block w-full rounded-full bg-ink px-4 py-3 text-center text-sm font-semibold text-stone shadow-sm"
           >
-            Recapitulatif de la commande
+            Récapitulatif de la commande
           </a>
           <button
             className="mt-2 w-full rounded-full border border-ink/20 bg-white px-4 py-2 text-sm font-semibold text-ink"

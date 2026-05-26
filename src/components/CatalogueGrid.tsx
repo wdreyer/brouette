@@ -79,8 +79,8 @@ function formatEstimatedRange(min?: number | null, max?: number | null) {
       ? `Estimatif: ${min.toFixed(2)} EUR`
       : `Estimatif: ${min.toFixed(2)} EUR - ${max.toFixed(2)} EUR`;
   }
-  if (hasMin) return `Estimatif: a partir de ${min!.toFixed(2)} EUR`;
-  return `Estimatif: jusqu'a ${max!.toFixed(2)} EUR`;
+  if (hasMin) return `Estimatif : à partir de ${min!.toFixed(2)} EUR`;
+  return `Estimatif : jusqu'à ${max!.toFixed(2)} EUR`;
 }
 
 export default function CatalogueGrid({ hideWhenClosed = false }: { hideWhenClosed?: boolean }) {

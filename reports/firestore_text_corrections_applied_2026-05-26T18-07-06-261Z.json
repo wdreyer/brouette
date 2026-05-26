@@ -1,0 +1,167 @@
+[
+  {
+    "path": "products/biopain-miche-aux-olives-kalamata/variants/v1",
+    "changes": [
+      {
+        "field": "unit",
+        "before": "piece",
+        "after": "pièce"
+      }
+    ]
+  },
+  {
+    "path": "products/biopain-miche-aux-raisins-bio/variants/v1",
+    "changes": [
+      {
+        "field": "unit",
+        "before": "piece",
+        "after": "pièce"
+      }
+    ]
+  },
+  {
+    "path": "products/biopain-pain-a-la-chataigne-bio/variants/v1",
+    "changes": [
+      {
+        "field": "unit",
+        "before": "piece",
+        "after": "pièce"
+      }
+    ]
+  },
+  {
+    "path": "products/biopain-pain-aux-figues-bio/variants/v1",
+    "changes": [
+      {
+        "field": "unit",
+        "before": "piece",
+        "after": "pièce"
+      }
+    ]
+  },
+  {
+    "path": "products/biopain-pain-aux-noix-bio/variants/v1",
+    "changes": [
+      {
+        "field": "unit",
+        "before": "piece",
+        "after": "pièce"
+      }
+    ]
+  },
+  {
+    "path": "products/biopain-pain-aux-sons-bio/variants/v1",
+    "changes": [
+      {
+        "field": "unit",
+        "before": "piece",
+        "after": "pièce"
+      }
+    ]
+  },
+  {
+    "path": "products/biopain-pain-complet-bio/variants/v1",
+    "changes": [
+      {
+        "field": "unit",
+        "before": "piece",
+        "after": "pièce"
+      }
+    ]
+  },
+  {
+    "path": "products/biopain-pain-de-campagne-moule-aux-graines-bio/variants/v1",
+    "changes": [
+      {
+        "field": "unit",
+        "before": "piece",
+        "after": "pièce"
+      }
+    ]
+  },
+  {
+    "path": "products/biopain-pain-du-giffre-bio/variants/v1",
+    "changes": [
+      {
+        "field": "unit",
+        "before": "piece",
+        "after": "pièce"
+      }
+    ]
+  },
+  {
+    "path": "products/biopain-pain-integral-moule-bio/variants/v1",
+    "changes": [
+      {
+        "field": "unit",
+        "before": "piece",
+        "after": "pièce"
+      }
+    ]
+  },
+  {
+    "path": "products/biopain-pain-l-indien-bio/variants/v1",
+    "changes": [
+      {
+        "field": "unit",
+        "before": "piece",
+        "after": "pièce"
+      }
+    ]
+  },
+  {
+    "path": "products/biopain-pain-la-bise-de-sixt-bio/variants/v1",
+    "changes": [
+      {
+        "field": "unit",
+        "before": "piece",
+        "after": "pièce"
+      }
+    ]
+  },
+  {
+    "path": "products/biopain-pain-le-kamut-bio/variants/v1",
+    "changes": [
+      {
+        "field": "unit",
+        "before": "piece",
+        "after": "pièce"
+      }
+    ]
+  },
+  {
+    "path": "products/biopain-pain-le-meteil-bio/variants/v1",
+    "changes": [
+      {
+        "field": "unit",
+        "before": "piece",
+        "after": "pièce"
+      }
+    ]
+  },
+  {
+    "path": "products/biopain-pain-le-tournelin-bio/variants/v1",
+    "changes": [
+      {
+        "field": "unit",
+        "before": "piece",
+        "after": "pièce"
+      }
+    ]
+  },
+  {
+    "path": "settings/defaults",
+    "changes": [
+      {
+        "field": "texts.welcome",
+        "before": "Bienvenue a la cooperative.",
+        "after": "Bienvenue à la coopérative."
+      },
+      {
+        "field": "association.address",
+        "before": "1 place du Marche, 35000 Rennes",
+        "after": "1 place du Marché, 35000 Rennes"
+      }
+    ]
+  }
+]

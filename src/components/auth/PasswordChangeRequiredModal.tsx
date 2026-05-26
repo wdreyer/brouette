@@ -109,7 +109,7 @@ export default function PasswordChangeRequiredModal() {
         setMessage("Nouveau mot de passe trop faible.");
         return;
       }
-      setMessage("Impossible de mettre a jour le mot de passe. Reessaie.");
+      setMessage("Impossible de mettre à jour le mot de passe. Réessaie.");
     } finally {
       setSaving(false);
     }
@@ -163,7 +163,7 @@ export default function PasswordChangeRequiredModal() {
           onClick={handleUpdatePassword}
           disabled={saving}
         >
-          {saving ? "Enregistrement..." : "Mettre a jour mon mot de passe"}
+          {saving ? "Enregistrement..." : "Mettre à jour mon mot de passe"}
         </button>
       </div>
     </div>

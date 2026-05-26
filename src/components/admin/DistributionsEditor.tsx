@@ -278,7 +278,7 @@ export default function DistributionsEditor({ title, description }: EditorProps)
       });
 
       await batch.commit();
-      setMessage("Distribution mise a jour.");
+      setMessage("Distribution mise à jour.");
       closeModal();
       await load();
     } catch {
@@ -348,9 +348,9 @@ export default function DistributionsEditor({ title, description }: EditorProps)
             : row,
         ),
       );
-      setMessage("Statut de la distribution mis a jour.");
+      setMessage("Statut de la distribution mis à jour.");
     } catch {
-      setMessage("Impossible de mettre a jour le statut.");
+      setMessage("Impossible de mettre à jour le statut.");
     } finally {
       setUpdatingStatusId(null);
     }
@@ -365,7 +365,7 @@ export default function DistributionsEditor({ title, description }: EditorProps)
           <div>
             <h2 className="font-serif text-3xl">{title}</h2>
             <p className="mt-2 text-sm text-ink/70">
-              {description ?? "Liste des distributions sur l annee a venir."}
+              {description ?? "Liste des distributions sur l'année à venir."}
             </p>
           </div>
           <button
@@ -382,7 +382,7 @@ export default function DistributionsEditor({ title, description }: EditorProps)
         {loading ? (
           <p className="text-sm text-ink/70">Chargement...</p>
         ) : empty ? (
-          <p className="text-sm text-ink/70">Aucune distribution sur l annee a venir.</p>
+          <p className="text-sm text-ink/70">Aucune distribution sur l&apos;année à venir.</p>
         ) : (
           <div className="overflow-auto border border-ink/15 bg-white">
             <table className="min-w-full text-left text-sm">
@@ -393,7 +393,7 @@ export default function DistributionsEditor({ title, description }: EditorProps)
                   <th className="px-3 py-2 text-xs uppercase tracking-[0.12em]">Date 2</th>
                   <th className="px-3 py-2 text-xs uppercase tracking-[0.12em]">Date 3</th>
                   <th className="px-3 py-2 text-xs uppercase tracking-[0.12em]">Statut</th>
-                  <th className="px-3 py-2 text-xs uppercase tracking-[0.12em]">Producteurs avec au moins une date cochee</th>
+                  <th className="px-3 py-2 text-xs uppercase tracking-[0.12em]">Producteurs avec au moins une date cochée</th>
                   <th className="px-3 py-2 text-xs uppercase tracking-[0.12em]">Actions</th>
                 </tr>
               </thead>

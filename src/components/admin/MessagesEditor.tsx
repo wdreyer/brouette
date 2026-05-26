@@ -84,23 +84,23 @@ const BUILTIN_TEMPLATES = [
     name: "Ouverture de la vente",
     subject: "La vente est ouverte",
     content:
-      "Bonjour,\n\nLa vente est ouverte. Tu peux des maintenant preparer et valider ton panier sur la boutique.\n\nA bientot,\nLa Brouette",
+      "Bonjour,\n\nLa vente est ouverte. Tu peux dès maintenant préparer et valider ton panier sur la boutique.\n\nÀ bientôt,\nLa Brouette",
   },
   {
     id: "builtin-pickup",
     name: "Rappel retrait (J-1/J-2)",
     subject: "Rappel retrait de commande",
     content:
-      "Bonjour,\n\nPetit rappel : ta commande est a recuperer tres bientot. Pense a verifier ton recap par date et par producteur.\n\nA bientot,\nLa Brouette",
+      "Bonjour,\n\nPetit rappel : ta commande est à récupérer très bientôt. Pense à vérifier ton récap par date et par producteur.\n\nÀ bientôt,\nLa Brouette",
   },
 ];
 
 const TARGET_OPTIONS: { value: TargetKind; label: string; desc: string }[] = [
-  { value: "all-members-and-coop", label: "Tous", desc: "Tous les adherents et membres Coop" },
-  { value: "adherents-only", label: "Adherents", desc: "Membres avec role adherent" },
+  { value: "all-members-and-coop", label: "Tous", desc: "Tous les adhérents et membres Coop" },
+  { value: "adherents-only", label: "Adhérents", desc: "Membres avec rôle adhérent" },
   { value: "recent-buyers", label: "Commandes recentes", desc: "Personnes ayant commande recemment" },
-  { value: "coop-only", label: "Membres Coop", desc: "Admins et referents" },
-  { value: "selected-adherents", label: "Selection manuelle", desc: "Choisir les adherents un par un" },
+  { value: "coop-only", label: "Membres Coop", desc: "Admins et référents" },
+  { value: "selected-adherents", label: "Sélection manuelle", desc: "Choisir les adhérents un par un" },
   { value: "contact-list", label: "Liste de diffusion", desc: "Utiliser une liste enregistree" },
   { value: "producers", label: "Producteurs", desc: "Tous les producteurs (email de la fiche producteur)" },
 ];
@@ -301,7 +301,7 @@ export default function MessagesEditor() {
   const applyTemplate = (tmpl: { subject?: string; content?: string; name?: string } | null) => {
     if (!tmpl) return;
     setDraft((prev) => ({ ...prev, subject: tmpl.subject ?? "", content: tmpl.content ?? "" }));
-    setStatusMsg({ type: "info", text: "Modele applique." });
+    setStatusMsg({ type: "info", text: "Modèle appliqué." });
   };
 
   const toggleManualMember = (memberId: string) => {
@@ -319,11 +319,11 @@ export default function MessagesEditor() {
       return;
     }
     if (mode === "send" && draft.target === "selected-adherents" && draft.selectedMemberIds.length === 0) {
-      setStatusMsg({ type: "error", text: "Selectionne au moins un adherent." });
+      setStatusMsg({ type: "error", text: "Sélectionne au moins un adhérent." });
       return;
     }
     if (mode === "send" && draft.target === "contact-list" && !draft.contactListId) {
-      setStatusMsg({ type: "error", text: "Selectionne une liste de diffusion." });
+      setStatusMsg({ type: "error", text: "Sélectionne une liste de diffusion." });
       return;
     }
     if (mode === "test" && !draft.testEmail.trim()) {
@@ -372,13 +372,13 @@ export default function MessagesEditor() {
         type: "success",
         text:
           mode === "test"
-            ? `Test envoye a ${draft.testEmail}.${ref}`
-            : `Message envoye a ${result.sent ?? 0} destinataires.${ref}`,
+            ? `Test envoyé à ${draft.testEmail}.${ref}`
+            : `Message envoyé à ${result.sent ?? 0} destinataires.${ref}`,
       });
       if (result.warning) {
         setStatusMsg({
           type: "info",
-          text: `${mode === "test" ? "Test envoye." : "Message envoye."} ${result.warning}`,
+          text: `${mode === "test" ? "Test envoyé." : "Message envoyé."} ${result.warning}`,
         });
       }
       await load();
@@ -404,7 +404,7 @@ export default function MessagesEditor() {
         updatedAt: serverTimestamp(),
       });
       setQuickTemplateName("");
-      setStatusMsg({ type: "success", text: "Modele enregistre." });
+      setStatusMsg({ type: "success", text: "Modèle enregistré." });
       await load();
     } catch (err) {
       setStatusMsg({ type: "error", text: err instanceof Error ? err.message : "Erreur." });
@@ -429,7 +429,7 @@ export default function MessagesEditor() {
           { name, subject, content, updatedAt: serverTimestamp() },
           { merge: true },
         );
-        setStatusMsg({ type: "success", text: "Modele mis a jour." });
+        setStatusMsg({ type: "success", text: "Modèle mis à jour." });
       } else {
         await addDoc(collection(firebaseDb, "messageTemplates"), {
           name,
@@ -438,7 +438,7 @@ export default function MessagesEditor() {
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
         });
-        setStatusMsg({ type: "success", text: "Modele cree." });
+        setStatusMsg({ type: "success", text: "Modèle créé." });
       }
       setEditingTemplate(null);
       await load();
@@ -452,7 +452,7 @@ export default function MessagesEditor() {
     try {
       await deleteDoc(doc(firebaseDb, "messageTemplates", deleteTemplateId));
       setDeleteTemplateId(null);
-      setStatusMsg({ type: "success", text: "Modele supprime." });
+      setStatusMsg({ type: "success", text: "Modèle supprimé." });
       await load();
     } catch (err) {
       setStatusMsg({ type: "error", text: err instanceof Error ? err.message : "Erreur." });
@@ -492,7 +492,7 @@ export default function MessagesEditor() {
           },
           { merge: true },
         );
-        setStatusMsg({ type: "success", text: "Liste mise a jour." });
+        setStatusMsg({ type: "success", text: "Liste mise à jour." });
       } else {
         await addDoc(collection(firebaseDb, "contactLists"), {
           name,
@@ -527,7 +527,7 @@ export default function MessagesEditor() {
 
   const tabs: { key: ActiveTab; label: string; count?: number }[] = [
     { key: "composer", label: "Composer" },
-    { key: "templates", label: "Modeles", count: templates.length },
+    { key: "templates", label: "Modèles", count: templates.length },
     { key: "lists", label: "Listes de diffusion", count: contactLists.length },
     { key: "history", label: "Historique", count: messages.length },
   ];
@@ -539,7 +539,7 @@ export default function MessagesEditor() {
         <p className="text-[11px] font-semibold uppercase tracking-[0.3em] text-ink/55">Messagerie</p>
         <h2 className="mt-2 font-serif text-3xl">Envoi de messages</h2>
         <p className="mt-3 max-w-3xl text-sm leading-7 text-ink/70">
-          Composez et envoyez des emails, gerez vos modeles et vos listes de diffusion.
+          Composez et envoyez des emails, gérez vos modèles et vos listes de diffusion.
         </p>
       </div>
 
@@ -681,7 +681,7 @@ export default function MessagesEditor() {
                       onClick={() => setActiveTab("lists")}
                       className="mt-1 text-sm font-semibold text-forest hover:underline"
                     >
-                      Creer une liste
+                      Créer une liste
                     </button>
                   </div>
                 ) : (
@@ -714,7 +714,7 @@ export default function MessagesEditor() {
             {draft.target === "selected-adherents" && (
               <div className="rounded-[24px] border border-clay/60 bg-white/90 p-5 shadow-card">
                 <div className="flex items-center justify-between">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-ink/50">Selection</p>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-ink/50">Sélection</p>
                   <span className="rounded-full bg-forest/10 px-2.5 py-0.5 text-xs font-bold text-forest">
                     {draft.selectedMemberIds.length} choisi(s)
                   </span>
@@ -743,7 +743,7 @@ export default function MessagesEditor() {
                 </div>
                 <div className="mt-2 max-h-60 overflow-auto rounded-[12px] border border-ink/8 bg-stone/20">
                   {manualCandidates.map((member) => {
-                    const name = fullName(member.firstName, member.lastName) || "Adherent";
+                    const name = fullName(member.firstName, member.lastName) || "Adhérent";
                     const email = firstEmail(member) || "-";
                     const checked = draft.selectedMemberIds.includes(member.id);
                     return (
@@ -771,7 +771,7 @@ export default function MessagesEditor() {
             {/* Template quick-pick */}
             <div className="rounded-[24px] border border-clay/60 bg-white/90 p-5 shadow-card">
               <div className="flex items-center justify-between">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-ink/50">Modele</p>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-ink/50">Modèle</p>
                 <button
                   className="text-[11px] font-semibold text-forest hover:underline"
                   onClick={() => setActiveTab("templates")}
@@ -785,7 +785,7 @@ export default function MessagesEditor() {
                 onChange={(e) => setSelectedTemplateKey(e.target.value)}
               >
                 <option value="">Aucun (message libre)</option>
-                <optgroup label="Modeles integres">
+                <optgroup label="Modèles intégrés">
                   {BUILTIN_TEMPLATES.map((t) => (
                     <option key={t.id} value={`builtin:${t.id}`}>
                       {t.name}
@@ -793,10 +793,10 @@ export default function MessagesEditor() {
                   ))}
                 </optgroup>
                 {templates.length > 0 && (
-                  <optgroup label="Modeles personnalises">
+                  <optgroup label="Modèles personnalisés">
                     {templates.map((t) => (
                       <option key={t.id} value={`custom:${t.id}`}>
-                        {t.name ?? "Modele"}
+                        {t.name ?? "Modèle"}
                       </option>
                     ))}
                   </optgroup>
@@ -838,7 +838,7 @@ export default function MessagesEditor() {
                   <label className="text-xs font-semibold text-ink/60">Contenu</label>
                   <textarea
                     className="min-h-[300px] resize-y rounded-[18px] border border-ink/15 bg-white px-4 py-4 text-sm leading-7 focus:outline-none focus:ring-2 focus:ring-forest/30"
-                    placeholder={"Bonjour,\n\nVotre message ici...\n\nA bientot,\nLa Brouette"}
+                    placeholder={"Bonjour,\n\nVotre message ici...\n\nÀ bientôt,\nLa Brouette"}
                     value={draft.content}
                     onChange={(e) => setDraft((prev) => ({ ...prev, content: e.target.value }))}
                   />
@@ -853,7 +853,7 @@ export default function MessagesEditor() {
 
               {/* Test */}
               <div className="mt-4 rounded-[16px] border border-ink/8 bg-stone/30 p-4">
-                <p className="text-xs font-semibold text-ink/55">Test - envoyer a une seule adresse</p>
+                <p className="text-xs font-semibold text-ink/55">Test - envoyer à une seule adresse</p>
                 <div className="mt-2 flex gap-2">
                   <input
                     className="min-w-0 flex-1 rounded-[12px] border border-ink/15 bg-white px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-forest/30"
@@ -931,7 +931,7 @@ export default function MessagesEditor() {
         <div className="flex flex-col gap-5">
           <div className="flex items-center justify-between">
             <div>
-              <h3 className="font-serif text-xl">Modeles de message</h3>
+              <h3 className="font-serif text-xl">Modèles de message</h3>
               <p className="mt-0.5 text-sm text-ink/60">{templates.length} modele(s) personnalise(s)</p>
             </div>
             <button
@@ -984,7 +984,7 @@ export default function MessagesEditor() {
                     className="rounded-full bg-forest px-5 py-2 text-sm font-semibold text-white transition-colors hover:bg-forest/90"
                     onClick={saveTemplate}
                   >
-                    {editingTemplate.id ? "Mettre a jour" : "Creer"}
+                    {editingTemplate.id ? "Mettre à jour" : "Créer"}
                   </button>
                   <button
                     className="rounded-full border border-ink/15 px-5 py-2 text-sm font-semibold text-ink/60 transition-colors hover:bg-stone/40"
@@ -1000,7 +1000,7 @@ export default function MessagesEditor() {
           {/* Built-in templates */}
           <div>
             <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.2em] text-ink/40">
-              Modeles integres
+              Modèles intégrés
             </p>
             <div className="grid gap-4 sm:grid-cols-2">
               {BUILTIN_TEMPLATES.map((tmpl) => (
@@ -1030,14 +1030,14 @@ export default function MessagesEditor() {
           {templates.length > 0 && (
             <div>
               <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.2em] text-ink/40">
-                Modeles personnalises
+                Modèles personnalisés
               </p>
               <div className="grid gap-4 sm:grid-cols-2">
                 {templates.map((tmpl) => (
                   <div key={tmpl.id} className="rounded-[20px] border border-clay/60 bg-white/90 p-5 shadow-card">
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
-                        <p className="font-semibold text-ink">{tmpl.name ?? "Modele"}</p>
+                        <p className="font-semibold text-ink">{tmpl.name ?? "Modèle"}</p>
                         <p className="mt-0.5 text-xs text-ink/55">{tmpl.subject}</p>
                       </div>
                       <div className="flex shrink-0 gap-1.5">
@@ -1087,7 +1087,7 @@ export default function MessagesEditor() {
                 className="mt-3 rounded-full bg-forest px-5 py-2 text-sm font-semibold text-white"
                 onClick={() => setEditingTemplate({ id: null, name: "", subject: "", content: "" })}
               >
-                Creer mon premier modele
+                Créer mon premier modèle
               </button>
             </div>
           )}
@@ -1279,7 +1279,7 @@ export default function MessagesEditor() {
                   className="rounded-full bg-forest px-5 py-2 text-sm font-semibold text-white transition-colors hover:bg-forest/90"
                   onClick={saveContactList}
                 >
-                  {editingList.id ? "Mettre a jour" : "Creer la liste"}
+                  {editingList.id ? "Mettre à jour" : "Créer la liste"}
                 </button>
                 <button
                   className="rounded-full border border-ink/15 px-5 py-2 text-sm font-semibold text-ink/60 transition-colors hover:bg-stone/40"
@@ -1308,7 +1308,7 @@ export default function MessagesEditor() {
                   setListSearchMembers("");
                 }}
               >
-                Creer ma premiere liste
+                Créer ma première liste
               </button>
             </div>
           ) : (
@@ -1411,7 +1411,7 @@ export default function MessagesEditor() {
         <div className="flex flex-col gap-4">
           <div>
             <h3 className="font-serif text-xl">Historique des envois</h3>
-            <p className="mt-0.5 text-sm text-ink/60">{messages.length} message(s) envoye(s)</p>
+            <p className="mt-0.5 text-sm text-ink/60">{messages.length} message(s) envoyé(s)</p>
           </div>
 
           {loading ? (
@@ -1420,7 +1420,7 @@ export default function MessagesEditor() {
             </div>
           ) : messages.length === 0 ? (
             <div className="rounded-[20px] border border-clay/40 bg-white/70 p-8 text-center">
-              <p className="text-sm text-ink/60">Aucun message envoye pour l&apos;instant.</p>
+              <p className="text-sm text-ink/60">Aucun message envoyé pour l&apos;instant.</p>
             </div>
           ) : (
             <div className="flex flex-col gap-3">

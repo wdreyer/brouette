@@ -406,7 +406,7 @@ export default function OrdersEditor() {
     <div className="flex flex-col gap-6">
       <div className="rounded-3xl border border-clay/70 bg-white/80 p-6 shadow-card">
         <h2 className="font-serif text-2xl">Commandes</h2>
-        <p className="mt-2 text-sm text-ink/70">Toutes les commandes passees par les adherents.</p>
+        <p className="mt-2 text-sm text-ink/70">Toutes les commandes passées par les adhérents.</p>
         {deleteMessage ? <p className="mt-2 text-xs text-ink/70">{deleteMessage}</p> : null}
       </div>
 
@@ -424,7 +424,7 @@ export default function OrdersEditor() {
           </div>
 
           <div className="rounded-2xl border border-clay/70 bg-white/90 p-4 shadow-card">
-            <p className="text-sm font-semibold text-ink/70">Recap par date</p>
+            <p className="text-sm font-semibold text-ink/70">Récap par date</p>
             <div className="mt-3 grid gap-3 md:grid-cols-3">
               {recapByDate.map((item) => (
                 <div key={item.label} className="rounded-xl border border-clay/70 bg-stone p-3">
@@ -438,7 +438,7 @@ export default function OrdersEditor() {
 
           <div className="rounded-2xl border border-clay/70 bg-white/90 p-4 shadow-card">
             <div className="flex items-center justify-between gap-3">
-              <p className="text-sm font-semibold text-ink/70">Recap par date & producteur</p>
+              <p className="text-sm font-semibold text-ink/70">Récap par date & producteur</p>
               <p className="text-xs font-semibold text-ink">
                 Total global:{" "}
                 {formatMoney(
