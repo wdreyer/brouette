@@ -51,7 +51,7 @@ function groupByDateThenProducer(
 
   items.forEach((item) => {
     const dateKey = item.saleDateKey ?? "no-date";
-    const dateLabel = item.saleDateLabel ?? "Date non definie";
+    const dateLabel = item.saleDateLabel ?? "Date non définie";
     if (!byDate.has(dateKey)) {
       byDate.set(dateKey, { label: dateLabel, byProducer: new Map<string, CartItem[]>() });
     }
@@ -162,9 +162,14 @@ export default function CartDrawer({ open, onClose }: CartDrawerProps) {
         ) : (
           <div className="flex flex-1 flex-col gap-6 overflow-y-auto pr-1">
             {grouped.map((dateGroup) => (
-              <div key={dateGroup.key} className="rounded-2xl border border-clay/80 bg-stone p-4">
-                <div className="flex items-center justify-between">
-                  <p className="text-sm font-semibold text-ink">{dateGroup.label}</p>
+              <div key={dateGroup.key} className="rounded-2xl border border-forest/35 bg-forest/5 p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-forest">
+                      Date de retrait
+                    </p>
+                    <p className="text-base font-semibold text-ink">{dateGroup.label}</p>
+                  </div>
                   <span className="text-xs font-semibold text-ink/70">
                     {formatMoney(dateGroup.total)} EUR
                   </span>
@@ -190,6 +195,9 @@ export default function CartDrawer({ open, onClose }: CartDrawerProps) {
                           <div key={item.id} className="flex items-start justify-between gap-3">
                             <div>
                               <p className="text-sm font-semibold text-ink">{item.name}</p>
+                              <span className="mt-1 inline-flex rounded-full bg-forest/10 px-2 py-0.5 text-[10px] font-semibold text-forest">
+                                Retrait : {dateGroup.label}
+                              </span>
                               <p className="text-xs text-ink/60">{item.variantLabel}</p>
                               {item.isSoldByWeight ? (
                                 <p className="text-xs text-ink/55">

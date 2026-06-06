@@ -15,6 +15,21 @@ import { findMemberByEmail, findMemberByUser, upsertMemberAccess } from "@/lib/m
 
 const ADHESION_EMAIL = "contact@labrouetteetlepanier.fr";
 
+function primaryEmailFromMember(data: Record<string, unknown>) {
+  const direct = String(data.email ?? "").trim();
+  if (direct) return direct;
+  const emails = Array.isArray(data.emails)
+    ? data.emails.map((item) => String(item ?? "").trim()).filter(Boolean)
+    : [];
+  return emails[0] ?? "";
+}
+
+function secondaryEmailMessage(loginEmail: string, primaryEmail: string) {
+  return primaryEmail
+    ? `Attention, ${loginEmail} est une adresse secondaire. Connecte-toi avec l'adresse principale : ${primaryEmail}.`
+    : "Attention, tu essaies de te connecter avec une adresse secondaire. Connecte-toi avec l'adresse principale du compte.";
+}
+
 function authErrorMessage(error: unknown) {
   if (!error || typeof error !== "object") return "Erreur inconnue.";
   const code = "code" in error ? String((error as { code?: string }).code ?? "") : "";
@@ -84,14 +99,19 @@ export default function AuthClient() {
     setMessage("");
     setResetSent(false);
     try {
+      const requestedEmail = email.trim().toLowerCase();
+      const preLoginMemberMatch = await findMemberByEmail(firebaseDb, requestedEmail);
+      if (preLoginMemberMatch?.emailMatch === "secondary") {
+        setMessage(secondaryEmailMessage(requestedEmail, primaryEmailFromMember(preLoginMemberMatch.data)));
+        return;
+      }
+
       const cred = await signInWithEmailAndPassword(firebaseAuth, email, password);
       const loginEmail = String(cred.user.email ?? email).trim().toLowerCase();
       const memberEmailMatch = await findMemberByEmail(firebaseDb, loginEmail);
       if (memberEmailMatch?.emailMatch === "secondary") {
         await signOut(firebaseAuth);
-        setMessage(
-          "Vous essayez de vous connecter avec un email secondaire. Utilisez l'email principal du compte.",
-        );
+        setMessage(secondaryEmailMessage(loginEmail, primaryEmailFromMember(memberEmailMatch.data)));
         return;
       }
       await redirectByRole(cred.user);

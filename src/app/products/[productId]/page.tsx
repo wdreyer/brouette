@@ -624,7 +624,17 @@ export default function ProductPage() {
               <span>Variante</span>
               <span>Prix</span>
               {openDates.map((date) => (
-                <span key={date.key}>{formatShortDate(date.date)}</span>
+                <span
+                  key={date.key}
+                  className="flex min-h-9 flex-col justify-center text-center normal-case tracking-normal"
+                >
+                  <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-forest">
+                    Retrait
+                  </span>
+                  <span className="text-xs font-semibold text-ink">
+                    {formatShortDate(date.date)}
+                  </span>
+                </span>
               ))}
               <span>Actions</span>
             </div>
@@ -656,27 +666,32 @@ export default function ProductPage() {
                     const activeKeys = variantDateMap[variant.id] ?? [];
                     if (!activeKeys.includes(date.key)) {
                       return (
-                        <div key={date.key} className="text-xs text-ink/50">
+                        <div key={date.key} className="flex items-center justify-center text-xs text-ink/50">
                           -
                         </div>
                       );
                     }
                     return (
-                      <div key={date.key} className="flex items-center gap-2">
-                        <button
-                          className="h-7 w-7 rounded-full border border-ink/20 bg-white text-xs font-semibold"
-                          onClick={() => setQuantity(variant.id, date.key, qty - 1)}
-                          disabled={qty <= 0}
-                        >
-                          -
-                        </button>
-                        <span className="w-6 text-center text-xs font-semibold text-ink">{qty}</span>
-                        <button
-                          className="h-7 w-7 rounded-full border border-ink/20 bg-white text-xs font-semibold"
-                          onClick={() => setQuantity(variant.id, date.key, qty + 1)}
-                        >
-                          +
-                        </button>
+                      <div key={date.key} className="flex flex-col items-center justify-center gap-1 text-center">
+                        <span className="rounded-full bg-forest/10 px-2 py-0.5 text-[10px] font-semibold text-forest">
+                          {formatShortDate(date.date)}
+                        </span>
+                        <div className="flex items-center justify-center gap-2">
+                          <button
+                            className="h-7 w-7 rounded-full border border-ink/20 bg-white text-xs font-semibold"
+                            onClick={() => setQuantity(variant.id, date.key, qty - 1)}
+                            disabled={qty <= 0}
+                          >
+                            -
+                          </button>
+                          <span className="w-6 text-center text-xs font-semibold text-ink">{qty}</span>
+                          <button
+                            className="h-7 w-7 rounded-full border border-ink/20 bg-white text-xs font-semibold"
+                            onClick={() => setQuantity(variant.id, date.key, qty + 1)}
+                          >
+                            +
+                          </button>
+                        </div>
                       </div>
                     );
                   })}

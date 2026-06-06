@@ -83,6 +83,16 @@ function formatEstimatedRange(min?: number | null, max?: number | null) {
   return `Estimatif : jusqu'à ${max!.toFixed(2)} EUR`;
 }
 
+function dateLabelForKey(key: string) {
+  const date = new Date(`${key}T00:00:00.000Z`);
+  if (Number.isNaN(date.getTime())) return key;
+  return date.toLocaleDateString("fr-FR", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+  });
+}
+
 export default function CatalogueGrid({ hideWhenClosed = false }: { hideWhenClosed?: boolean }) {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
@@ -504,6 +514,21 @@ export default function CatalogueGrid({ hideWhenClosed = false }: { hideWhenClos
             <p className="text-xs text-ink/70">
               {descriptionExcerpt(product.description) || "Description disponible sur la fiche produit."}
             </p>
+            <div className="rounded-lg border border-forest/25 bg-forest/5 p-2">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-forest">
+                Dates de retrait
+              </p>
+              <div className="mt-1 flex flex-wrap gap-1.5">
+                {(availabilityMap[product.id]?.dateKeys ?? []).map((key) => (
+                  <span
+                    key={`${product.id}-${key}`}
+                    className="rounded-full bg-forest px-2 py-0.5 text-[11px] font-semibold text-white"
+                  >
+                    {dateLabelForKey(key)}
+                  </span>
+                ))}
+              </div>
+            </div>
             {product.isSoldByWeight ? (
               <p className="text-xs font-semibold text-ink/60">
                 Produit au poids - {formatEstimatedRange(product.estimatedPriceMin, product.estimatedPriceMax)}

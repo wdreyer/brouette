@@ -1057,7 +1057,7 @@ export default function PdfGenerationsEditor() {
 
       <section className="rounded-2xl border border-clay/70 bg-white/90 p-5 shadow-card">
         <div className="mb-3 flex items-center justify-between gap-2">
-          <h3 className="font-serif text-2xl">Récap producteurs</h3>
+          <h3 className="font-serif text-2xl">Bons de commande Producteurs</h3>
         </div>
         <div className="grid gap-3 md:grid-cols-1">
           <label className="flex flex-col gap-1 text-sm font-semibold text-ink/80">
@@ -1201,7 +1201,7 @@ export default function PdfGenerationsEditor() {
       <section className="rounded-2xl border border-clay/70 bg-white/90 p-5 shadow-card">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <h3 className="font-serif text-2xl">Bon de commande</h3>
+            <h3 className="font-serif text-2xl">Fiches de distribution</h3>
             <p className="mt-1 text-sm text-ink/70">
               Un PDF multi-pages par date : page 1 sommaire producteurs, puis récap produit x adhérent par producteur.
             </p>

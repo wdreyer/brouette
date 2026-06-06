@@ -50,7 +50,7 @@ function groupByDateThenProducer(
 
   items.forEach((item) => {
     const dateKey = item.saleDateKey ?? "no-date";
-    const dateLabel = item.saleDateLabel ?? "Date non definie";
+    const dateLabel = item.saleDateLabel ?? "Date non définie";
     if (!byDate.has(dateKey)) {
       byDate.set(dateKey, { label: dateLabel, byProducer: new Map<string, CartItem[]>() });
     }
@@ -250,10 +250,15 @@ export default function CheckoutPage() {
             {grouped.map((dateGroup) => (
               <section
                 key={dateGroup.key}
-                className="rounded-xl border border-clay/70 bg-white/95 p-5 shadow-card"
+                className="rounded-xl border border-forest/35 bg-white/95 p-5 shadow-card"
               >
                 <div className="flex flex-wrap items-center justify-between gap-3">
-                  <h2 className="font-serif text-2xl">{dateGroup.label}</h2>
+                  <div>
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-forest">
+                      Date de retrait
+                    </p>
+                    <h2 className="font-serif text-3xl text-ink">{dateGroup.label}</h2>
+                  </div>
                   <span className="text-sm font-semibold text-ink">
                     {formatMoney(dateGroup.total)} EUR
                   </span>
@@ -290,6 +295,9 @@ export default function CheckoutPage() {
                           >
                             <div>
                               <p className="text-sm font-semibold text-ink">{item.name}</p>
+                              <span className="mt-1 inline-flex rounded-full bg-forest/10 px-2 py-0.5 text-[10px] font-semibold text-forest">
+                                Retrait : {dateGroup.label}
+                              </span>
                               <p className="text-xs text-ink/60">{item.variantLabel}</p>
                               {item.isSoldByWeight ? (
                                 <p className="text-xs text-ink/55">

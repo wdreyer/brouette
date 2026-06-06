@@ -9,7 +9,7 @@ import { firebaseAuth, firebaseDb } from "@/lib/firebase/client";
 const QUICK_LOGIN_BYPASS_KEY = "brouette:skipMustChangePasswordForEmail";
 
 export default function PasswordChangeRequiredModal() {
-  const { user, memberId, role } = useAuth();
+  const { user, memberId } = useAuth();
   const [open, setOpen] = useState(false);
   const [checking, setChecking] = useState(true);
   const [currentPassword, setCurrentPassword] = useState("");
@@ -21,11 +21,6 @@ export default function PasswordChangeRequiredModal() {
   useEffect(() => {
     const load = async () => {
       if (!user || !memberId) {
-        setOpen(false);
-        setChecking(false);
-        return;
-      }
-      if (role !== "admin" && role !== "referent") {
         setOpen(false);
         setChecking(false);
         return;
@@ -60,7 +55,7 @@ export default function PasswordChangeRequiredModal() {
 
     setChecking(true);
     load().catch(() => setChecking(false));
-  }, [user, memberId, role]);
+  }, [user, memberId]);
 
   const handleUpdatePassword = async () => {
     if (!memberId) return;
