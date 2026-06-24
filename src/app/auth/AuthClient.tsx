@@ -5,29 +5,33 @@ import { useRouter, useSearchParams } from "next/navigation";
 import {
   createUserWithEmailAndPassword,
   sendPasswordResetEmail,
-  signOut,
   signInWithEmailAndPassword,
 } from "firebase/auth";
 import { addDoc, collection, doc, getDocs, query, setDoc, serverTimestamp, updateDoc, where } from "firebase/firestore";
 import { firebaseAuth, firebaseDb } from "@/lib/firebase/client";
 import { useAuth } from "@/components/auth/AuthProvider";
-import { findMemberByEmail, findMemberByUser, upsertMemberAccess } from "@/lib/members";
+import { findMemberByUser, upsertMemberAccess } from "@/lib/members";
 
 const ADHESION_EMAIL = "contact@labrouetteetlepanier.fr";
-
-function primaryEmailFromMember(data: Record<string, unknown>) {
-  const direct = String(data.email ?? "").trim();
-  if (direct) return direct;
-  const emails = Array.isArray(data.emails)
-    ? data.emails.map((item) => String(item ?? "").trim()).filter(Boolean)
-    : [];
-  return emails[0] ?? "";
-}
 
 function secondaryEmailMessage(loginEmail: string, primaryEmail: string) {
   return primaryEmail
     ? `Attention, ${loginEmail} est une adresse secondaire. Connecte-toi avec l'adresse principale : ${primaryEmail}.`
     : "Attention, tu essaies de te connecter avec une adresse secondaire. Connecte-toi avec l'adresse principale du compte.";
+}
+
+async function lookupSecondaryEmail(email: string) {
+  const response = await fetch("/api/auth/secondary-email", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email }),
+  });
+  if (!response.ok) return null;
+  return (await response.json()) as {
+    ok?: boolean;
+    emailMatch?: "primary" | "secondary" | "unknown";
+    primaryEmail?: string;
+  };
 }
 
 function authErrorMessage(error: unknown) {
@@ -100,20 +104,13 @@ export default function AuthClient() {
     setResetSent(false);
     try {
       const requestedEmail = email.trim().toLowerCase();
-      const preLoginMemberMatch = await findMemberByEmail(firebaseDb, requestedEmail);
-      if (preLoginMemberMatch?.emailMatch === "secondary") {
-        setMessage(secondaryEmailMessage(requestedEmail, primaryEmailFromMember(preLoginMemberMatch.data)));
+      const preLoginEmailMatch = await lookupSecondaryEmail(requestedEmail);
+      if (preLoginEmailMatch?.emailMatch === "secondary") {
+        setMessage(secondaryEmailMessage(requestedEmail, preLoginEmailMatch.primaryEmail ?? ""));
         return;
       }
 
       const cred = await signInWithEmailAndPassword(firebaseAuth, email, password);
-      const loginEmail = String(cred.user.email ?? email).trim().toLowerCase();
-      const memberEmailMatch = await findMemberByEmail(firebaseDb, loginEmail);
-      if (memberEmailMatch?.emailMatch === "secondary") {
-        await signOut(firebaseAuth);
-        setMessage(secondaryEmailMessage(loginEmail, primaryEmailFromMember(memberEmailMatch.data)));
-        return;
-      }
       await redirectByRole(cred.user);
     } catch (error) {
       try {
