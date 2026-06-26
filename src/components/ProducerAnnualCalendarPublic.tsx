@@ -3,7 +3,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { collection, getDocs } from "firebase/firestore";
 import { firebaseDb } from "@/lib/firebase/client";
-import { distributionLabel, resolveDistributionStatus, type DistributionStatusKey } from "@/lib/distributions";
+import {
+  distributionLabel,
+  isArchivedStatus,
+  resolveDistributionStatus,
+  type DistributionStatusKey,
+} from "@/lib/distributions";
 
 type FireDate = { toDate?: () => Date };
 
@@ -61,12 +66,13 @@ function formatDateLabel(value: Date) {
 }
 
 function isUpcomingOrCurrentDistribution(distribution: DistributionDoc, now: Date) {
-  const status = resolveDistributionStatus(distribution.status);
-  if (status === "open" || status === "planned") return true;
+  if (isArchivedStatus(distribution.status)) return false;
+  const today = new Date(now);
+  today.setHours(0, 0, 0, 0);
   const dates = (distribution.dates ?? [])
     .map((item) => item.toDate?.())
     .filter(Boolean) as Date[];
-  return dates.some((date) => date.getTime() >= now.getTime());
+  return dates.some((date) => date.getTime() >= today.getTime());
 }
 
 function statusBadge(status: DistributionStatusKey) {
