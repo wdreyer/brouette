@@ -318,8 +318,6 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
               referentName,
               active: true,
               activeDateKeys,
-              validatedByReferent: false,
-              validatedAt: null,
             },
             { merge: true },
           );
