@@ -5,6 +5,7 @@ import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { collection, getDocs } from "firebase/firestore";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { firebaseDb } from "@/lib/firebase/client";
+import { reportError } from "@/lib/reportError";
 import {
   distributionStatusLabel,
   distributionLabel,
@@ -546,7 +547,10 @@ export default function AdminDashboard({
       setLoading(false);
     };
 
-    load().catch(() => setLoading(false));
+    load().catch((error) => {
+      reportError("Echec du chargement du tableau de bord", error);
+      setLoading(false);
+    });
   }, [effectiveMemberId]);
 
   const roleLabel = effectiveRole === "admin" ? "Admin" : effectiveRole === "referent" ? "Référent" : "Membre";

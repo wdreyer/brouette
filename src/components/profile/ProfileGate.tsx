@@ -6,6 +6,7 @@ import { firebaseDb } from "@/lib/firebase/client";
 import { useAuth } from "@/components/auth/AuthProvider";
 import ProfileForm from "@/components/profile/ProfileForm";
 import { findMemberByUser } from "@/lib/members";
+import { reportError } from "@/lib/reportError";
 
 function isComplete(data: Record<string, unknown>) {
   const emails = Array.isArray(data.emails)
@@ -52,7 +53,10 @@ export default function ProfileGate({ children }: { children: React.ReactNode })
       setLoading(false);
     };
 
-    load().catch(() => setLoading(false));
+    load().catch((error) => {
+      reportError("Echec de la vérification du profil", error, { silent: true });
+      setLoading(false);
+    });
   }, [user, memberId]);
 
   if (loading || !user) return <>{children}</>;

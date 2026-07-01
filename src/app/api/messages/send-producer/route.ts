@@ -35,6 +35,12 @@ export async function POST(request: Request) {
     if (!producerEmail) {
       return NextResponse.json({ ok: false, error: "Aucun email renseigné pour ce producteur." }, { status: 400 });
     }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(producerEmail)) {
+      return NextResponse.json(
+        { ok: false, error: `L'email du producteur ("${producerEmail}") n'est pas valide.` },
+        { status: 400 },
+      );
+    }
     if (!subject || !content) {
       return NextResponse.json({ ok: false, error: "Objet et message obligatoires." }, { status: 400 });
     }
@@ -70,26 +76,35 @@ export async function POST(request: Request) {
       throw new Error(`Brevo error (${response.status}): ${raw.slice(0, 400)}`);
     }
 
-    const db = getAdminDb();
-    await db.collection("messages").add({
-      target: "producer",
-      targetLabel: `Producteur : ${producerName}`,
-      subject,
-      content,
-      status: "sent",
-      filters: { producerId, producerEmail },
-      template: { id: null, name: null },
-      stats: {
-        recipients: 1,
-        sentAt: new Date(),
-        recipientsPreview: [producerEmail],
-        provider: "brevo",
-      },
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
+    // L'email est parti : un échec d'archivage ne doit plus faire passer la
+    // réponse en ok:false, sinon l'admin croit l'envoi échoué et le relance
+    // (doublon d'email envoyé au producteur).
+    let archiveWarning: string | null = null;
+    try {
+      const db = getAdminDb();
+      await db.collection("messages").add({
+        target: "producer",
+        targetLabel: `Producteur : ${producerName}`,
+        subject,
+        content,
+        status: "sent",
+        filters: { producerId, producerEmail },
+        template: { id: null, name: null },
+        stats: {
+          recipients: 1,
+          sentAt: new Date(),
+          recipientsPreview: [producerEmail],
+          provider: "brevo",
+        },
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+    } catch (archiveError) {
+      const archiveMessage = archiveError instanceof Error ? archiveError.message : "Archivage impossible.";
+      archiveWarning = `Envoi effectue mais archivage impossible: ${archiveMessage}`;
+    }
 
-    return NextResponse.json({ ok: true, sent: 1, producerEmail });
+    return NextResponse.json({ ok: true, sent: 1, producerEmail, warning: archiveWarning });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Erreur inconnue.";
     return NextResponse.json({ ok: false, error: message }, { status: 500 });

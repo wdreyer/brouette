@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Timestamp, collection, doc, getDocs, setDoc, writeBatch } from "firebase/firestore";
 import { firebaseDb } from "@/lib/firebase/client";
 import {
+  computeCloseAt,
   distributionLabel,
   distributionStatusLabel,
   distributionStatusSelectValue,
@@ -12,6 +13,7 @@ import {
   normalizeDistributionStatus,
   resolveDistributionStatus,
 } from "@/lib/distributions";
+import { reportError } from "@/lib/reportError";
 
 type FireDate = { toDate?: () => Date };
 
@@ -166,7 +168,10 @@ export default function AnnualCalendarEditor() {
   }, []);
 
   useEffect(() => {
-    load().catch(() => setLoading(false));
+    load().catch((error) => {
+      reportError("Echec du chargement du calendrier", error);
+      setLoading(false);
+    });
   }, [load]);
 
   const dateColumns = useMemo(() => {
@@ -232,22 +237,32 @@ export default function AnnualCalendarEditor() {
         status: nextStatus,
         updatedAt: Timestamp.now(),
       };
+      let closeWarning = "";
       if (nextStatus === "open") {
         payload.openedAt = Timestamp.now();
         payload.closedAt = null;
+        const firstDate = distribution.dates?.[0]?.toDate?.() ?? null;
+        const closeDate = computeCloseAt(firstDate);
+        payload.closeAt = closeDate ? Timestamp.fromDate(closeDate) : null;
+        if (firstDate && !closeDate) {
+          closeWarning =
+            " Attention : la date de vente est trop proche pour calculer une fermeture automatique — pense à fermer la vente manuellement.";
+        }
       } else if (nextStatus === "finished") {
         payload.closedAt = Timestamp.now();
+        payload.closeAt = Timestamp.now();
       } else {
         payload.openedAt = null;
         payload.closedAt = null;
+        payload.closeAt = null;
       }
       await setDoc(doc(firebaseDb, "distributionDates", distribution.id), payload, { merge: true });
       setDistributions((prev) =>
         prev.map((item) => (item.id === distribution.id ? { ...item, status: nextStatus } : item)),
       );
-      setMessage("Statut de la distribution mis à jour.");
-    } catch {
-      setMessage("Impossible de mettre à jour le statut.");
+      setMessage(`Statut de la distribution mis à jour.${closeWarning}`);
+    } catch (error) {
+      reportError("Impossible de mettre à jour le statut", error);
     } finally {
       setUpdatingStatusId(null);
     }
@@ -290,8 +305,8 @@ export default function AnnualCalendarEditor() {
       setMessage("Distribution archivee.");
       setShowArchived(true);
       await load();
-    } catch {
-      setMessage("Impossible d'archiver la distribution.");
+    } catch (error) {
+      reportError("Impossible d'archiver la distribution", error);
     } finally {
       setSaving(false);
     }
@@ -318,8 +333,8 @@ export default function AnnualCalendarEditor() {
       );
       setMessage("Distribution restauree.");
       await load();
-    } catch {
-      setMessage("Impossible de restaurer la distribution.");
+    } catch (error) {
+      reportError("Impossible de restaurer la distribution", error);
     } finally {
       setSaving(false);
     }
@@ -361,8 +376,8 @@ export default function AnnualCalendarEditor() {
       setCreateOpen(false);
       setMessage("Distribution ajoutee (3 dates).");
       await load();
-    } catch {
-      setMessage("Impossible d'ajouter la distribution.");
+    } catch (error) {
+      reportError("Impossible d'ajouter la distribution", error);
     } finally {
       setSaving(false);
     }

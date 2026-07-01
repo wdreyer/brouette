@@ -17,9 +17,11 @@ import {
   where,
   writeBatch,
 } from "firebase/firestore";
+import { toast } from "sonner";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { firebaseDb } from "@/lib/firebase/client";
 import {
+  computeCloseAt,
   distributionLabel,
   isArchivedStatus,
   isDistributionExpired,
@@ -34,6 +36,7 @@ import {
   filterVisibleOffers,
   type ProducerLinkLike,
 } from "@/lib/offerVisibility";
+import { reportError } from "@/lib/reportError";
 
 type FireDate = { toDate?: () => Date };
 
@@ -606,7 +609,10 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
   }, [syncRows]);
 
   useEffect(() => {
-    load().catch(() => setLoading(false));
+    load().catch((error) => {
+      reportError("Echec du chargement des ventes", error);
+      setLoading(false);
+    });
   }, [load]);
 
   useEffect(() => {
@@ -615,7 +621,9 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
       setRows([]);
       return;
     }
-    syncRows(targetDistribution.id, producers, membersById, productsByProducer, saleDateKeys).catch(() => undefined);
+    syncRows(targetDistribution.id, producers, membersById, productsByProducer, saleDateKeys).catch((error) =>
+      reportError("Echec de la synchronisation des producteurs", error, { silent: true }),
+    );
   }, [targetDistribution?.id, loading, producers, membersById, productsByProducer, saleDateKeys, syncRows]);
 
   const validatedCount = rows.filter((row) => row.validatedByReferent).length;
@@ -1193,13 +1201,8 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
 
       const batch = writeBatch(firebaseDb);
       const firstDate = toDate(targetDistribution.dates?.[0]);
-      let closeAt: Timestamp | null = null;
-      if (firstDate) {
-        const closeDate = new Date(firstDate);
-        closeDate.setDate(closeDate.getDate() - 10);
-        closeDate.setHours(22, 0, 0, 0);
-        closeAt = Timestamp.fromDate(closeDate);
-      }
+      const closeDate = computeCloseAt(firstDate ?? null);
+      const closeAt = closeDate ? Timestamp.fromDate(closeDate) : null;
       otherOpenDistributions.forEach((distribution) => {
         batch.update(doc(firebaseDb, "distributionDates", distribution.id), { status: "finished" });
       });
@@ -1210,9 +1213,15 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
       });
       await batch.commit();
       await load();
+      const closeWarning = firstDate && !closeDate
+        ? " Attention : la date de vente est trop proche pour calculer une fermeture automatique — pense à fermer la vente manuellement le moment venu."
+        : "";
       setMessage(
-        `Vente ouverte. ${offerSync.offersCreated} offres publiees pour ${offerSync.producersWithOffers} producteurs.`,
+        `Vente ouverte. ${offerSync.offersCreated} offres publiees pour ${offerSync.producersWithOffers} producteurs.${closeWarning}`,
       );
+      if (closeWarning) toast.warning(closeWarning.trim());
+    } catch (error) {
+      reportError("Echec de l'ouverture de la vente", error);
     } finally {
       setSaving(false);
     }
@@ -1228,6 +1237,9 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
         closedAt: Timestamp.now(),
       });
       await load();
+      toast.success("Vente fermee.");
+    } catch (error) {
+      reportError("Echec de la fermeture de la vente", error);
     } finally {
       setSaving(false);
     }

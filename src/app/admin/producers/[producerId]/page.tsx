@@ -569,6 +569,7 @@ export default function ProducerPage() {
             <label className="flex flex-col gap-2 text-sm font-semibold text-ink/70">
               Email
               <input
+                type="email"
                 className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
                 value={draft.email}
                 onChange={(event) => setDraft((prev) => ({ ...prev, email: event.target.value }))}

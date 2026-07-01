@@ -6,6 +6,7 @@ import { collection, getDocs } from "firebase/firestore";
 import { CartItem, clearCart, getCart, removeFromCart, subscribeCart, updateCartItem } from "@/lib/cart";
 import { firebaseDb } from "@/lib/firebase/client";
 import { reconcileCartWithOpenSale } from "@/lib/cartReconcile";
+import { reportError } from "@/lib/reportError";
 
 type CartDrawerProps = {
   open: boolean;
@@ -91,7 +92,9 @@ export default function CartDrawer({ open, onClose }: CartDrawerProps) {
   useEffect(() => {
     let cancelled = false;
     const refresh = async () => {
-      await reconcileCartWithOpenSale().catch(() => undefined);
+      await reconcileCartWithOpenSale().catch((error) =>
+        reportError("Echec de la synchronisation du panier", error, { silent: true }),
+      );
       if (cancelled) return;
       setItems(getCart());
     };
@@ -109,7 +112,7 @@ export default function CartDrawer({ open, onClose }: CartDrawerProps) {
     if (!open) return;
     reconcileCartWithOpenSale()
       .then(() => setItems(getCart()))
-      .catch(() => undefined);
+      .catch((error) => reportError("Echec de la synchronisation du panier", error, { silent: true }));
   }, [open]);
 
   useEffect(() => {
@@ -126,7 +129,7 @@ export default function CartDrawer({ open, onClose }: CartDrawerProps) {
       });
       setProducerLabelById(map);
     };
-    loadProducers().catch(() => undefined);
+    loadProducers().catch((error) => reportError("Echec du chargement des producteurs", error, { silent: true }));
   }, []);
 
   const grouped = useMemo(

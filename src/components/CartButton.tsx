@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import CartDrawer from "@/components/CartDrawer";
 import { getCart, subscribeCart } from "@/lib/cart";
 import { reconcileCartWithOpenSale } from "@/lib/cartReconcile";
+import { reportError } from "@/lib/reportError";
 
 export default function CartButton() {
   const [open, setOpen] = useState(false);
@@ -13,7 +14,9 @@ export default function CartButton() {
   useEffect(() => {
     let cancelled = false;
     const update = async () => {
-      await reconcileCartWithOpenSale().catch(() => undefined);
+      await reconcileCartWithOpenSale().catch((error) =>
+        reportError("Echec de la synchronisation du panier", error, { silent: true }),
+      );
       if (cancelled) return;
       const items = getCart();
       const total = items.reduce((sum, item) => sum + item.quantity, 0);

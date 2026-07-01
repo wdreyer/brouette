@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { collection, getDocs } from "firebase/firestore";
 import { firebaseDb } from "@/lib/firebase/client";
+import { reportError } from "@/lib/reportError";
 
 type OrderDoc = {
   id: string;
@@ -348,7 +349,10 @@ export default function AdminStatsDashboard() {
       setLoading(false);
     };
 
-    load().catch(() => setLoading(false));
+    load().catch((error) => {
+      reportError("Echec du chargement des statistiques", error);
+      setLoading(false);
+    });
   }, []);
 
   const distributionRevenueBars = useMemo(

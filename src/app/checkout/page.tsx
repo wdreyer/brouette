@@ -10,6 +10,8 @@ import { useAuth } from "@/components/auth/AuthProvider";
 import { findMemberByUser } from "@/lib/members";
 import { readBalanceTrackingEnabled } from "@/lib/balanceTracking";
 import { reconcileCartWithOpenSale } from "@/lib/cartReconcile";
+import { checkCartAgainstLimits } from "@/lib/orderLimits";
+import { reportError } from "@/lib/reportError";
 
 type ProducerGroup = {
   producerId: string;
@@ -93,7 +95,9 @@ export default function CheckoutPage() {
   useEffect(() => {
     let cancelled = false;
     const refresh = async () => {
-      await reconcileCartWithOpenSale().catch(() => undefined);
+      await reconcileCartWithOpenSale().catch((error) =>
+        reportError("Echec de la synchronisation du panier", error, { silent: true }),
+      );
       if (cancelled) return;
       setItems(getCart());
     };
@@ -120,7 +124,7 @@ export default function CheckoutPage() {
       });
       setProducerLabelById(map);
     };
-    loadProducers().catch(() => undefined);
+    loadProducers().catch((error) => reportError("Echec du chargement des producteurs", error, { silent: true }));
   }, []);
 
   const grouped = useMemo(
@@ -168,6 +172,13 @@ export default function CheckoutPage() {
       }
 
       const distributionId = resolvedOpenDist.id;
+
+      const limitCheck = await checkCartAgainstLimits(firebaseDb, distributionId, freshItems);
+      if (!limitCheck.ok) {
+        setMessage(limitCheck.message);
+        return;
+      }
+
       const itemCount = freshItems.reduce((sum, item) => sum + item.quantity, 0);
       const freshTotal = freshItems.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
 
@@ -223,6 +234,7 @@ export default function CheckoutPage() {
       clearCart();
       router.replace("/profil");
     } catch (error) {
+      console.error("submitOrder failed", error);
       const err = error instanceof Error ? error.message : "Erreur inconnue.";
       setMessage(err);
     } finally {

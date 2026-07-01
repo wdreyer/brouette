@@ -10,6 +10,7 @@ import {
 import { deleteField, doc, getDoc, serverTimestamp, setDoc, updateDoc } from "firebase/firestore";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { firebaseAuth, firebaseDb } from "@/lib/firebase/client";
+import { reportError } from "@/lib/reportError";
 
 type ProfileData = {
   firstName: string;
@@ -161,7 +162,10 @@ export default function ProfileForm({
       setLoading(false);
     };
 
-    load().catch(() => setLoading(false));
+    load().catch((error) => {
+      reportError("Echec du chargement du profil", error);
+      setLoading(false);
+    });
   }, [userId, startInEdit, requireEditToggle, authEmail]);
 
   const setEmailAt = (index: number, value: string) => {
@@ -250,7 +254,13 @@ export default function ProfileForm({
           : null;
     }
 
-    await setDoc(doc(firebaseDb, "members", userId), payload, { merge: true });
+    try {
+      await setDoc(doc(firebaseDb, "members", userId), payload, { merge: true });
+    } catch (error) {
+      reportError("Echec de l'enregistrement du profil", error);
+      setMessage("Echec de l'enregistrement du profil, réessaie.");
+      return;
+    }
 
     const nextDraft: ProfileData = {
       ...draft,

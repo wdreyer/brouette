@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { addDoc, collection, getDocs, orderBy, query, serverTimestamp, updateDoc, doc } from "firebase/firestore";
 import { firebaseDb } from "@/lib/firebase/client";
+import { reportError } from "@/lib/reportError";
 
 type Invite = {
   id: string;
@@ -54,7 +55,7 @@ export default function InvitesEditor() {
   };
 
   useEffect(() => {
-    load().catch(() => undefined);
+    load().catch((error) => reportError("Echec du chargement des invitations", error));
   }, []);
 
   const createInvite = async () => {
@@ -103,8 +104,13 @@ export default function InvitesEditor() {
   };
 
   const revokeInvite = async (inviteId: string) => {
-    await updateDoc(doc(firebaseDb, "invites", inviteId), { used: true });
-    await load();
+    try {
+      await updateDoc(doc(firebaseDb, "invites", inviteId), { used: true });
+      await load();
+      setMessage("Invitation revoquee.");
+    } catch (error) {
+      reportError("Echec de la revocation de l'invitation", error);
+    }
   };
 
   return (

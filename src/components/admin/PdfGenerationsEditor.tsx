@@ -1,9 +1,14 @@
 ﻿"use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { collection, getDocs, orderBy, query } from "firebase/firestore";
+import { Timestamp, collection, doc, getDocs, orderBy, query, setDoc } from "firebase/firestore";
 import { firebaseDb } from "@/lib/firebase/client";
 import { distributionLabel, resolveDistributionStatus } from "@/lib/distributions";
+import { reportError } from "@/lib/reportError";
+
+function notifiedKey(distributionId: string, producerId: string) {
+  return `${distributionId}::${producerId}`;
+}
 
 type Order = {
   id: string;
@@ -201,7 +206,7 @@ export default function PdfGenerationsEditor() {
   const [exportingProducerId, setExportingProducerId] = useState<string | null>(null);
   const [exportingBdcDateKey, setExportingBdcDateKey] = useState<string | null>(null);
   const [sendingEmailProducerId, setSendingEmailProducerId] = useState<string | null>(null);
-  const [emailSentProducerIds, setEmailSentProducerIds] = useState<Set<string>>(new Set());
+  const [notifiedAtByKey, setNotifiedAtByKey] = useState<Record<string, Date>>({});
   const [message, setMessage] = useState("");
 
   const [orders, setOrders] = useState<Order[]>([]);
@@ -263,12 +268,27 @@ export default function PdfGenerationsEditor() {
         }),
       );
       setOrderItemsByOrder(nextItemsByOrder);
+
+      const nextNotifiedAtByKey: Record<string, Date> = {};
+      await Promise.all(
+        nextDistributions.map(async (distribution) => {
+          const producersLinkSnap = await getDocs(
+            collection(firebaseDb, "distributionDates", distribution.id, "producers"),
+          );
+          producersLinkSnap.docs.forEach((docSnap) => {
+            const data = docSnap.data() as { lastNotifiedAt?: { toDate?: () => Date } };
+            const notifiedAt = data.lastNotifiedAt?.toDate?.();
+            if (notifiedAt) nextNotifiedAtByKey[notifiedKey(distribution.id, docSnap.id)] = notifiedAt;
+          });
+        }),
+      );
+      setNotifiedAtByKey(nextNotifiedAtByKey);
       setLoading(false);
     };
 
-    load().catch(() => {
+    load().catch((error) => {
       setLoading(false);
-      setMessage("Impossible de charger les donnees PDF.");
+      reportError("Impossible de charger les donnees PDF", error);
     });
   }, []);
 
@@ -827,10 +847,29 @@ export default function PdfGenerationsEditor() {
           pdfFileName: fileName,
         }),
       });
-      const data = (await response.json()) as { ok: boolean; error?: string };
+      const data = (await response.json()) as { ok: boolean; error?: string; warning?: string | null };
       if (!data.ok) throw new Error(data.error ?? "Erreur inconnue.");
-      setEmailSentProducerIds((prev) => new Set([...prev, row.producerId]));
-      setMessage(`Email envoyé à ${row.producerName} (${producerEmail}).`);
+
+      const notifiedAt = new Date();
+      setNotifiedAtByKey((prev) => ({
+        ...prev,
+        [notifiedKey(selectedDistribution.id, row.producerId)]: notifiedAt,
+      }));
+      // Persiste la trace d'envoi pour qu'elle survive au rechargement de page
+      // et évite un double-envoi si l'admin revient plus tard sur cet écran.
+      try {
+        await setDoc(
+          doc(firebaseDb, "distributionDates", selectedDistribution.id, "producers", row.producerId),
+          { lastNotifiedAt: Timestamp.fromDate(notifiedAt) },
+          { merge: true },
+        );
+      } catch (persistError) {
+        reportError("Email envoyé mais la trace n'a pas pu être enregistrée", persistError, { silent: true });
+      }
+
+      setMessage(
+        `Email envoyé à ${row.producerName} (${producerEmail}).${data.warning ? ` ${data.warning}` : ""}`,
+      );
     } catch (error) {
       setMessage(`Erreur envoi email ${row.producerName} : ${error instanceof Error ? error.message : "inconnu"}`);
     } finally {
@@ -1156,9 +1195,13 @@ export default function PdfGenerationsEditor() {
                       <button
                         type="button"
                         aria-label={`Envoyer email ${row.producerName}`}
-                        title={emailSentProducerIds.has(row.producerId) ? "Email déjà envoyé" : "Envoyer la commande par email"}
+                        title={
+                          selectedDistribution && notifiedAtByKey[notifiedKey(selectedDistribution.id, row.producerId)]
+                            ? `Déjà envoyé le ${notifiedAtByKey[notifiedKey(selectedDistribution.id, row.producerId)].toLocaleString("fr-FR")}`
+                            : "Envoyer la commande par email"
+                        }
                         className={`inline-flex h-8 w-8 items-center justify-center rounded-full border bg-white text-ink transition disabled:opacity-50 ${
-                          emailSentProducerIds.has(row.producerId)
+                          selectedDistribution && notifiedAtByKey[notifiedKey(selectedDistribution.id, row.producerId)]
                             ? "border-forest/60 text-forest"
                             : "border-ink/20 hover:border-forest/60 hover:text-forest"
                         }`}
@@ -1169,7 +1212,7 @@ export default function PdfGenerationsEditor() {
                           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 animate-spin">
                             <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
                           </svg>
-                        ) : emailSentProducerIds.has(row.producerId) ? (
+                        ) : selectedDistribution && notifiedAtByKey[notifiedKey(selectedDistribution.id, row.producerId)] ? (
                           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
                             <path d="M20 6L9 17l-5-5" />
                           </svg>

@@ -86,6 +86,21 @@ export function pickOpenDistribution<T extends DistributionLike>(items: T[]) {
   })[openItems.length - 1];
 }
 
+/**
+ * Calcule la fermeture automatique d'une vente : 10 jours avant la première
+ * date, 22h. Retourne null si cette date de fermeture tombe déjà dans le
+ * passé (dates trop proches) — dans ce cas la vente ne doit pas se fermer
+ * automatiquement à une heure fictive, l'admin devra la fermer à la main.
+ */
+export function computeCloseAt(firstDate: Date | null | undefined, now = new Date()): Date | null {
+  if (!firstDate) return null;
+  const closeDate = new Date(firstDate);
+  closeDate.setDate(closeDate.getDate() - 10);
+  closeDate.setHours(22, 0, 0, 0);
+  if (closeDate.getTime() <= now.getTime()) return null;
+  return closeDate;
+}
+
 export function distributionLabel(item?: DistributionLike | null) {
   const firstDate = item?.dates?.[0]?.toDate?.();
   if (!firstDate) return "Distribution";

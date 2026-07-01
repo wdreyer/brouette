@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { addDoc, collection, deleteDoc, doc, getDocs, limit, query, setDoc, Timestamp, where } from "firebase/firestore";
 import { firebaseDb } from "@/lib/firebase/client";
 import { distributionLabel } from "@/lib/distributions";
+import { reportError } from "@/lib/reportError";
 
 type FieldType = "text" | "number" | "boolean" | "date" | "datetime";
 
@@ -109,7 +110,10 @@ export default function CollectionEditor({
   };
 
   useEffect(() => {
-    load().catch(() => setLoading(false));
+    load().catch((error) => {
+      reportError(`Echec du chargement de "${collectionName}"`, error);
+      setLoading(false);
+    });
   }, [collectionName]);
 
   useEffect(() => {
