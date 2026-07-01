@@ -297,13 +297,16 @@ export default function AdminSaleProducerManagerPage() {
         const productId = productSnap.docs[index]?.id;
         if (!productId) return;
         const variants = variantSnap.docs.map((variantDoc) => {
-          const variantData = variantDoc.data() as { label?: string; price?: number };
+          const variantData = variantDoc.data() as { label?: string; price?: number; activeDates?: string[] };
+          const storedActiveDates = Array.isArray(variantData.activeDates)
+            ? variantData.activeDates.filter((key) => nextEditableDateKeys.includes(key))
+            : [...nextEditableDateKeys];
           return {
             id: variantDoc.id,
             tempId: variantDoc.id,
             label: String(variantData.label ?? "Variante"),
             price: Number(variantData.price ?? 0),
-            activeDates: [...nextEditableDateKeys],
+            activeDates: storedActiveDates,
           } satisfies VariantDraft;
         });
         variantsByProduct.set(productId, variants);
@@ -353,7 +356,11 @@ export default function AdminSaleProducerManagerPage() {
       setLoading(false);
     };
 
-    load().catch(() => setLoading(false));
+    load().catch((error) => {
+      console.error("Chargement producteur echoue", error);
+      setMessage("Echec du chargement du producteur : verifiez la console pour le detail.");
+      setLoading(false);
+    });
   }, [currentProducerId, distributionId]);
 
   useEffect(() => {
@@ -653,13 +660,17 @@ export default function AdminSaleProducerManagerPage() {
           const variantData = variantDoc.data() as {
             label?: string;
             price?: number;
+            activeDates?: string[];
           };
+          const storedActiveDates = Array.isArray(variantData.activeDates)
+            ? variantData.activeDates.filter((key) => selectedDateKeys.includes(key))
+            : [...selectedDateKeys];
           return {
             id: variantDoc.id,
             tempId: variantDoc.id,
             label: String(variantData.label ?? "Variante"),
             price: Number(variantData.price ?? 0),
-            activeDates: [...selectedDateKeys],
+            activeDates: storedActiveDates,
           } satisfies VariantDraft;
         });
 
@@ -730,6 +741,10 @@ export default function AdminSaleProducerManagerPage() {
       setDirtyProducerIds((prev) => prev.filter((id) => id !== currentProducerId));
       setMessage("Producteur enregistre et valide.");
       router.push(distributionLocked ? "/admin/vente/en-cours" : "/admin/vente/prochaine");
+    } catch (error) {
+      console.error("saveDraft failed", error);
+      const detail = error instanceof Error ? error.message : String(error);
+      setMessage(`Echec de l'enregistrement : ${detail}`);
     } finally {
       setSaving(false);
     }
