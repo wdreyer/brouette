@@ -18,7 +18,6 @@ type NavItem = {
     | "orders"
     | "stats"
     | "messages"
-    | "invites"
     | "pdfs"
     | "settings";
   roles?: Array<"admin" | "referent">;
@@ -131,14 +130,6 @@ function Icon({ kind }: { kind: NavItem["icon"] }) {
           <path d="M4 6h16v10H8l-4 4V6Z" />
           <path d="M8 10h8" />
           <path d="M8 13h5" />
-        </svg>
-      );
-    case "invites":
-      return (
-        <svg {...props}>
-          <path d="M12 3v18" />
-          <path d="M3 12h18" />
-          <rect x="5" y="5" width="14" height="14" rx="3" />
         </svg>
       );
     case "pdfs":

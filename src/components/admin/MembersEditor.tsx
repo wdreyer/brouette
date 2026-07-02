@@ -192,9 +192,10 @@ export default function MembersEditor({
   const [editEmails, setEditEmails] = useState<string[]>([""]);
   const [editPhones, setEditPhones] = useState<string[]>([""]);
   const [createOpen, setCreateOpen] = useState(false);
-  const [createDraft, setCreateDraft] = useState<Record<string, unknown>>({});
-  const [createEmails, setCreateEmails] = useState<string[]>([""]);
-  const [createPhones, setCreatePhones] = useState<string[]>([""]);
+  const [createFirstName, setCreateFirstName] = useState("");
+  const [createLastName, setCreateLastName] = useState("");
+  const [createEmail, setCreateEmail] = useState("");
+  const [createSubmitting, setCreateSubmitting] = useState(false);
   const [filter, setFilter] = useState("");
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [filterRole, setFilterRole] = useState<string>("all");
@@ -598,43 +599,36 @@ export default function MembersEditor({
   };
 
   const handleCreate = async () => {
+    const firstName = createFirstName.trim();
+    const lastName = createLastName.trim();
+    const email = createEmail.trim();
+    if (!firstName || !lastName || !email) {
+      setMessage("Prénom, nom et email sont obligatoires.");
+      return;
+    }
     try {
-      const normalizedEmails = uniqueList(createEmails);
-      const normalizedPhones = uniqueList(createPhones);
-      if (!normalizedEmails.length || !normalizedPhones.length) {
-        setMessage("Ajoute au moins un email et un téléphone.");
+      setCreateSubmitting(true);
+      const response = await fetch("/api/members/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ firstName, lastName, email }),
+      });
+      const result = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+      if (!response.ok || !result.ok) {
+        setMessage(result.error || "Erreur inconnue.");
         return;
       }
-      const payload: Record<string, unknown> = {
-        ...createDraft,
-        emails: normalizedEmails,
-        phones: normalizedPhones,
-        email: normalizedEmails[0],
-        phone: normalizedPhones[0],
-        accessEmails: normalizedEmails.map((value) => value.toLowerCase()),
-      };
-      if (!isAdmin) {
-        payload.membershipStatus = "active";
-        payload.membershipPaymentStatus = "to_pay";
-      }
-      if (!payload.membershipStatus) payload.membershipStatus = "active";
-      if (!payload.membershipPaymentStatus) payload.membershipPaymentStatus = "to_pay";
-      if (
-        String(payload.membershipPaymentStatus ?? "").toLowerCase() !== "up_to_date" ||
-        !payload.membershipJoinedAt
-      ) {
-        payload.membershipJoinedAt = null;
-      }
-      await addDoc(collection(firebaseDb, collectionName), payload);
-      setCreateDraft({});
-      setCreateEmails([""]);
-      setCreatePhones([""]);
+      setCreateFirstName("");
+      setCreateLastName("");
+      setCreateEmail("");
       setCreateOpen(false);
-      setMessage("Adhérent créé.");
+      setMessage("Adhérent créé, email envoyé.");
       await load();
     } catch (error) {
       const err = error instanceof Error ? error.message : "Erreur inconnue.";
       setMessage(err);
+    } finally {
+      setCreateSubmitting(false);
     }
   };
 
@@ -771,9 +765,10 @@ export default function MembersEditor({
           className="rounded-full bg-ink px-5 py-2 text-sm font-semibold text-stone"
           onClick={() => {
             setCreateOpen(true);
-            setCreateDraft({});
-            setCreateEmails([""]);
-            setCreatePhones([""]);
+            setCreateFirstName("");
+            setCreateLastName("");
+            setCreateEmail("");
+            setMessage("");
           }}
         >
           Nouveau
@@ -1275,192 +1270,51 @@ export default function MembersEditor({
 
       {createOpen ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-6">
-          <div className="w-full max-w-2xl rounded-3xl border border-clay/70 bg-white p-6 shadow-card">
+          <div className="w-full max-w-md rounded-3xl border border-clay/70 bg-white p-6 shadow-card">
             <h3 className="font-serif text-2xl">Nouvel adhérent</h3>
-            <div className="mt-4 grid gap-4 md:grid-cols-2">
-              {formFields.map((field) => {
-                const inputValue = toInputValue(getByPath(createDraft, field.path), field.type);
-                const adminOnlyField = [
-                  "membershipStatus",
-                  "membershipPaymentStatus",
-                  "membershipJoinedAt",
-                ].includes(field.path);
-                const fieldDisabled = adminOnlyField && !isAdmin;
-                const paymentDateLocked =
-                  field.path === "membershipJoinedAt" &&
-                  String(getByPath(createDraft, "membershipPaymentStatus") ?? "").toLowerCase() !== "up_to_date";
-                return (
-                  <label key={field.path} className="flex flex-col gap-2 text-sm font-semibold text-ink/70">
-                    {field.label}
-                    {field.path === "auth.role" ? (
-                      <select
-                        className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
-                        value={String(inputValue || "member")}
-                        onChange={(event) => {
-                          const next = { ...createDraft };
-                          setByPath(next, field.path, event.target.value);
-                          setCreateDraft(next);
-                        }}
-                        disabled={!isAdmin}
-                      >
-                        <option value="member">Membre</option>
-                        <option value="referent">Référent</option>
-                        <option value="admin">Admin</option>
-                      </select>
-                    ) : field.path === "membershipStatus" ? (
-                      <select
-                        className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
-                        value={String(inputValue || "active")}
-                        onChange={(event) => {
-                          const next = { ...createDraft };
-                          setByPath(next, field.path, event.target.value);
-                          setCreateDraft(next);
-                        }}
-                        disabled={fieldDisabled}
-                      >
-                        <option value="active">Actif</option>
-                        <option value="inactive">Inactif</option>
-                      </select>
-                    ) : field.path === "membershipPaymentStatus" ? (
-                      <select
-                        className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
-                        value={String(inputValue || "to_pay")}
-                        onChange={(event) => {
-                          const next = { ...createDraft };
-                          const nextValue = event.target.value;
-                          setByPath(next, field.path, nextValue);
-                          if (nextValue !== "up_to_date") {
-                            setByPath(next, "membershipJoinedAt", null);
-                          }
-                          setCreateDraft(next);
-                        }}
-                        disabled={fieldDisabled}
-                      >
-                        <option value="up_to_date">Payé</option>
-                        <option value="to_pay">Non payé</option>
-                      </select>
-                    ) : field.type === "boolean" ? (
-                      <select
-                        className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
-                        value={String(inputValue)}
-                        onChange={(event) => {
-                          const next = { ...createDraft };
-                          setByPath(next, field.path, fromInputValue(event.target.value, field.type));
-                          setCreateDraft(next);
-                        }}
-                        disabled={fieldDisabled}
-                      >
-                        <option value="true">Oui</option>
-                        <option value="false">Non</option>
-                      </select>
-                    ) : field.type === "date" || field.type === "datetime" ? (
-                      <input
-                        type={field.type === "date" ? "date" : "datetime-local"}
-                        className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
-                        value={String(inputValue)}
-                        onChange={(event) => {
-                          const next = { ...createDraft };
-                          setByPath(next, field.path, fromInputValue(event.target.value, field.type));
-                          setCreateDraft(next);
-                        }}
-                        disabled={fieldDisabled || paymentDateLocked}
-                      />
-                    ) : (
-                      <input
-                        type={field.type === "number" ? "number" : "text"}
-                        className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
-                        value={String(inputValue)}
-                        onChange={(event) => {
-                          const next = { ...createDraft };
-                          setByPath(next, field.path, fromInputValue(event.target.value, field.type));
-                          setCreateDraft(next);
-                        }}
-                        disabled={fieldDisabled}
-                      />
-                    )}
-                  </label>
-                );
-              })}
-              <div className="md:col-span-2">
-                <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">Emails</p>
-                <div className="flex flex-col gap-2">
-                  {createEmails.map((value, index) => (
-                    <div key={`create-email-${index}`} className="flex items-center gap-2">
-                      <input
-                        className="flex-1 rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
-                        type="email"
-                        value={value}
-                        onChange={(event) =>
-                          setCreateEmails((prev) =>
-                            prev.map((item, i) => (i === index ? event.target.value : item)),
-                          )
-                        }
-                      />
-                      {createEmails.length > 1 ? (
-                        <button
-                          className="rounded-full border border-ink/20 px-3 py-1 text-xs font-semibold"
-                          onClick={() => setCreateEmails((prev) => prev.filter((_, i) => i !== index))}
-                        >
-                          Retirer
-                        </button>
-                      ) : null}
-                    </div>
-                  ))}
-                  <button
-                    className="w-fit rounded-full border border-ink/20 px-3 py-1 text-xs font-semibold"
-                    onClick={() => setCreateEmails((prev) => [...prev, ""])}
-                  >
-                    + Ajouter un email
-                  </button>
-                </div>
-              </div>
-              <div className="md:col-span-2">
-                <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">Téléphones</p>
-                <div className="flex flex-col gap-2">
-                  {createPhones.map((value, index) => (
-                    <div key={`create-phone-${index}`} className="flex items-center gap-2">
-                      <input
-                        className="flex-1 rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
-                        value={value}
-                        onChange={(event) =>
-                          setCreatePhones((prev) =>
-                            prev.map((item, i) => (i === index ? event.target.value : item)),
-                          )
-                        }
-                      />
-                      {createPhones.length > 1 ? (
-                        <button
-                          className="rounded-full border border-ink/20 px-3 py-1 text-xs font-semibold"
-                          onClick={() => setCreatePhones((prev) => prev.filter((_, i) => i !== index))}
-                        >
-                          Retirer
-                        </button>
-                      ) : null}
-                    </div>
-                  ))}
-                  <button
-                    className="w-fit rounded-full border border-ink/20 px-3 py-1 text-xs font-semibold"
-                    onClick={() => setCreatePhones((prev) => [...prev, ""])}
-                  >
-                    + Ajouter un téléphone
-                  </button>
-                </div>
-              </div>
+            <p className="mt-2 text-sm text-ink/70">
+              Un mot de passe par défaut (brouette2026) sera attribué et envoyé par email. Il devra
+              être changé à la première connexion.
+            </p>
+            <div className="mt-4 flex flex-col gap-4">
+              <label className="flex flex-col gap-2 text-sm font-semibold text-ink/70">
+                Prénom
+                <input
+                  className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
+                  value={createFirstName}
+                  onChange={(event) => setCreateFirstName(event.target.value)}
+                />
+              </label>
+              <label className="flex flex-col gap-2 text-sm font-semibold text-ink/70">
+                Nom
+                <input
+                  className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
+                  value={createLastName}
+                  onChange={(event) => setCreateLastName(event.target.value)}
+                />
+              </label>
+              <label className="flex flex-col gap-2 text-sm font-semibold text-ink/70">
+                Email
+                <input
+                  className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
+                  type="email"
+                  value={createEmail}
+                  onChange={(event) => setCreateEmail(event.target.value)}
+                />
+              </label>
             </div>
             <div className="mt-6 flex items-center gap-3">
               <button
-                className="rounded-full bg-ink px-5 py-2 text-sm font-semibold text-stone"
-                onClick={handleCreate}
+                className="rounded-full bg-ink px-5 py-2 text-sm font-semibold text-stone disabled:opacity-50"
+                onClick={() => handleCreate().catch(() => undefined)}
+                disabled={createSubmitting}
               >
-                Créer
+                {createSubmitting ? "Création..." : "Créer"}
               </button>
               <button
                 className="rounded-full border border-ink/20 px-4 py-2 text-sm font-semibold"
-                onClick={() => {
-                  setCreateOpen(false);
-                  setCreateEmails([""]);
-                  setCreatePhones([""]);
-                }}
+                onClick={() => setCreateOpen(false)}
+                disabled={createSubmitting}
               >
                 Annuler
               </button>

@@ -13,9 +13,6 @@ const REFERENT_ALLOWED_PREFIXES = [
   "/admin/members",
   "/admin/adherents",
   "/admin/membres-coop",
-  "/admin/invites",
-  "/admin/invite",
-  "/admin/invitations",
   "/admin/messages",
   "/admin/generations-pdf",
 ];

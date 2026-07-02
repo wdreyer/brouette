@@ -1,16 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
-import {
-  createUserWithEmailAndPassword,
-  sendPasswordResetEmail,
-  signInWithEmailAndPassword,
-} from "firebase/auth";
-import { addDoc, collection, doc, getDocs, query, setDoc, serverTimestamp, updateDoc, where } from "firebase/firestore";
+import { useRouter } from "next/navigation";
+import { sendPasswordResetEmail, signInWithEmailAndPassword } from "firebase/auth";
+import { addDoc, collection, serverTimestamp } from "firebase/firestore";
 import { firebaseAuth, firebaseDb } from "@/lib/firebase/client";
 import { useAuth } from "@/components/auth/AuthProvider";
-import { findMemberByUser, upsertMemberAccess } from "@/lib/members";
+import { findMemberByUser } from "@/lib/members";
 
 const ADHESION_EMAIL = "contact@labrouetteetlepanier.fr";
 
@@ -64,18 +60,14 @@ function authErrorMessage(error: unknown) {
 export default function AuthClient() {
   const { user } = useAuth();
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const inviteToken = searchParams.get("invite") ?? "";
-  const [mode, setMode] = useState<"login" | "signup" | "forgot">(
-    inviteToken ? "signup" : "login",
-  );
+  const [mode, setMode] = useState<"login" | "forgot">("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [resetEmail, setResetEmail] = useState("");
-  const [token, setToken] = useState(inviteToken);
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
   const [resetSent, setResetSent] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   const redirectByRole = async (nextUser: typeof user) => {
     if (!nextUser) return;
@@ -132,88 +124,6 @@ export default function AuthClient() {
     }
   };
 
-  const handleSignup = async () => {
-    setLoading(true);
-    setMessage("");
-    setResetSent(false);
-    try {
-      if (!token) {
-        setMessage("Invite requise.");
-        setLoading(false);
-        return;
-      }
-      const inviteSnap = await getDocs(
-        query(collection(firebaseDb, "invites"), where("token", "==", token), where("used", "==", false)),
-      );
-      if (inviteSnap.empty) {
-        setMessage("Invitation invalide ou déjà utilisée.");
-        setLoading(false);
-        return;
-      }
-      const inviteDoc = inviteSnap.docs[0];
-      const invite = inviteDoc.data() as { email?: string; role?: string; memberId?: string };
-      if (invite.email && invite.email.toLowerCase() !== email.toLowerCase()) {
-        setMessage("Cette invitation est liée à un autre email.");
-        setLoading(false);
-        return;
-      }
-      const cred = await createUserWithEmailAndPassword(firebaseAuth, email, password);
-      const role = invite.role === "admin" ? "admin" : invite.role === "referent" ? "referent" : "member";
-      let targetMemberId = String(invite.memberId ?? "").trim();
-      if (!targetMemberId) {
-        const memberSnap = await getDocs(
-          query(collection(firebaseDb, "members"), where("email", "==", email)),
-        );
-        if (!memberSnap.empty) {
-          targetMemberId = memberSnap.docs[0].id;
-        }
-      }
-      if (!targetMemberId) {
-        const memberByAccessSnap = await getDocs(
-          query(
-            collection(firebaseDb, "members"),
-            where("accessEmails", "array-contains", email.trim().toLowerCase()),
-          ),
-        );
-        if (!memberByAccessSnap.empty) {
-          targetMemberId = memberByAccessSnap.docs[0].id;
-        }
-      }
-      if (!targetMemberId) {
-        targetMemberId = cred.user.uid;
-      }
-
-      await setDoc(
-        doc(firebaseDb, "members", targetMemberId),
-        {
-          email,
-          emails: [email],
-          accessEmails: [email.trim().toLowerCase()],
-          auth: { uid: cred.user.uid, role },
-          createdAt: serverTimestamp(),
-        },
-        { merge: true },
-      );
-
-      await upsertMemberAccess(firebaseDb, {
-        uid: cred.user.uid,
-        memberId: targetMemberId,
-        role,
-        email,
-      });
-      await updateDoc(doc(firebaseDb, "invites", inviteDoc.id), {
-        used: true,
-        usedAt: serverTimestamp(),
-        usedBy: cred.user.uid,
-      });
-      await redirectByRole(cred.user);
-    } catch (error) {
-      setMessage(authErrorMessage(error));
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const handleForgotPassword = async () => {
     setMessage("");
     setResetSent(false);
@@ -243,32 +153,16 @@ export default function AuthClient() {
       <section className="rounded-xl border border-clay/70 bg-white/95 p-6 shadow-card">
         <p className="text-[11px] font-semibold uppercase tracking-[0.32em] text-ink/60">Connexion</p>
         <h1 className="mt-2 font-serif text-3xl">
-          {mode === "login"
-            ? "Se connecter"
-            : mode === "signup"
-              ? "Activer mon compte"
-              : "Réinitialiser le mot de passe"}
+          {mode === "login" ? "Se connecter" : "Réinitialiser le mot de passe"}
         </h1>
         <p className="mt-2 text-sm text-ink/70">
           {mode === "login"
             ? "Connecte-toi pour accéder au catalogue."
-            : mode === "signup"
-              ? "Un compte est possible uniquement sur invitation."
-              : "Saisis ton email et reçois un lien de réinitialisation."}
+            : "Saisis ton email et reçois un lien de réinitialisation."}
         </p>
       </section>
 
       <section className="rounded-xl border border-clay/70 bg-white/95 p-6 shadow-card">
-        {mode === "signup" ? (
-          <label className="flex flex-col gap-2 text-sm font-semibold text-ink/70">
-            Code d'invitation
-            <input
-              className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
-              value={token}
-              onChange={(event) => setToken(event.target.value)}
-            />
-          </label>
-        ) : null}
         {mode === "forgot" ? (
           <form
             className="mt-2 flex flex-col gap-4"
@@ -309,12 +203,54 @@ export default function AuthClient() {
             </label>
             <label className="mt-4 flex flex-col gap-2 text-sm font-semibold text-ink/70">
               Mot de passe
-              <input
-                className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
-                type="password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-              />
+              <div className="relative">
+                <input
+                  className="w-full rounded-xl border border-ink/20 bg-white px-3 py-2 pr-10 text-sm"
+                  type={showPassword ? "text" : "password"}
+                  value={password}
+                  onChange={(event) => setPassword(event.target.value)}
+                />
+                <button
+                  type="button"
+                  className="absolute inset-y-0 right-0 flex items-center px-3 text-ink/50 hover:text-ink"
+                  onClick={() => setShowPassword((prev) => !prev)}
+                  aria-label={showPassword ? "Masquer le mot de passe" : "Afficher le mot de passe"}
+                  tabIndex={-1}
+                >
+                  {showPassword ? (
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth={1.8}
+                      className="h-5 w-5"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c1.828 0 3.545-.463 5.043-1.276M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.243 4.243L9.88 9.88"
+                      />
+                    </svg>
+                  ) : (
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth={1.8}
+                      className="h-5 w-5"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z"
+                      />
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    </svg>
+                  )}
+                </button>
+              </div>
             </label>
             {mode === "login" ? (
               <button
@@ -347,14 +283,6 @@ export default function AuthClient() {
             >
               {loading ? "Connexion..." : "Se connecter"}
             </button>
-          ) : mode === "signup" ? (
-            <button
-              className="rounded-full bg-ink px-5 py-2 text-sm font-semibold text-stone"
-              onClick={handleSignup}
-              disabled={loading}
-            >
-              {loading ? "Activation..." : "Créer le compte"}
-            </button>
           ) : (
             <button
               className="rounded-full border border-ink/20 px-4 py-2 text-sm font-semibold text-ink"
@@ -376,8 +304,9 @@ export default function AuthClient() {
         </p>
         <h2 className="mt-2 font-serif text-2xl">Découvrir la coop</h2>
         <p className="mt-2 text-sm text-ink/70">
-          L'inscription est réservée aux adhérents invités. Pour rejoindre la coop ou obtenir une
-          invitation, contacte l'équipe ou viens nous rencontrer lors d'une distribution.
+          Les comptes sont créés par l&apos;équipe. Pour rejoindre la coop, contacte l&apos;équipe
+          ou viens nous rencontrer lors d&apos;une distribution : un email te sera envoyé pour
+          définir ton mot de passe.
         </p>
         <div className="mt-4 flex flex-wrap gap-3">
           <a

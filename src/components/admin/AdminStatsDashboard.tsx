@@ -169,7 +169,6 @@ export default function AdminStatsDashboard() {
     revenue: 0,
     items: 0,
     avgBasket: 0,
-    pendingInvites: 0,
   });
   const [monthly, setMonthly] = useState({
     labels: [] as string[],
@@ -192,13 +191,12 @@ export default function AdminStatsDashboard() {
 
   useEffect(() => {
     const load = async () => {
-      const [membersSnap, producersSnap, productsSnap, ordersSnap, distSnap, invitesSnap] = await Promise.all([
+      const [membersSnap, producersSnap, productsSnap, ordersSnap, distSnap] = await Promise.all([
         getDocs(collection(firebaseDb, "members")),
         getDocs(collection(firebaseDb, "producers")),
         getDocs(collection(firebaseDb, "products")),
         getDocs(collection(firebaseDb, "orders")),
         getDocs(collection(firebaseDb, "distributionDates")),
-        getDocs(collection(firebaseDb, "invites")),
       ]);
 
       const productMap = new Map<string, ProductDoc>(
@@ -320,7 +318,6 @@ export default function AdminStatsDashboard() {
 
       const activeMembers = members.filter((member) => String(member.membershipStatus ?? "active") !== "inactive").length;
       const inactiveMembers = Math.max(members.length - activeMembers, 0);
-      const pendingInvites = invitesSnap.docs.filter((docSnap) => !(docSnap.data() as { used?: boolean }).used).length;
 
       setSummary({
         members: members.length,
@@ -332,7 +329,6 @@ export default function AdminStatsDashboard() {
         revenue: totalRevenue,
         items: totalItems,
         avgBasket: orders.length ? totalRevenue / orders.length : 0,
-        pendingInvites,
       });
       setMonthly({
         labels: monthLabels,

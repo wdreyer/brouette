@@ -8,7 +8,6 @@ import CollectionEditor from "@/components/admin/CollectionEditor";
 import MembersEditor from "@/components/admin/MembersEditor";
 import ProductsEditor from "@/components/admin/ProductsEditor";
 import ProducersEditor from "@/components/admin/ProducersEditor";
-import InvitesEditor from "@/components/admin/InvitesEditor";
 import OrdersEditor from "@/components/admin/OrdersEditor";
 import MessagesEditor from "@/components/admin/MessagesEditor";
 import SettingsEditor from "@/components/admin/SettingsEditor";
@@ -166,7 +165,6 @@ const COLLECTION_ROLES: Record<string, Array<"admin" | "referent">> = {
   producers: ["admin", "referent"],
   products: ["admin", "referent"],
   orders: ["admin", "referent"],
-  invites: ["admin", "referent"],
   messages: ["admin", "referent"],
   catalogues: ["admin"],
   distributionDates: ["admin"],
@@ -260,10 +258,6 @@ export default function AdminCollectionPage() {
         fields={config.fields}
       />
     );
-  }
-
-  if (key === "invites") {
-    return <InvitesEditor />;
   }
 
   if (key === "messages") {

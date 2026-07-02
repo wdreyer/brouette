@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import { applicationDefault, cert, getApps, initializeApp } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
+import { getAuth } from "firebase-admin/auth";
 
 function getServiceAccount() {
   const inlineJson = process.env.FIREBASE_SERVICE_ACCOUNT;
@@ -28,7 +29,7 @@ function getServiceAccount() {
   return null;
 }
 
-export function getAdminDb() {
+function ensureApp() {
   if (!getApps().length) {
     const serviceAccount = getServiceAccount();
     if (serviceAccount) {
@@ -48,5 +49,14 @@ export function getAdminDb() {
       }
     }
   }
+}
+
+export function getAdminDb() {
+  ensureApp();
   return getFirestore();
+}
+
+export function getAdminAuth() {
+  ensureApp();
+  return getAuth();
 }

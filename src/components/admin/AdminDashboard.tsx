@@ -53,10 +53,6 @@ type OrderDoc = {
   createdAt?: { toDate?: () => Date };
 };
 
-type InviteDoc = {
-  used?: boolean;
-};
-
 type LoginAttemptDoc = {
   success?: boolean;
   createdAt?: { toDate?: () => Date };
@@ -254,7 +250,6 @@ export default function AdminDashboard({
     revenuePrevious: 0,
     itemsCurrent: 0,
     itemsPrevious: 0,
-    pendingInvites: 0,
     failedLoginAttempts: 0,
     distributionsTotal: 0,
     distributionsPast: 0,
@@ -269,14 +264,13 @@ export default function AdminDashboard({
       const now = new Date();
       const season = seasonRanges(now);
 
-      const [membersSnap, producersSnap, productsSnap, ordersSnap, distSnap, invitesSnap, attemptsSnap] =
+      const [membersSnap, producersSnap, productsSnap, ordersSnap, distSnap, attemptsSnap] =
         await Promise.all([
           getDocs(collection(firebaseDb, "members")),
           getDocs(collection(firebaseDb, "producers")),
           getDocs(collection(firebaseDb, "products")),
           getDocs(collection(firebaseDb, "orders")),
           getDocs(collection(firebaseDb, "distributionDates")),
-          getDocs(collection(firebaseDb, "invites")),
           getDocs(collection(firebaseDb, "authLoginAttempts")),
         ]);
 
@@ -352,7 +346,6 @@ export default function AdminDashboard({
         return Boolean(firstDate && firstDate >= now);
       }).length;
 
-      const pendingInvites = invitesSnap.docs.filter((docSnap) => !(docSnap.data() as InviteDoc).used).length;
       const thirtyDaysAgo = new Date();
       thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
       const failedAttempts = attemptsSnap.docs.filter((docSnap) => {
@@ -373,7 +366,6 @@ export default function AdminDashboard({
         revenuePrevious: previousSeasonRevenue,
         itemsCurrent: seasonItems,
         itemsPrevious: previousSeasonItems,
-        pendingInvites,
         failedLoginAttempts: failedAttempts,
         distributionsTotal: seasonDistributions.length,
         distributionsPast,
