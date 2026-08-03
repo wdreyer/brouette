@@ -432,6 +432,7 @@ export default function ProductsEditor({
       payload.estimatedPriceMax = isSoldByWeight
         ? parseNullableNumber(payload.estimatedPriceMax)
         : null;
+      payload.saleLimit = parseNullableNumber(payload.saleLimit);
       await setDoc(doc(firebaseDb, collectionName, editingId), payload, { merge: true });
 
       for (const variantId of removedVariantIds) {
@@ -511,6 +512,7 @@ export default function ProductsEditor({
       payload.estimatedPriceMax = isSoldByWeight
         ? parseNullableNumber(payload.estimatedPriceMax)
         : null;
+      payload.saleLimit = parseNullableNumber(payload.saleLimit);
       await addDoc(collection(firebaseDb, collectionName), payload);
       setCreateDraft({});
       setCreateTags("");
@@ -1039,6 +1041,16 @@ export default function ProductsEditor({
                 >
                   Fermer
                 </button>
+                <button
+                  className="rounded-full border border-ember/35 px-4 py-2 text-sm font-semibold text-ember transition hover:bg-ember/10 disabled:opacity-50"
+                  onClick={() => {
+                    if (!editingId) return;
+                    deleteProduct({ id: editingId, data: editDraft }).catch(() => undefined);
+                  }}
+                  disabled={!editingId || deletingProductId === editingId}
+                >
+                  {deletingProductId === editingId ? "Suppression..." : "Supprimer le produit"}
+                </button>
               </div>
               </div>
               </aside>
@@ -1154,7 +1166,7 @@ export default function ProductsEditor({
                             type="button"
                             title="Supprimer"
                             aria-label="Supprimer"
-                            className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-ember/35 text-ember transition hover:bg-ember/10 disabled:opacity-50"
+                            className="inline-flex h-9 items-center justify-center gap-1.5 rounded-full border border-ember/35 px-3 text-xs font-semibold text-ember transition hover:bg-ember/10 disabled:opacity-50"
                             onClick={(event) => {
                               event.stopPropagation();
                               deleteProduct(entry).catch(() => undefined);
@@ -1190,6 +1202,7 @@ export default function ProductsEditor({
                                 <path d="M14 11v6" />
                               </svg>
                             )}
+                            <span>Supprimer</span>
                           </button>
                         </div>
                       </td>

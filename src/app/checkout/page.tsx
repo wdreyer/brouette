@@ -316,6 +316,9 @@ export default function CheckoutPage() {
                                   Produit au poids - {formatEstimatedRange(item.estimatedPriceMin, item.estimatedPriceMax)}
                                 </p>
                               ) : null}
+                              {item.maxQuantity ? (
+                                <p className="text-xs font-semibold text-ink/55">Maximum : {item.maxQuantity}</p>
+                              ) : null}
                             </div>
                             <div className={`text-sm font-semibold ${item.isSoldByWeight ? "text-ink/60" : "text-ink"}`}>
                               {item.isSoldByWeight ? "0,00 EUR" : `${formatMoney(item.unitPrice)} EUR`}
@@ -334,6 +337,7 @@ export default function CheckoutPage() {
                               <button
                                 className="h-7 w-7 rounded-full border border-ink/20 bg-white text-xs font-semibold"
                                 onClick={() => updateCartItem(item.id, item.quantity + 1)}
+                                disabled={Boolean(item.maxQuantity && item.quantity >= item.maxQuantity)}
                               >
                                 +
                               </button>

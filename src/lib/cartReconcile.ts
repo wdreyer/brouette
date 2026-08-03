@@ -19,6 +19,7 @@ type OfferItem = {
   saleDateKey?: string;
   dateIndex?: number;
   active?: boolean;
+  limitTotal?: number;
 };
 
 function dateKey(date: Date) {
@@ -27,6 +28,11 @@ function dateKey(date: Date) {
 
 function offerKey(productId: string, variantId: string, saleDateKey: string) {
   return `${productId}::${variantId}::${saleDateKey}`;
+}
+
+function normalizeMaxQuantity(value: number | null | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return null;
+  return Math.floor(value);
 }
 
 export async function reconcileCartWithOpenSale() {
@@ -52,7 +58,7 @@ export async function reconcileCartWithOpenSale() {
   const offerSnap = await getDocs(
     collection(firebaseDb, "distributionDates", openDistribution.id, "offerItems"),
   );
-  const validOfferKeys = new Set<string>();
+  const validOffers = new Map<string, { offerItemId: string; maxQuantity: number | null }>();
   offerSnap.docs.forEach((docSnap) => {
     const offer = docSnap.data() as OfferItem;
     if (offer.active === false) return;
@@ -66,15 +72,31 @@ export async function reconcileCartWithOpenSale() {
           ? openDateKeys[offer.dateIndex] ?? ""
           : "";
     if (!resolvedDateKey) return;
-    validOfferKeys.add(offerKey(productId, variantId, resolvedDateKey));
+    validOffers.set(offerKey(productId, variantId, resolvedDateKey), {
+      offerItemId: docSnap.id,
+      maxQuantity: normalizeMaxQuantity(Number(offer.limitTotal ?? 0)),
+    });
   });
 
-  const nextItems = items.filter((item) => {
+  const nextItems = items.flatMap((item) => {
     const productId = String(item.productId ?? "");
     const variantId = String(item.variantId ?? "");
     const saleDate = String(item.saleDateKey ?? "");
-    if (!productId || !variantId || !saleDate) return false;
-    return validOfferKeys.has(offerKey(productId, variantId, saleDate));
+    if (!productId || !variantId || !saleDate) return [];
+    const validOffer = validOffers.get(offerKey(productId, variantId, saleDate));
+    if (!validOffer) return [];
+    const quantity =
+      validOffer.maxQuantity === null
+        ? item.quantity
+        : Math.min(item.quantity, validOffer.maxQuantity);
+    return [
+      {
+        ...item,
+        offerItemId: validOffer.offerItemId,
+        maxQuantity: validOffer.maxQuantity,
+        quantity,
+      },
+    ];
   });
 
   if (nextItems.length !== items.length) {

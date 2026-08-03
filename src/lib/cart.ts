@@ -11,6 +11,7 @@ export type CartItem = {
   saleDateKey?: string;
   saleDateLabel?: string;
   offerItemId?: string;
+  maxQuantity?: number | null;
   isSoldByWeight?: boolean;
   estimatedPriceMin?: number | null;
   estimatedPriceMax?: number | null;
@@ -75,6 +76,17 @@ export function setCartUser(scopeId: string | null) {
   window.dispatchEvent(new CustomEvent(CART_EVENT));
 }
 
+function normalizeMaxQuantity(value: number | null | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return null;
+  return Math.floor(value);
+}
+
+function clampQuantity(quantity: number, maxQuantity?: number | null) {
+  const minQuantity = Math.max(1, Math.floor(quantity));
+  const max = normalizeMaxQuantity(maxQuantity);
+  return max === null ? minQuantity : Math.min(minQuantity, max);
+}
+
 export function addToCart(item: CartItem) {
   const items = readCart();
   const existingIndex = items.findIndex(
@@ -86,12 +98,20 @@ export function addToCart(item: CartItem) {
 
   if (existingIndex >= 0) {
     const existing = items[existingIndex];
+    const maxQuantity = normalizeMaxQuantity(item.maxQuantity ?? existing.maxQuantity);
     items[existingIndex] = {
       ...existing,
-      quantity: existing.quantity + item.quantity,
+      offerItemId: item.offerItemId ?? existing.offerItemId,
+      maxQuantity,
+      quantity: clampQuantity(existing.quantity + item.quantity, maxQuantity),
     };
   } else {
-    items.push(item);
+    const maxQuantity = normalizeMaxQuantity(item.maxQuantity);
+    items.push({
+      ...item,
+      maxQuantity,
+      quantity: clampQuantity(item.quantity, maxQuantity),
+    });
   }
 
   writeCart(items);
@@ -104,7 +124,7 @@ export function getCart(): CartItem[] {
 export function updateCartItem(id: string, quantity: number) {
   const items = readCart();
   const next = items.map((item) =>
-    item.id === id ? { ...item, quantity: Math.max(1, quantity) } : item,
+    item.id === id ? { ...item, quantity: clampQuantity(quantity, item.maxQuantity) } : item,
   );
   writeCart(next);
 }

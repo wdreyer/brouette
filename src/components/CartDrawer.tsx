@@ -210,6 +210,9 @@ export default function CartDrawer({ open, onClose }: CartDrawerProps) {
                               <p className={`text-xs ${item.isSoldByWeight ? "text-ink/50" : "text-ink/60"}`}>
                                 {item.isSoldByWeight ? "0,00 EUR / unité" : `${formatMoney(item.unitPrice)} EUR / unité`}
                               </p>
+                              {item.maxQuantity ? (
+                                <p className="text-xs font-semibold text-ink/55">Maximum : {item.maxQuantity}</p>
+                              ) : null}
                             </div>
                             <div className="flex flex-col items-end gap-2">
                               <div className="flex items-center gap-2">
@@ -226,6 +229,7 @@ export default function CartDrawer({ open, onClose }: CartDrawerProps) {
                                 <button
                                   className="h-7 w-7 rounded-full border border-ink/20 bg-white text-xs font-semibold"
                                   onClick={() => updateCartItem(item.id, item.quantity + 1)}
+                                  disabled={Boolean(item.maxQuantity && item.quantity >= item.maxQuantity)}
                                 >
                                   +
                                 </button>

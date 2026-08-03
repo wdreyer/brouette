@@ -53,6 +53,7 @@ type Category = {
 };
 
 type OfferItem = {
+  id?: string;
   producerId?: string;
   productId?: string;
   variantId?: string;
@@ -61,6 +62,12 @@ type OfferItem = {
   priceApplied?: number;
   price?: number;
   active?: boolean;
+  limitTotal?: number;
+};
+
+type VariantOfferInfo = {
+  offerItemId?: string;
+  maxQuantity: number | null;
 };
 
 function dateKey(date: Date) {
@@ -105,6 +112,11 @@ function formatEstimatedRange(min?: number | null, max?: number | null) {
   return `Estimatif : jusqu'à ${max!.toFixed(2)} EUR`;
 }
 
+function normalizeMaxQuantity(value: number | null | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return null;
+  return Math.floor(value);
+}
+
 function sortProducts(
   items: Product[],
   producerMap: Record<string, Producer>,
@@ -139,6 +151,7 @@ export default function ProductPage() {
   const [categoryMap, setCategoryMap] = useState<Record<string, Category>>({});
   const [variantDateMap, setVariantDateMap] = useState<Record<string, string[]>>({});
   const [variantPriceMap, setVariantPriceMap] = useState<Record<string, number>>({});
+  const [variantOfferMap, setVariantOfferMap] = useState<Record<string, Record<string, VariantOfferInfo>>>({});
 
   const params = useParams<{ productId: string }>();
   const productId = params?.productId ?? "";
@@ -219,7 +232,7 @@ export default function ProductPage() {
           ...(producerDoc.data() as Omit<ProducerLinkLike, "id">),
         }));
         openOffers = filterVisibleOffers(
-          offerSnap.docs.map((docSnap) => docSnap.data() as OfferItem),
+          offerSnap.docs.map((docSnap) => ({ id: docSnap.id, ...(docSnap.data() as OfferItem) })),
           producerLinks,
           openDateKeyByIndex,
         );
@@ -233,6 +246,7 @@ export default function ProductPage() {
 
       const variantDates: Record<string, string[]> = {};
       const variantPrices: Record<string, number> = {};
+      const variantOffers: Record<string, Record<string, VariantOfferInfo>> = {};
       const openDateKeyByIndex: string[] = openDatesRaw.map((date) => dateKey(date));
       openOffers
         .filter((offer) => String(offer.productId ?? "") === currentProduct.id)
@@ -245,6 +259,13 @@ export default function ProductPage() {
             if (!currentKeys.includes(saleKey)) {
               variantDates[variantId] = [...currentKeys, saleKey];
             }
+            variantOffers[variantId] = {
+              ...(variantOffers[variantId] ?? {}),
+              [saleKey]: {
+                offerItemId: offer.id,
+                maxQuantity: normalizeMaxQuantity(Number(offer.limitTotal ?? 0)),
+              },
+            };
           }
           const appliedPrice =
             typeof offer.priceApplied === "number"
@@ -261,6 +282,7 @@ export default function ProductPage() {
       });
       setVariantDateMap(variantDates);
       setVariantPriceMap(variantPrices);
+      setVariantOfferMap(variantOffers);
 
       const ordered = sortProducts(sourceProducts, producerMapNext, categoryMapNext);
       setCatalogProducts(ordered);
@@ -329,7 +351,9 @@ export default function ProductPage() {
   }, [catalogProducts, currentCatalogIndex]);
 
   const setQuantity = (variantId: string, key: string, value: number) => {
-    const nextValue = Number.isFinite(value) ? Math.max(0, value) : 0;
+    const maxQuantity = variantOfferMap[variantId]?.[key]?.maxQuantity ?? null;
+    const baseValue = Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
+    const nextValue = maxQuantity === null ? baseValue : Math.min(baseValue, maxQuantity);
     setQuantities((prev) => ({
       ...prev,
       [variantId]: {
@@ -359,6 +383,12 @@ export default function ProductPage() {
       if (!activeKeys.includes(key)) return;
       const qty = qtyByDate[key] ?? 0;
       if (qty <= 0) return;
+      const offerInfo = variantOfferMap[variant.id]?.[key];
+      const maxQuantity = offerInfo?.maxQuantity ?? null;
+      if (maxQuantity !== null && qty > maxQuantity) {
+        toast.error(`QuantitÃ© maximale : ${maxQuantity}.`);
+        return;
+      }
       const unitPrice = product.isSoldByWeight ? 0 : variantPriceMap[variant.id] ?? variant.price;
       addToCart({
         id: `${product.id}_${variant.id}_${key}`,
@@ -372,6 +402,8 @@ export default function ProductPage() {
         imageUrl: product.imageUrl,
         saleDateKey: key,
         saleDateLabel: formatDate(date.date),
+        offerItemId: offerInfo?.offerItemId,
+        maxQuantity,
         isSoldByWeight: Boolean(product.isSoldByWeight),
         estimatedPriceMin: product.isSoldByWeight ? product.estimatedPriceMin ?? null : null,
         estimatedPriceMax: product.isSoldByWeight ? product.estimatedPriceMax ?? null : null,
@@ -664,6 +696,7 @@ export default function ProductPage() {
                   {openDates.map((date) => {
                     const qty = quantities[variant.id]?.[date.key] ?? 0;
                     const activeKeys = variantDateMap[variant.id] ?? [];
+                    const maxQuantity = variantOfferMap[variant.id]?.[date.key]?.maxQuantity ?? null;
                     if (!activeKeys.includes(date.key)) {
                       return (
                         <div key={date.key} className="flex items-center justify-center text-xs text-ink/50">
@@ -688,10 +721,14 @@ export default function ProductPage() {
                           <button
                             className="h-7 w-7 rounded-full border border-ink/20 bg-white text-xs font-semibold"
                             onClick={() => setQuantity(variant.id, date.key, qty + 1)}
+                            disabled={maxQuantity !== null && qty >= maxQuantity}
                           >
                             +
                           </button>
                         </div>
+                        {maxQuantity !== null ? (
+                          <span className="text-[10px] font-semibold text-ink/55">Max {maxQuantity}</span>
+                        ) : null}
                       </div>
                     );
                   })}

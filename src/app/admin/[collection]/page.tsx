@@ -93,6 +93,7 @@ const COLLECTIONS: Record<
       { label: "Description", path: "description", type: "text" },
       { label: "Image URL", path: "imageUrl", type: "text" },
       { label: "Bio", path: "isOrganic", type: "boolean" },
+      { label: "QuantitÃ© max", path: "saleLimit", type: "number", table: true },
     ],
   },
   catalogues: {
