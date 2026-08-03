@@ -386,7 +386,7 @@ export default function ProductPage() {
       const offerInfo = variantOfferMap[variant.id]?.[key];
       const maxQuantity = offerInfo?.maxQuantity ?? null;
       if (maxQuantity !== null && qty > maxQuantity) {
-        toast.error(`QuantitÃ© maximale : ${maxQuantity}.`);
+        toast.error(`Quantité maximale : ${maxQuantity}.`);
         return;
       }
       const unitPrice = product.isSoldByWeight ? 0 : variantPriceMap[variant.id] ?? variant.price;
