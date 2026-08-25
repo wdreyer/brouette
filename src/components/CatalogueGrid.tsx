@@ -61,9 +61,11 @@ type CatalogueNavigationState = {
   dateFilter: string[];
   visibleCount: number;
   scrollY: number;
+  selectedProductId?: string;
 };
 
 const CATALOGUE_NAVIGATION_STATE_KEY = "labrouette.catalogue.navigationState";
+const CATALOGUE_PRODUCT_CARD_PREFIX = "catalogue-product";
 const PAGE_SIZE = 16;
 
 function dateKey(date: Date) {
@@ -126,7 +128,7 @@ export default function CatalogueGrid({ hideWhenClosed = false }: { hideWhenClos
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
   const restoredNavigationRef = useRef(false);
   const suppressNextResetRef = useRef(false);
-  const pendingScrollYRef = useRef<number | null>(null);
+  const pendingNavigationStateRef = useRef<CatalogueNavigationState | null>(null);
 
   useEffect(() => {
     const load = async () => {
@@ -262,24 +264,35 @@ export default function CatalogueGrid({ hideWhenClosed = false }: { hideWhenClos
 
     try {
       const savedState = JSON.parse(rawSavedState) as Partial<CatalogueNavigationState>;
+      const restoredDateFilter = Array.isArray(savedState.dateFilter)
+        ? savedState.dateFilter.filter((key) => allDateKeys.includes(key))
+        : allDateKeys;
+      const restoredVisibleCount =
+        typeof savedState.visibleCount === "number"
+          ? Math.max(PAGE_SIZE, Math.floor(savedState.visibleCount))
+          : PAGE_SIZE;
+
       suppressNextResetRef.current = true;
       setCategoryFilter(savedState.categoryFilter ?? "all");
       setProducerFilter(savedState.producerFilter ?? "all");
       setOrganicFilter(savedState.organicFilter ?? "all");
-      setDateFilter(
-        Array.isArray(savedState.dateFilter)
-          ? savedState.dateFilter.filter((key) => allDateKeys.includes(key))
-          : allDateKeys,
-      );
-      setVisibleCount(
-        typeof savedState.visibleCount === "number"
-          ? Math.max(PAGE_SIZE, Math.floor(savedState.visibleCount))
-          : PAGE_SIZE,
-      );
-      pendingScrollYRef.current =
-        typeof savedState.scrollY === "number" && Number.isFinite(savedState.scrollY)
-          ? Math.max(0, savedState.scrollY)
-          : null;
+      setDateFilter(restoredDateFilter);
+      setVisibleCount(restoredVisibleCount);
+      pendingNavigationStateRef.current = {
+        categoryFilter: savedState.categoryFilter ?? "all",
+        producerFilter: savedState.producerFilter ?? "all",
+        organicFilter: savedState.organicFilter ?? "all",
+        dateFilter: restoredDateFilter,
+        visibleCount: restoredVisibleCount,
+        scrollY:
+          typeof savedState.scrollY === "number" && Number.isFinite(savedState.scrollY)
+            ? Math.max(0, savedState.scrollY)
+            : 0,
+        selectedProductId:
+          typeof savedState.selectedProductId === "string"
+            ? savedState.selectedProductId
+            : undefined,
+      };
     } catch {
       setDateFilter(allDateKeys);
     } finally {
@@ -399,17 +412,46 @@ export default function CatalogueGrid({ hideWhenClosed = false }: { hideWhenClos
   }, [hasMore, visibleProducts.length]);
 
   useEffect(() => {
-    const scrollY = pendingScrollYRef.current;
-    if (scrollY === null || loading || !restoredNavigationRef.current) return;
+    const savedState = pendingNavigationStateRef.current;
+    if (!savedState || loading || !restoredNavigationRef.current) return;
     if (pagedProducts.length === 0) return;
 
-    window.requestAnimationFrame(() => {
-      window.scrollTo({ top: scrollY });
-      pendingScrollYRef.current = null;
-    });
+    let attempts = 0;
+    let timeoutId: number | null = null;
+    let frameId: number | null = null;
+
+    const restorePosition = () => {
+      const productCard = savedState.selectedProductId
+        ? document.getElementById(`${CATALOGUE_PRODUCT_CARD_PREFIX}-${savedState.selectedProductId}`)
+        : null;
+
+      if (savedState.scrollY > 0) {
+        window.scrollTo({ top: savedState.scrollY });
+      } else if (productCard) {
+        productCard.scrollIntoView({ block: "center" });
+      } else {
+        window.scrollTo({ top: savedState.scrollY });
+      }
+
+      attempts += 1;
+      if (attempts >= 8) {
+        pendingNavigationStateRef.current = null;
+        return;
+      }
+
+      timeoutId = window.setTimeout(() => {
+        frameId = window.requestAnimationFrame(restorePosition);
+      }, 50);
+    };
+
+    frameId = window.requestAnimationFrame(restorePosition);
+    return () => {
+      if (frameId !== null) window.cancelAnimationFrame(frameId);
+      if (timeoutId !== null) window.clearTimeout(timeoutId);
+    };
   }, [loading, pagedProducts.length]);
 
-  const saveNavigationState = () => {
+  const saveNavigationState = (selectedProductId: string) => {
     window.sessionStorage.setItem(
       CATALOGUE_NAVIGATION_STATE_KEY,
       JSON.stringify({
@@ -419,6 +461,7 @@ export default function CatalogueGrid({ hideWhenClosed = false }: { hideWhenClos
         dateFilter,
         visibleCount: Math.max(visibleCount, pagedProducts.length),
         scrollY: window.scrollY,
+        selectedProductId,
       } satisfies CatalogueNavigationState),
     );
   };
@@ -561,10 +604,11 @@ export default function CatalogueGrid({ hideWhenClosed = false }: { hideWhenClos
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         {pagedProducts.map((product) => (
           <Link
+            id={`${CATALOGUE_PRODUCT_CARD_PREFIX}-${product.id}`}
             className="group flex h-full overflow-hidden flex-col gap-3 rounded-xl border border-clay/70 bg-white/95 p-4 shadow-card transition hover:-translate-y-1 hover:border-ink/30"
             key={product.id}
             href={`/products/${product.id}`}
-            onClick={saveNavigationState}
+            onClick={() => saveNavigationState(product.id)}
           >
             <div className="flex h-28 items-center justify-center overflow-hidden rounded-lg border border-clay/70 bg-stone">
               {product.imageUrl ? (
