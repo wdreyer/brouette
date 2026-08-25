@@ -488,7 +488,7 @@ export default function ProductPage() {
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-5 px-6 py-10">
       <div className="flex items-center justify-between gap-3">
         <Link
-          href="/"
+          href="/catalogue"
           className="rounded-full border border-ink/20 bg-white px-4 py-2 text-xs font-semibold text-ink"
         >
           Retour catalogue

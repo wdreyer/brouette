@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { collection, getDocs } from "firebase/firestore";
 import { firebaseDb } from "@/lib/firebase/client";
 import { pickOpenDistribution } from "@/lib/distributions";
@@ -53,6 +53,18 @@ type OfferItem = {
   limitTotal?: number;
   active?: boolean;
 };
+
+type CatalogueNavigationState = {
+  categoryFilter: string;
+  producerFilter: string;
+  organicFilter: string;
+  dateFilter: string[];
+  visibleCount: number;
+  scrollY: number;
+};
+
+const CATALOGUE_NAVIGATION_STATE_KEY = "labrouette.catalogue.navigationState";
+const PAGE_SIZE = 16;
 
 function dateKey(date: Date) {
   return date.toISOString().slice(0, 10);
@@ -110,7 +122,11 @@ export default function CatalogueGrid({ hideWhenClosed = false }: { hideWhenClos
   >({});
   const [activeProducerIds, setActiveProducerIds] = useState<string[]>([]);
   const [hasProducerLinks, setHasProducerLinks] = useState(false);
-  const [visibleCount, setVisibleCount] = useState(16);
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  const loadMoreRef = useRef<HTMLDivElement | null>(null);
+  const restoredNavigationRef = useRef(false);
+  const suppressNextResetRef = useRef(false);
+  const pendingScrollYRef = useRef<number | null>(null);
 
   useEffect(() => {
     const load = async () => {
@@ -234,10 +250,42 @@ export default function CatalogueGrid({ hideWhenClosed = false }: { hideWhenClos
   );
 
   useEffect(() => {
-    if (dateOptions.length) {
-      setDateFilter(dateOptions.map((option) => option.key));
+    if (loading || restoredNavigationRef.current || !dateOptions.length) return;
+
+    const allDateKeys = dateOptions.map((option) => option.key);
+    const rawSavedState = window.sessionStorage.getItem(CATALOGUE_NAVIGATION_STATE_KEY);
+    if (!rawSavedState) {
+      setDateFilter(allDateKeys);
+      restoredNavigationRef.current = true;
+      return;
     }
-  }, [dateOptions]);
+
+    try {
+      const savedState = JSON.parse(rawSavedState) as Partial<CatalogueNavigationState>;
+      suppressNextResetRef.current = true;
+      setCategoryFilter(savedState.categoryFilter ?? "all");
+      setProducerFilter(savedState.producerFilter ?? "all");
+      setOrganicFilter(savedState.organicFilter ?? "all");
+      setDateFilter(
+        Array.isArray(savedState.dateFilter)
+          ? savedState.dateFilter.filter((key) => allDateKeys.includes(key))
+          : allDateKeys,
+      );
+      setVisibleCount(
+        typeof savedState.visibleCount === "number"
+          ? Math.max(PAGE_SIZE, Math.floor(savedState.visibleCount))
+          : PAGE_SIZE,
+      );
+      pendingScrollYRef.current =
+        typeof savedState.scrollY === "number" && Number.isFinite(savedState.scrollY)
+          ? Math.max(0, savedState.scrollY)
+          : null;
+    } catch {
+      setDateFilter(allDateKeys);
+    } finally {
+      restoredNavigationRef.current = true;
+    }
+  }, [dateOptions, loading]);
 
   const inStockProducts = useMemo(() => {
     if (!openDateKeys.length) return [];
@@ -291,11 +339,13 @@ export default function CatalogueGrid({ hideWhenClosed = false }: { hideWhenClos
     producerFilter,
     organicFilter,
     dateFilter,
+    availabilityMap,
     categoryMap,
     producerMap,
   ]);
   const pagedProducts = useMemo(() => visibleProducts.slice(0, visibleCount), [visibleProducts, visibleCount]);
   const hasMore = visibleProducts.length > visibleCount;
+  const openDateKeysSignature = openDateKeys.join(",");
 
   const categoryOptions = useMemo(
     () =>
@@ -324,8 +374,54 @@ export default function CatalogueGrid({ hideWhenClosed = false }: { hideWhenClos
   );
 
   useEffect(() => {
-    setVisibleCount(16);
-  }, [categoryFilter, producerFilter, organicFilter, dateFilter, openDateKeys.join(","), visibleProducts.length]);
+    if (!restoredNavigationRef.current) return;
+    if (suppressNextResetRef.current) {
+      suppressNextResetRef.current = false;
+      return;
+    }
+    setVisibleCount(PAGE_SIZE);
+  }, [categoryFilter, producerFilter, organicFilter, dateFilter, openDateKeysSignature]);
+
+  useEffect(() => {
+    if (!hasMore) return;
+    const node = loadMoreRef.current;
+    if (!node) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (!entry.isIntersecting) return;
+        setVisibleCount((prev) => Math.min(prev + PAGE_SIZE, visibleProducts.length));
+      },
+      { rootMargin: "600px 0px 600px 0px" },
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [hasMore, visibleProducts.length]);
+
+  useEffect(() => {
+    const scrollY = pendingScrollYRef.current;
+    if (scrollY === null || loading || !restoredNavigationRef.current) return;
+    if (pagedProducts.length === 0) return;
+
+    window.requestAnimationFrame(() => {
+      window.scrollTo({ top: scrollY });
+      pendingScrollYRef.current = null;
+    });
+  }, [loading, pagedProducts.length]);
+
+  const saveNavigationState = () => {
+    window.sessionStorage.setItem(
+      CATALOGUE_NAVIGATION_STATE_KEY,
+      JSON.stringify({
+        categoryFilter,
+        producerFilter,
+        organicFilter,
+        dateFilter,
+        visibleCount: Math.max(visibleCount, pagedProducts.length),
+        scrollY: window.scrollY,
+      } satisfies CatalogueNavigationState),
+    );
+  };
 
   if (loading) {
     return <p className="text-sm text-ink/70">Chargement...</p>;
@@ -468,6 +564,7 @@ export default function CatalogueGrid({ hideWhenClosed = false }: { hideWhenClos
             className="group flex h-full overflow-hidden flex-col gap-3 rounded-xl border border-clay/70 bg-white/95 p-4 shadow-card transition hover:-translate-y-1 hover:border-ink/30"
             key={product.id}
             href={`/products/${product.id}`}
+            onClick={saveNavigationState}
           >
             <div className="flex h-28 items-center justify-center overflow-hidden rounded-lg border border-clay/70 bg-stone">
               {product.imageUrl ? (
@@ -548,14 +645,11 @@ export default function CatalogueGrid({ hideWhenClosed = false }: { hideWhenClos
         ))}
       </div>
       {hasMore ? (
-        <div className="mt-2 flex justify-center md:col-span-2 xl:col-span-3">
-          <button
-            className="rounded-full border border-ink/20 bg-white px-5 py-2 text-sm font-semibold text-ink transition hover:border-ink/45 hover:bg-stone"
-            onClick={() => setVisibleCount((prev) => prev + 16)}
-          >
-            Charger plus de produits
-          </button>
-        </div>
+        <div
+          ref={loadMoreRef}
+          aria-hidden="true"
+          className="h-8 md:col-span-2 xl:col-span-3"
+        />
       ) : null}
     </div>
   );
