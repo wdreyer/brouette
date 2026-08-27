@@ -20,4 +20,28 @@ describe("renderRichTextToHtml", () => {
     expect(html).not.toContain("<script>");
     expect(html).toContain("<strong>ok</strong>");
   });
+
+  it("renders strikethrough, ordered lists, quotes and dividers", () => {
+    const html = renderRichTextToHtml(
+      "~~annule~~\n\n1. Premier\n1. Deuxieme\n\n> Une citation\n> sur deux lignes\n\n---\n\nFin",
+    );
+
+    expect(html).toContain("<s>annule</s>");
+    expect(html).toMatch(/<ol[^>]*><li[^>]*>Premier<\/li><li[^>]*>Deuxieme<\/li><\/ol>/);
+    expect(html).toContain("Une citation<br/>sur deux lignes");
+    expect(html).toContain("<hr");
+  });
+
+  it("renders links with a safe href and keeps plain urls working without a scheme", () => {
+    const withScheme = renderRichTextToHtml("[La Brouette](https://labrouette.example/retrait)");
+    expect(withScheme).toContain('href="https://labrouette.example/retrait"');
+
+    const withoutScheme = renderRichTextToHtml("[La Brouette](labrouette.example)");
+    expect(withoutScheme).toContain('href="https://labrouette.example"');
+  });
+
+  it("refuses to turn a javascript: url into a usable link scheme", () => {
+    const html = renderRichTextToHtml("[Clique](javascript:alert(1))");
+    expect(html).not.toContain('href="javascript:');
+  });
 });

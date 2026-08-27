@@ -100,13 +100,34 @@ img {
   font-size: 20px;
 }
 
-.brouette-message ul {
+.brouette-message ul,
+.brouette-message ol {
   margin: 0 0 14px 20px;
   padding: 0;
 }
 
 .brouette-message li {
   margin: 0 0 6px;
+}
+
+.brouette-message hr {
+  border: none;
+  border-top: 1px solid #ddd1bd;
+  margin: 20px 0;
+}
+
+.brouette-message a {
+  color: #3f6b4a;
+}
+
+.markdown ol {
+  list-style: decimal;
+}
+
+.markdown hr {
+  border: none;
+  border-top: 1px solid #ddd1bd;
+  margin: 1rem 0;
 }
 
 .markdown pre {

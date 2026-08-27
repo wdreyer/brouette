@@ -15,7 +15,7 @@ import {
   setDoc,
 } from "firebase/firestore";
 import { firebaseDb } from "@/lib/firebase/client";
-import { renderRichTextToHtml } from "@/lib/messageFormatting";
+import { RICH_TEXT_SYNTAX_HELP, renderRichTextToHtml } from "@/lib/messageFormatting";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -76,7 +76,18 @@ type TargetKind =
   | "producers";
 
 type ActiveTab = "composer" | "templates" | "lists" | "history";
-type FormatKind = "title" | "bold" | "underline" | "italic" | "list";
+type FormatKind =
+  | "titleLarge"
+  | "titleSmall"
+  | "bold"
+  | "underline"
+  | "italic"
+  | "strike"
+  | "list"
+  | "orderedList"
+  | "quote"
+  | "divider"
+  | "link";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -144,26 +155,51 @@ function getTargetLabel(target: TargetKind, listName?: string) {
   return TARGET_OPTIONS.find((o) => o.value === target)?.label ?? target;
 }
 
-function applyTextFormat(value: string, start: number, end: number, kind: FormatKind) {
+function applyTextFormat(value: string, start: number, end: number, kind: FormatKind, extra?: string) {
   const selected = value.slice(start, end);
-  const fallback = selected || (kind === "title" ? "Titre" : kind === "list" ? "Element de liste" : "texte");
+  const fallback =
+    selected ||
+    (kind === "titleLarge" || kind === "titleSmall"
+      ? "Titre"
+      : kind === "list" || kind === "orderedList"
+        ? "Element de liste"
+        : kind === "quote"
+          ? "Citation"
+          : kind === "link"
+            ? "texte du lien"
+            : "texte");
   const prefix = value.slice(0, start);
   const suffix = value.slice(end);
+  const needsLineStart = prefix.length > 0 && !prefix.endsWith("\n");
   let replacement = fallback;
 
-  if (kind === "title") {
-    const needsLineStart = prefix.length > 0 && !prefix.endsWith("\n");
-    replacement = `${needsLineStart ? "\n" : ""}## ${fallback}`;
-  }
+  if (kind === "titleLarge") replacement = `${needsLineStart ? "\n" : ""}# ${fallback}`;
+  if (kind === "titleSmall") replacement = `${needsLineStart ? "\n" : ""}## ${fallback}`;
   if (kind === "bold") replacement = `**${fallback}**`;
   if (kind === "underline") replacement = `__${fallback}__`;
   if (kind === "italic") replacement = `*${fallback}*`;
+  if (kind === "strike") replacement = `~~${fallback}~~`;
+  if (kind === "link") replacement = `[${fallback}](${extra || "https://"})`;
   if (kind === "list") {
-    const needsLineStart = prefix.length > 0 && !prefix.endsWith("\n");
     replacement = `${needsLineStart ? "\n" : ""}${fallback
       .split("\n")
       .map((line) => `- ${line.replace(/^-\s*/, "")}`)
       .join("\n")}`;
+  }
+  if (kind === "orderedList") {
+    replacement = `${needsLineStart ? "\n" : ""}${fallback
+      .split("\n")
+      .map((line) => `1. ${line.replace(/^\d+\.\s*/, "")}`)
+      .join("\n")}`;
+  }
+  if (kind === "quote") {
+    replacement = `${needsLineStart ? "\n" : ""}${fallback
+      .split("\n")
+      .map((line) => `> ${line.replace(/^>\s*/, "")}`)
+      .join("\n")}`;
+  }
+  if (kind === "divider") {
+    replacement = `${needsLineStart ? "\n" : ""}---\n`;
   }
 
   const nextValue = `${prefix}${replacement}${suffix}`;
@@ -344,10 +380,21 @@ export default function MessagesEditor() {
     setStatusMsg({ type: "info", text: "Modèle appliqué." });
   };
 
+  const promptLinkUrl = () => {
+    const url = window.prompt("Adresse du lien (https://...)", "https://");
+    return url && url.trim() ? url.trim() : null;
+  };
+
   const formatComposerContent = (kind: FormatKind) => {
     const textarea = composerTextareaRef.current;
     if (!textarea) return;
-    const formatted = applyTextFormat(draft.content, textarea.selectionStart, textarea.selectionEnd, kind);
+    let extra: string | undefined;
+    if (kind === "link") {
+      const url = promptLinkUrl();
+      if (!url) return;
+      extra = url;
+    }
+    const formatted = applyTextFormat(draft.content, textarea.selectionStart, textarea.selectionEnd, kind, extra);
     setDraft((prev) => ({ ...prev, content: formatted.value }));
     window.requestAnimationFrame(() => {
       textarea.focus();
@@ -358,11 +405,18 @@ export default function MessagesEditor() {
   const formatTemplateContent = (kind: FormatKind) => {
     const textarea = templateTextareaRef.current;
     if (!textarea || !editingTemplate) return;
+    let extra: string | undefined;
+    if (kind === "link") {
+      const url = promptLinkUrl();
+      if (!url) return;
+      extra = url;
+    }
     const formatted = applyTextFormat(
       editingTemplate.content,
       textarea.selectionStart,
       textarea.selectionEnd,
       kind,
+      extra,
     );
     setEditingTemplate((prev) => (prev ? { ...prev, content: formatted.value } : prev));
     window.requestAnimationFrame(() => {
@@ -905,11 +959,17 @@ export default function MessagesEditor() {
                   <label className="text-xs font-semibold text-ink/60">Contenu</label>
                   <div className="flex flex-wrap gap-2 rounded-[14px] border border-ink/10 bg-stone/35 p-2">
                     {[
-                      { kind: "title" as const, label: "Titre" },
+                      { kind: "titleLarge" as const, label: "Titre" },
+                      { kind: "titleSmall" as const, label: "Sous-titre" },
                       { kind: "bold" as const, label: "Gras" },
-                      { kind: "underline" as const, label: "Souligner" },
                       { kind: "italic" as const, label: "Italique" },
+                      { kind: "underline" as const, label: "Souligner" },
+                      { kind: "strike" as const, label: "Barré" },
+                      { kind: "link" as const, label: "Lien" },
                       { kind: "list" as const, label: "Liste" },
+                      { kind: "orderedList" as const, label: "Liste num." },
+                      { kind: "quote" as const, label: "Citation" },
+                      { kind: "divider" as const, label: "Séparateur" },
                     ].map((item) => (
                       <button
                         key={item.kind}
@@ -929,9 +989,7 @@ export default function MessagesEditor() {
                     onChange={(e) => setDraft((prev) => ({ ...prev, content: e.target.value }))}
                   />
                   <div className="grid gap-3 lg:grid-cols-2">
-                    <p className="text-[10px] text-ink/45">
-                      Syntaxe: ## titre, **gras**, __souligné__, *italique*, - liste
-                    </p>
+                    <p className="text-[10px] text-ink/45">Syntaxe: {RICH_TEXT_SYNTAX_HELP}</p>
                     <p className="text-right text-[10px] text-ink/35">{draft.content.length} caracteres</p>
                   </div>
                   {draft.content.trim() ? (
@@ -1075,11 +1133,17 @@ export default function MessagesEditor() {
                   <label className="text-xs font-semibold text-ink/60">Contenu</label>
                   <div className="flex flex-wrap gap-2 rounded-[14px] border border-ink/10 bg-stone/35 p-2">
                     {[
-                      { kind: "title" as const, label: "Titre" },
+                      { kind: "titleLarge" as const, label: "Titre" },
+                      { kind: "titleSmall" as const, label: "Sous-titre" },
                       { kind: "bold" as const, label: "Gras" },
-                      { kind: "underline" as const, label: "Souligner" },
                       { kind: "italic" as const, label: "Italique" },
+                      { kind: "underline" as const, label: "Souligner" },
+                      { kind: "strike" as const, label: "Barré" },
+                      { kind: "link" as const, label: "Lien" },
                       { kind: "list" as const, label: "Liste" },
+                      { kind: "orderedList" as const, label: "Liste num." },
+                      { kind: "quote" as const, label: "Citation" },
+                      { kind: "divider" as const, label: "Séparateur" },
                     ].map((item) => (
                       <button
                         key={item.kind}
@@ -1099,6 +1163,7 @@ export default function MessagesEditor() {
                       setEditingTemplate((prev) => (prev ? { ...prev, content: e.target.value } : prev))
                     }
                   />
+                  <p className="text-[10px] text-ink/45">Syntaxe: {RICH_TEXT_SYNTAX_HELP}</p>
                   {editingTemplate.content.trim() ? (
                     <div className="rounded-[16px] border border-clay/70 bg-stone/30 p-4">
                       <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-ink/45">
