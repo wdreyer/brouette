@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { Timestamp } from "firebase-admin/firestore";
 import { getAdminDb } from "@/lib/firebase/admin";
+import { renderRichTextToHtml } from "@/lib/messageFormatting";
 
 export const runtime = "nodejs";
 
@@ -60,14 +61,6 @@ function fullName(firstName: unknown, lastName: unknown) {
   return `${String(firstName ?? "").trim()} ${String(lastName ?? "").trim()}`.replace(/\s+/g, " ").trim();
 }
 
-function toHtml(content: string) {
-  const escaped = content
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-  return escaped.replace(/\n/g, "<br/>");
-}
-
 function chunk<T>(items: T[], size: number) {
   const out: T[][] = [];
   for (let i = 0; i < items.length; i += size) {
@@ -104,7 +97,7 @@ async function sendBrevoEmail(params: {
         name: senderName,
       },
       subject: params.subject,
-      htmlContent: toHtml(params.content),
+      htmlContent: renderRichTextToHtml(params.content),
       textContent: params.content,
       tags: ["brouette", "admin-message"],
     };

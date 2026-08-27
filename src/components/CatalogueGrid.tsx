@@ -10,6 +10,7 @@ import {
   filterVisibleOffers,
   type ProducerLinkLike,
 } from "@/lib/offerVisibility";
+import { estimatedUnitPrice } from "@/lib/orderEstimates";
 
 type Product = {
   id: string;
@@ -85,16 +86,9 @@ function descriptionExcerpt(value?: string, maxLength = 96) {
 }
 
 function formatEstimatedRange(min?: number | null, max?: number | null) {
-  const hasMin = typeof min === "number" && min >= 0;
-  const hasMax = typeof max === "number" && max >= 0;
-  if (!hasMin && !hasMax) return "Prix final au retrait";
-  if (hasMin && hasMax) {
-    return min === max
-      ? `Estimatif: ${min.toFixed(2)} EUR`
-      : `Estimatif: ${min.toFixed(2)} EUR - ${max.toFixed(2)} EUR`;
-  }
-  if (hasMin) return `Estimatif : à partir de ${min!.toFixed(2)} EUR`;
-  return `Estimatif : jusqu'à ${max!.toFixed(2)} EUR`;
+  const estimate = estimatedUnitPrice(min, max);
+  if (estimate === null) return "Prix final au retrait";
+  return `Prix estime : ~${estimate.toFixed(2)} EUR`;
 }
 
 function dateLabelForKey(key: string) {

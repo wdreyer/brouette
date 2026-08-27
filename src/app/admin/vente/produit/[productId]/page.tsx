@@ -152,8 +152,7 @@ export default function AdminSaleProductDetailPage() {
     setSaving(true);
     setMessage("");
     const isSoldByWeight = Boolean(product.isSoldByWeight);
-    const estimatedPriceMin = isSoldByWeight ? parseNullableNumber(product.estimatedPriceMin) : null;
-    const estimatedPriceMax = isSoldByWeight ? parseNullableNumber(product.estimatedPriceMax) : null;
+    const estimatedPrice = isSoldByWeight ? parseNullableNumber(product.estimatedPriceMin) : null;
     const parsedLimit = Number(product.limitTotal || 0);
 
     await setDoc(
@@ -164,8 +163,8 @@ export default function AdminSaleProductDetailPage() {
         imageUrl: product.imageUrl.trim(),
         isOrganic: Boolean(product.isOrganic),
         isSoldByWeight,
-        estimatedPriceMin,
-        estimatedPriceMax,
+        estimatedPriceMin: estimatedPrice,
+        estimatedPriceMax: estimatedPrice,
         saleLimit: Number.isFinite(parsedLimit) && parsedLimit > 0 ? parsedLimit : null,
         producerId: product.producerId || producerId,
       },
@@ -253,25 +252,20 @@ export default function AdminSaleProductDetailPage() {
         {product.isSoldByWeight ? (
           <div className="mt-3 grid gap-3 md:grid-cols-2">
             <label className="text-xs font-semibold uppercase tracking-[0.12em] text-ink/65">
-              Prix estimatif min
+              Prix estimatif
               <input
                 className="mt-1 w-full border border-ink/25 px-3 py-2 text-sm"
                 type="number"
                 min={0}
                 step="0.01"
                 value={product.estimatedPriceMin}
-                onChange={(e) => setProduct((p) => ({ ...p, estimatedPriceMin: e.target.value }))}
-              />
-            </label>
-            <label className="text-xs font-semibold uppercase tracking-[0.12em] text-ink/65">
-              Prix estimatif max
-              <input
-                className="mt-1 w-full border border-ink/25 px-3 py-2 text-sm"
-                type="number"
-                min={0}
-                step="0.01"
-                value={product.estimatedPriceMax}
-                onChange={(e) => setProduct((p) => ({ ...p, estimatedPriceMax: e.target.value }))}
+                onChange={(e) =>
+                  setProduct((p) => ({
+                    ...p,
+                    estimatedPriceMin: e.target.value,
+                    estimatedPriceMax: e.target.value,
+                  }))
+                }
               />
             </label>
           </div>

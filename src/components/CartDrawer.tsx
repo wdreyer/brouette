@@ -7,6 +7,7 @@ import { CartItem, clearCart, getCart, removeFromCart, subscribeCart, updateCart
 import { firebaseDb } from "@/lib/firebase/client";
 import { reconcileCartWithOpenSale } from "@/lib/cartReconcile";
 import { reportError } from "@/lib/reportError";
+import { estimatedUnitPrice, estimateWeightedItemsTotal, hasWeightedEstimate } from "@/lib/orderEstimates";
 
 type CartDrawerProps = {
   open: boolean;
@@ -31,17 +32,15 @@ function formatMoney(amount: number) {
   return amount.toFixed(2).replace(".", ",");
 }
 
-function formatEstimatedRange(min?: number | null, max?: number | null) {
-  const hasMin = typeof min === "number" && min >= 0;
-  const hasMax = typeof max === "number" && max >= 0;
-  if (!hasMin && !hasMax) return "Prix final au retrait";
-  if (hasMin && hasMax) {
-    return min === max
-      ? `Estimatif: ${min.toFixed(2)} EUR`
-      : `Estimatif: ${min.toFixed(2)} EUR - ${max.toFixed(2)} EUR`;
-  }
-  if (hasMin) return `Estimatif : à partir de ${min!.toFixed(2)} EUR`;
-  return `Estimatif : jusqu'à ${max!.toFixed(2)} EUR`;
+function formatEstimatedPrice(min?: number | null, max?: number | null) {
+  const estimate = estimatedUnitPrice(min, max);
+  if (estimate === null) return "Prix final au retrait";
+  return `Prix estime : ~${formatMoney(estimate)} EUR`;
+}
+
+function estimatedLineTotal(item: CartItem) {
+  const estimate = estimatedUnitPrice(item.estimatedPriceMin, item.estimatedPriceMax);
+  return estimate === null ? null : estimate * item.quantity;
 }
 
 function groupByDateThenProducer(
@@ -140,6 +139,8 @@ export default function CartDrawer({ open, onClose }: CartDrawerProps) {
     () => items.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0),
     [items],
   );
+  const weightedEstimateTotal = useMemo(() => estimateWeightedItemsTotal(items), [items]);
+  const hasWeightEstimate = useMemo(() => hasWeightedEstimate(items), [items]);
 
   if (!open || !mounted) return null;
 
@@ -204,7 +205,7 @@ export default function CartDrawer({ open, onClose }: CartDrawerProps) {
                               <p className="text-xs text-ink/60">{item.variantLabel}</p>
                               {item.isSoldByWeight ? (
                                 <p className="text-xs text-ink/55">
-                                  Produit au poids - {formatEstimatedRange(item.estimatedPriceMin, item.estimatedPriceMax)}
+                                  Produit au poids - {formatEstimatedPrice(item.estimatedPriceMin, item.estimatedPriceMax)}
                                 </p>
                               ) : null}
                               <p className={`text-xs ${item.isSoldByWeight ? "text-ink/50" : "text-ink/60"}`}>
@@ -235,7 +236,11 @@ export default function CartDrawer({ open, onClose }: CartDrawerProps) {
                                 </button>
                               </div>
                               <p className="text-xs font-semibold text-ink">
-                                {formatMoney(item.unitPrice * item.quantity)} EUR
+                                {item.isSoldByWeight
+                                  ? estimatedLineTotal(item) === null
+                                    ? "Au retrait"
+                                    : `~${formatMoney(estimatedLineTotal(item)!)} EUR`
+                                  : `${formatMoney(item.unitPrice * item.quantity)} EUR`}
                               </p>
                               <button
                                 className="text-xs text-ink/50 underline"
@@ -260,6 +265,18 @@ export default function CartDrawer({ open, onClose }: CartDrawerProps) {
             <span>Total</span>
             <span>{formatMoney(total)} EUR</span>
           </div>
+          {hasWeightEstimate ? (
+            <div className="mt-2 rounded-lg border border-forest/25 bg-forest/5 px-3 py-2 text-xs text-ink/75">
+              <div className="flex items-center justify-between gap-3">
+                <span>Produits au poids</span>
+                <span className="font-semibold">~{formatMoney(weightedEstimateTotal)} EUR</span>
+              </div>
+              <div className="mt-1 flex items-center justify-between gap-3 font-semibold text-ink">
+                <span>Total estime</span>
+                <span>~{formatMoney(total + weightedEstimateTotal)} EUR</span>
+              </div>
+            </div>
+          ) : null}
           <p className="mt-2 text-xs text-ink/60">
             Paiement sur place. Pense à valider ta commande avant la fermeture de la vente.
           </p>

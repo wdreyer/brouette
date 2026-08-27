@@ -72,6 +72,43 @@ img {
   margin: 0.5rem 0 0.4rem;
 }
 
+.brouette-message {
+  color: #2f2a24;
+  font-family: Arial, sans-serif;
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+.brouette-message p {
+  margin: 0 0 14px;
+}
+
+.brouette-message h2,
+.brouette-message h3 {
+  color: #2f2a24;
+  font-family: Georgia, serif;
+  font-weight: 700;
+  line-height: 1.25;
+  margin: 18px 0 10px;
+}
+
+.brouette-message h2 {
+  font-size: 24px;
+}
+
+.brouette-message h3 {
+  font-size: 20px;
+}
+
+.brouette-message ul {
+  margin: 0 0 14px 20px;
+  padding: 0;
+}
+
+.brouette-message li {
+  margin: 0 0 6px;
+}
+
 .markdown pre {
   max-width: 100%;
   overflow-x: auto;

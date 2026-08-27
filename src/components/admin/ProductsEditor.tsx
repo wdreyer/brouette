@@ -426,12 +426,9 @@ export default function ProductsEditor({
       payload.tags = parseTags(editTags);
       const isSoldByWeight = Boolean(payload.isSoldByWeight);
       payload.isSoldByWeight = isSoldByWeight;
-      payload.estimatedPriceMin = isSoldByWeight
-        ? parseNullableNumber(payload.estimatedPriceMin)
-        : null;
-      payload.estimatedPriceMax = isSoldByWeight
-        ? parseNullableNumber(payload.estimatedPriceMax)
-        : null;
+      const estimatedPrice = isSoldByWeight ? parseNullableNumber(payload.estimatedPriceMin) : null;
+      payload.estimatedPriceMin = estimatedPrice;
+      payload.estimatedPriceMax = estimatedPrice;
       payload.saleLimit = parseNullableNumber(payload.saleLimit);
       await setDoc(doc(firebaseDb, collectionName, editingId), payload, { merge: true });
 
@@ -506,12 +503,9 @@ export default function ProductsEditor({
       payload.tags = parseTags(createTags);
       const isSoldByWeight = Boolean(payload.isSoldByWeight);
       payload.isSoldByWeight = isSoldByWeight;
-      payload.estimatedPriceMin = isSoldByWeight
-        ? parseNullableNumber(payload.estimatedPriceMin)
-        : null;
-      payload.estimatedPriceMax = isSoldByWeight
-        ? parseNullableNumber(payload.estimatedPriceMax)
-        : null;
+      const estimatedPrice = isSoldByWeight ? parseNullableNumber(payload.estimatedPriceMin) : null;
+      payload.estimatedPriceMin = estimatedPrice;
+      payload.estimatedPriceMax = estimatedPrice;
       payload.saleLimit = parseNullableNumber(payload.saleLimit);
       await addDoc(collection(firebaseDb, collectionName), payload);
       setCreateDraft({});
@@ -925,7 +919,7 @@ export default function ProductsEditor({
                     {Boolean(getByPath(editDraft, "isSoldByWeight")) ? (
                       <div className="mt-3 grid gap-3 md:grid-cols-2">
                         <label className="flex flex-col gap-1 text-xs font-semibold uppercase tracking-[0.12em] text-ink/65">
-                          Prix estime min
+                          Prix estime
                           <input
                             className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm normal-case tracking-normal"
                             type="number"
@@ -935,25 +929,10 @@ export default function ProductsEditor({
                             onChange={(event) => {
                               const next = { ...editDraft };
                               setByPath(next, "estimatedPriceMin", event.target.value);
-                              setEditDraft(next);
-                            }}
-                            placeholder="Ex: 12.00"
-                          />
-                        </label>
-                        <label className="flex flex-col gap-1 text-xs font-semibold uppercase tracking-[0.12em] text-ink/65">
-                          Prix estime max
-                          <input
-                            className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm normal-case tracking-normal"
-                            type="number"
-                            min={0}
-                            step="0.01"
-                            value={String(toInputValue(getByPath(editDraft, "estimatedPriceMax"), "number"))}
-                            onChange={(event) => {
-                              const next = { ...editDraft };
                               setByPath(next, "estimatedPriceMax", event.target.value);
                               setEditDraft(next);
                             }}
-                            placeholder="Ex: 18.00"
+                            placeholder="Ex: 12.00"
                           />
                         </label>
                       </div>
@@ -1359,7 +1338,7 @@ export default function ProductsEditor({
                 {Boolean(getByPath(createDraft, "isSoldByWeight")) ? (
                   <div className="mt-3 grid gap-3 md:grid-cols-2">
                     <label className="flex flex-col gap-1 text-xs font-semibold uppercase tracking-[0.12em] text-ink/65">
-                      Prix estime min
+                      Prix estime
                       <input
                         className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm normal-case tracking-normal"
                         type="number"
@@ -1369,25 +1348,10 @@ export default function ProductsEditor({
                         onChange={(event) => {
                           const next = { ...createDraft };
                           setByPath(next, "estimatedPriceMin", event.target.value);
-                          setCreateDraft(next);
-                        }}
-                        placeholder="Ex: 12.00"
-                      />
-                    </label>
-                    <label className="flex flex-col gap-1 text-xs font-semibold uppercase tracking-[0.12em] text-ink/65">
-                      Prix estime max
-                      <input
-                        className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm normal-case tracking-normal"
-                        type="number"
-                        min={0}
-                        step="0.01"
-                        value={String(toInputValue(getByPath(createDraft, "estimatedPriceMax"), "number"))}
-                        onChange={(event) => {
-                          const next = { ...createDraft };
                           setByPath(next, "estimatedPriceMax", event.target.value);
                           setCreateDraft(next);
                         }}
-                        placeholder="Ex: 18.00"
+                        placeholder="Ex: 12.00"
                       />
                     </label>
                   </div>

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getAdminDb } from "@/lib/firebase/admin";
+import { renderRichTextToHtml } from "@/lib/messageFormatting";
 
 export const runtime = "nodejs";
 
@@ -12,14 +13,6 @@ type SendProducerPayload = {
   pdfBase64?: string;
   pdfFileName?: string;
 };
-
-function toHtml(content: string) {
-  const escaped = content
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-  return escaped.replace(/\n/g, "<br/>");
-}
 
 export async function POST(request: Request) {
   try {
@@ -56,7 +49,7 @@ export async function POST(request: Request) {
       sender: { email: senderEmail, name: senderName },
       to: [{ email: producerEmail, name: producerName || undefined }],
       subject,
-      htmlContent: toHtml(content),
+      htmlContent: renderRichTextToHtml(content),
       textContent: content,
       tags: ["brouette", "commande-producteur"],
     };

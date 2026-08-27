@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Timestamp,
   addDoc,
@@ -15,6 +15,7 @@ import {
   setDoc,
 } from "firebase/firestore";
 import { firebaseDb } from "@/lib/firebase/client";
+import { renderRichTextToHtml } from "@/lib/messageFormatting";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -75,6 +76,7 @@ type TargetKind =
   | "producers";
 
 type ActiveTab = "composer" | "templates" | "lists" | "history";
+type FormatKind = "title" | "bold" | "underline" | "italic" | "list";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -142,6 +144,36 @@ function getTargetLabel(target: TargetKind, listName?: string) {
   return TARGET_OPTIONS.find((o) => o.value === target)?.label ?? target;
 }
 
+function applyTextFormat(value: string, start: number, end: number, kind: FormatKind) {
+  const selected = value.slice(start, end);
+  const fallback = selected || (kind === "title" ? "Titre" : kind === "list" ? "Element de liste" : "texte");
+  const prefix = value.slice(0, start);
+  const suffix = value.slice(end);
+  let replacement = fallback;
+
+  if (kind === "title") {
+    const needsLineStart = prefix.length > 0 && !prefix.endsWith("\n");
+    replacement = `${needsLineStart ? "\n" : ""}## ${fallback}`;
+  }
+  if (kind === "bold") replacement = `**${fallback}**`;
+  if (kind === "underline") replacement = `__${fallback}__`;
+  if (kind === "italic") replacement = `*${fallback}*`;
+  if (kind === "list") {
+    const needsLineStart = prefix.length > 0 && !prefix.endsWith("\n");
+    replacement = `${needsLineStart ? "\n" : ""}${fallback
+      .split("\n")
+      .map((line) => `- ${line.replace(/^-\s*/, "")}`)
+      .join("\n")}`;
+  }
+
+  const nextValue = `${prefix}${replacement}${suffix}`;
+  return {
+    value: nextValue,
+    selectionStart: prefix.length,
+    selectionEnd: prefix.length + replacement.length,
+  };
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function MessagesEditor() {
@@ -171,6 +203,8 @@ export default function MessagesEditor() {
   const [selectedTemplateKey, setSelectedTemplateKey] = useState("");
   const [quickTemplateName, setQuickTemplateName] = useState("");
   const [searchManualMembers, setSearchManualMembers] = useState("");
+  const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const templateTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   // Template editing
   const [editingTemplate, setEditingTemplate] = useState<{
@@ -296,12 +330,45 @@ export default function MessagesEditor() {
     return true;
   }, [draft]);
 
+  const composerPreviewHtml = useMemo(() => renderRichTextToHtml(draft.content), [draft.content]);
+  const templatePreviewHtml = useMemo(
+    () => renderRichTextToHtml(editingTemplate?.content ?? ""),
+    [editingTemplate?.content],
+  );
+
   // ─── Composer handlers ────────────────────────────────────────────────────────
 
   const applyTemplate = (tmpl: { subject?: string; content?: string; name?: string } | null) => {
     if (!tmpl) return;
     setDraft((prev) => ({ ...prev, subject: tmpl.subject ?? "", content: tmpl.content ?? "" }));
     setStatusMsg({ type: "info", text: "Modèle appliqué." });
+  };
+
+  const formatComposerContent = (kind: FormatKind) => {
+    const textarea = composerTextareaRef.current;
+    if (!textarea) return;
+    const formatted = applyTextFormat(draft.content, textarea.selectionStart, textarea.selectionEnd, kind);
+    setDraft((prev) => ({ ...prev, content: formatted.value }));
+    window.requestAnimationFrame(() => {
+      textarea.focus();
+      textarea.setSelectionRange(formatted.selectionStart, formatted.selectionEnd);
+    });
+  };
+
+  const formatTemplateContent = (kind: FormatKind) => {
+    const textarea = templateTextareaRef.current;
+    if (!textarea || !editingTemplate) return;
+    const formatted = applyTextFormat(
+      editingTemplate.content,
+      textarea.selectionStart,
+      textarea.selectionEnd,
+      kind,
+    );
+    setEditingTemplate((prev) => (prev ? { ...prev, content: formatted.value } : prev));
+    window.requestAnimationFrame(() => {
+      textarea.focus();
+      textarea.setSelectionRange(formatted.selectionStart, formatted.selectionEnd);
+    });
   };
 
   const toggleManualMember = (memberId: string) => {
@@ -836,13 +903,48 @@ export default function MessagesEditor() {
                 </div>
                 <div className="flex flex-col gap-1.5">
                   <label className="text-xs font-semibold text-ink/60">Contenu</label>
+                  <div className="flex flex-wrap gap-2 rounded-[14px] border border-ink/10 bg-stone/35 p-2">
+                    {[
+                      { kind: "title" as const, label: "Titre" },
+                      { kind: "bold" as const, label: "Gras" },
+                      { kind: "underline" as const, label: "Souligner" },
+                      { kind: "italic" as const, label: "Italique" },
+                      { kind: "list" as const, label: "Liste" },
+                    ].map((item) => (
+                      <button
+                        key={item.kind}
+                        type="button"
+                        className="rounded-[10px] border border-ink/15 bg-white px-3 py-1.5 text-xs font-semibold text-ink/70 transition hover:border-forest/35 hover:text-forest"
+                        onClick={() => formatComposerContent(item.kind)}
+                      >
+                        {item.label}
+                      </button>
+                    ))}
+                  </div>
                   <textarea
+                    ref={composerTextareaRef}
                     className="min-h-[300px] resize-y rounded-[18px] border border-ink/15 bg-white px-4 py-4 text-sm leading-7 focus:outline-none focus:ring-2 focus:ring-forest/30"
                     placeholder={"Bonjour,\n\nVotre message ici...\n\nÀ bientôt,\nLa Brouette"}
                     value={draft.content}
                     onChange={(e) => setDraft((prev) => ({ ...prev, content: e.target.value }))}
                   />
-                  <p className="text-right text-[10px] text-ink/35">{draft.content.length} caracteres</p>
+                  <div className="grid gap-3 lg:grid-cols-2">
+                    <p className="text-[10px] text-ink/45">
+                      Syntaxe: ## titre, **gras**, __souligné__, *italique*, - liste
+                    </p>
+                    <p className="text-right text-[10px] text-ink/35">{draft.content.length} caracteres</p>
+                  </div>
+                  {draft.content.trim() ? (
+                    <div className="rounded-[16px] border border-clay/70 bg-stone/30 p-4">
+                      <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-ink/45">
+                        Apercu email
+                      </p>
+                      <div
+                        className="markdown max-w-none text-sm leading-6 text-ink/75"
+                        dangerouslySetInnerHTML={{ __html: composerPreviewHtml }}
+                      />
+                    </div>
+                  ) : null}
                 </div>
               </div>
             </div>
@@ -971,13 +1073,43 @@ export default function MessagesEditor() {
                 </div>
                 <div className="flex flex-col gap-1.5">
                   <label className="text-xs font-semibold text-ink/60">Contenu</label>
+                  <div className="flex flex-wrap gap-2 rounded-[14px] border border-ink/10 bg-stone/35 p-2">
+                    {[
+                      { kind: "title" as const, label: "Titre" },
+                      { kind: "bold" as const, label: "Gras" },
+                      { kind: "underline" as const, label: "Souligner" },
+                      { kind: "italic" as const, label: "Italique" },
+                      { kind: "list" as const, label: "Liste" },
+                    ].map((item) => (
+                      <button
+                        key={item.kind}
+                        type="button"
+                        className="rounded-[10px] border border-ink/15 bg-white px-3 py-1.5 text-xs font-semibold text-ink/70 transition hover:border-forest/35 hover:text-forest"
+                        onClick={() => formatTemplateContent(item.kind)}
+                      >
+                        {item.label}
+                      </button>
+                    ))}
+                  </div>
                   <textarea
+                    ref={templateTextareaRef}
                     className="min-h-[200px] resize-y rounded-[18px] border border-ink/15 bg-white px-4 py-4 text-sm leading-7 focus:outline-none focus:ring-2 focus:ring-forest/30"
                     value={editingTemplate.content}
                     onChange={(e) =>
                       setEditingTemplate((prev) => (prev ? { ...prev, content: e.target.value } : prev))
                     }
                   />
+                  {editingTemplate.content.trim() ? (
+                    <div className="rounded-[16px] border border-clay/70 bg-stone/30 p-4">
+                      <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-ink/45">
+                        Apercu email
+                      </p>
+                      <div
+                        className="markdown max-w-none text-sm leading-6 text-ink/75"
+                        dangerouslySetInnerHTML={{ __html: templatePreviewHtml }}
+                      />
+                    </div>
+                  ) : null}
                 </div>
                 <div className="flex gap-2">
                   <button

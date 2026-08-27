@@ -12,6 +12,7 @@ import { readBalanceTrackingEnabled } from "@/lib/balanceTracking";
 import { reconcileCartWithOpenSale } from "@/lib/cartReconcile";
 import { checkCartAgainstLimits } from "@/lib/orderLimits";
 import { reportError } from "@/lib/reportError";
+import { estimatedUnitPrice, estimateWeightedItemsTotal, hasWeightedEstimate } from "@/lib/orderEstimates";
 
 type ProducerGroup = {
   producerId: string;
@@ -31,17 +32,15 @@ function formatMoney(amount: number) {
   return amount.toFixed(2).replace(".", ",");
 }
 
-function formatEstimatedRange(min?: number | null, max?: number | null) {
-  const hasMin = typeof min === "number" && min >= 0;
-  const hasMax = typeof max === "number" && max >= 0;
-  if (!hasMin && !hasMax) return "Prix final au retrait";
-  if (hasMin && hasMax) {
-    return min === max
-      ? `Estimatif: ${min.toFixed(2)} EUR`
-      : `Estimatif: ${min.toFixed(2)} EUR - ${max.toFixed(2)} EUR`;
-  }
-  if (hasMin) return `Estimatif : à partir de ${min!.toFixed(2)} EUR`;
-  return `Estimatif : jusqu'à ${max!.toFixed(2)} EUR`;
+function formatEstimatedPrice(min?: number | null, max?: number | null) {
+  const estimate = estimatedUnitPrice(min, max);
+  if (estimate === null) return "Prix final au retrait";
+  return `Prix estime : ~${formatMoney(estimate)} EUR`;
+}
+
+function estimatedLineTotal(item: CartItem) {
+  const estimate = estimatedUnitPrice(item.estimatedPriceMin, item.estimatedPriceMax);
+  return estimate === null ? null : estimate * item.quantity;
 }
 
 function groupByDateThenProducer(
@@ -135,6 +134,8 @@ export default function CheckoutPage() {
     () => items.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0),
     [items],
   );
+  const weightedEstimateTotal = useMemo(() => estimateWeightedItemsTotal(items), [items]);
+  const hasWeightEstimate = useMemo(() => hasWeightedEstimate(items), [items]);
 
   const submitOrder = async () => {
     if (!user) return;
@@ -181,13 +182,19 @@ export default function CheckoutPage() {
 
       const itemCount = freshItems.reduce((sum, item) => sum + item.quantity, 0);
       const freshTotal = freshItems.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
+      const freshWeightedEstimateTotal = estimateWeightedItemsTotal(freshItems);
 
       const orderRef = await addDoc(collection(firebaseDb, "orders"), {
         distributionId,
         memberId: orderMemberId,
         memberUid: user.uid,
         status: "validated",
-        totals: { totalAmount: freshTotal, itemCount },
+        totals: {
+          totalAmount: freshTotal,
+          itemCount,
+          weightedEstimatedAmount: freshWeightedEstimateTotal,
+          estimatedTotalAmount: freshTotal + freshWeightedEstimateTotal,
+        },
         memberSnapshot: {
           email: user.email ?? null,
         },
@@ -215,6 +222,14 @@ export default function CheckoutPage() {
             estimatedPriceMax: item.isSoldByWeight ? item.estimatedPriceMax ?? null : null,
           }),
         ),
+      );
+
+      await fetch("/api/orders/confirmation", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orderId: orderRef.id }),
+      }).catch((error) =>
+        reportError("Echec de l'envoi de l'email de confirmation", error, { silent: true }),
       );
 
       const balanceTrackingEnabled = await readBalanceTrackingEnabled(firebaseDb);
@@ -313,7 +328,7 @@ export default function CheckoutPage() {
                               <p className="text-xs text-ink/60">{item.variantLabel}</p>
                               {item.isSoldByWeight ? (
                                 <p className="text-xs text-ink/55">
-                                  Produit au poids - {formatEstimatedRange(item.estimatedPriceMin, item.estimatedPriceMax)}
+                                  Produit au poids - {formatEstimatedPrice(item.estimatedPriceMin, item.estimatedPriceMax)}
                                 </p>
                               ) : null}
                               {item.maxQuantity ? (
@@ -343,7 +358,11 @@ export default function CheckoutPage() {
                               </button>
                             </div>
                             <div className="text-sm font-semibold">
-                              {formatMoney(item.unitPrice * item.quantity)} EUR
+                              {item.isSoldByWeight
+                                ? estimatedLineTotal(item) === null
+                                  ? "Au retrait"
+                                  : `~${formatMoney(estimatedLineTotal(item)!)} EUR`
+                                : `${formatMoney(item.unitPrice * item.quantity)} EUR`}
                             </div>
                             <button
                               className="text-xs text-ink/50 underline"
@@ -367,6 +386,18 @@ export default function CheckoutPage() {
               <span>Commande</span>
               <span>{formatMoney(total)} EUR</span>
             </div>
+            {hasWeightEstimate ? (
+              <div className="mt-2 rounded-lg border border-forest/25 bg-forest/5 px-3 py-2 text-sm text-ink/75">
+                <div className="flex items-center justify-between gap-3">
+                  <span>Produits au poids</span>
+                  <span className="font-semibold">~{formatMoney(weightedEstimateTotal)} EUR</span>
+                </div>
+                <div className="mt-1 flex items-center justify-between gap-3 font-semibold text-ink">
+                  <span>Total estime</span>
+                  <span>~{formatMoney(total + weightedEstimateTotal)} EUR</span>
+                </div>
+              </div>
+            ) : null}
             <p className="mt-2 text-xs text-ink/60">
               Paiement sur place lors du retrait.
             </p>

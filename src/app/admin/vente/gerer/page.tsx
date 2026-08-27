@@ -75,14 +75,9 @@ function parseNullableNumber(value: string) {
 function formatEstimatedRange(minValue: string, maxValue: string) {
   const min = parseNullableNumber(minValue);
   const max = parseNullableNumber(maxValue);
-  if (min === null && max === null) return "Prix final au retrait";
-  if (min !== null && max !== null) {
-    return min === max
-      ? `Estimatif: ${min.toFixed(2)} EUR`
-      : `Estimatif: ${min.toFixed(2)} - ${max.toFixed(2)} EUR`;
-  }
-  if (min !== null) return `Estimatif à partir de ${min.toFixed(2)} EUR`;
-  return `Estimatif jusqu'à ${max!.toFixed(2)} EUR`;
+  const estimate = min !== null && max !== null ? (min + max) / 2 : min ?? max;
+  if (estimate === null) return "Prix final au retrait";
+  return `Prix estime : ~${estimate.toFixed(2)} EUR`;
 }
 
 function createDraftProductWithDates(activeDateKeys: string[]): ProductDraft {
@@ -508,8 +503,7 @@ export default function AdminSaleProducerManagerPage() {
       for (const product of producerDrafts) {
         const parsedLimit = Number(product.limitTotal || 0);
         const isSoldByWeight = Boolean(product.isSoldByWeight);
-        const estimatedPriceMin = isSoldByWeight ? parseNullableNumber(product.estimatedPriceMin) : null;
-        const estimatedPriceMax = isSoldByWeight ? parseNullableNumber(product.estimatedPriceMax) : null;
+        const estimatedPrice = isSoldByWeight ? parseNullableNumber(product.estimatedPriceMin) : null;
         const productId = product.id.startsWith("tmp_")
           ? doc(collection(firebaseDb, "products")).id
           : product.id;
@@ -520,8 +514,8 @@ export default function AdminSaleProducerManagerPage() {
           imageUrl: product.imageUrl.trim(),
           isOrganic: Boolean(product.isOrganic),
           isSoldByWeight,
-          estimatedPriceMin,
-          estimatedPriceMax,
+          estimatedPriceMin: estimatedPrice,
+          estimatedPriceMax: estimatedPrice,
           saleLimit: Number.isFinite(parsedLimit) && parsedLimit > 0 ? parsedLimit : null,
           updatedAt: now,
         };
@@ -1056,7 +1050,7 @@ export default function AdminSaleProducerManagerPage() {
                   {editingProduct.isSoldByWeight ? (
                     <div className="mt-3 grid gap-3 md:grid-cols-2">
                       <label className="flex flex-col gap-1 text-xs font-semibold uppercase tracking-[0.12em] text-ink/65">
-                        Prix estime min
+                        Prix estime
                         <input
                           className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm normal-case tracking-normal"
                           type="number"
@@ -1065,21 +1059,10 @@ export default function AdminSaleProducerManagerPage() {
                           value={editingProduct.estimatedPriceMin}
                           disabled={editingLocked}
                           onChange={(event) =>
-                            updateDraftProduct(editingProductIndex!, { estimatedPriceMin: event.target.value })
-                          }
-                        />
-                      </label>
-                      <label className="flex flex-col gap-1 text-xs font-semibold uppercase tracking-[0.12em] text-ink/65">
-                        Prix estime max
-                        <input
-                          className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm normal-case tracking-normal"
-                          type="number"
-                          min={0}
-                          step="0.01"
-                          value={editingProduct.estimatedPriceMax}
-                          disabled={editingLocked}
-                          onChange={(event) =>
-                            updateDraftProduct(editingProductIndex!, { estimatedPriceMax: event.target.value })
+                            updateDraftProduct(editingProductIndex!, {
+                              estimatedPriceMin: event.target.value,
+                              estimatedPriceMax: event.target.value,
+                            })
                           }
                         />
                       </label>
@@ -1273,25 +1256,20 @@ export default function AdminSaleProducerManagerPage() {
               {addDraft.isSoldByWeight ? (
                 <div className="grid gap-3 md:grid-cols-2">
                   <label className="text-xs font-semibold uppercase tracking-[0.12em] text-ink/65">
-                    Prix estimatif min
+                    Prix estimatif
                     <input
                       className="mt-1 w-full border border-ink/25 px-3 py-2 text-sm"
                       type="number"
                       min={0}
                       step="0.01"
                       value={addDraft.estimatedPriceMin}
-                      onChange={(e) => setAddDraft((prev) => ({ ...prev, estimatedPriceMin: e.target.value }))}
-                    />
-                  </label>
-                  <label className="text-xs font-semibold uppercase tracking-[0.12em] text-ink/65">
-                    Prix estimatif max
-                    <input
-                      className="mt-1 w-full border border-ink/25 px-3 py-2 text-sm"
-                      type="number"
-                      min={0}
-                      step="0.01"
-                      value={addDraft.estimatedPriceMax}
-                      onChange={(e) => setAddDraft((prev) => ({ ...prev, estimatedPriceMax: e.target.value }))}
+                      onChange={(e) =>
+                        setAddDraft((prev) => ({
+                          ...prev,
+                          estimatedPriceMin: e.target.value,
+                          estimatedPriceMax: e.target.value,
+                        }))
+                      }
                     />
                   </label>
                 </div>
