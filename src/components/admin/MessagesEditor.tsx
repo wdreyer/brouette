@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Timestamp,
   addDoc,
@@ -15,7 +15,8 @@ import {
   setDoc,
 } from "firebase/firestore";
 import { firebaseDb } from "@/lib/firebase/client";
-import { RICH_TEXT_SYNTAX_HELP, renderRichTextToHtml } from "@/lib/messageFormatting";
+import { renderComposedContentToEmailHtml, stripHtmlToText } from "@/lib/messageFormatting";
+import RichTextEditor from "@/components/admin/RichTextEditor";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -76,18 +77,6 @@ type TargetKind =
   | "producers";
 
 type ActiveTab = "composer" | "templates" | "lists" | "history";
-type FormatKind =
-  | "titleLarge"
-  | "titleSmall"
-  | "bold"
-  | "underline"
-  | "italic"
-  | "strike"
-  | "list"
-  | "orderedList"
-  | "quote"
-  | "divider"
-  | "link";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -155,61 +144,6 @@ function getTargetLabel(target: TargetKind, listName?: string) {
   return TARGET_OPTIONS.find((o) => o.value === target)?.label ?? target;
 }
 
-function applyTextFormat(value: string, start: number, end: number, kind: FormatKind, extra?: string) {
-  const selected = value.slice(start, end);
-  const fallback =
-    selected ||
-    (kind === "titleLarge" || kind === "titleSmall"
-      ? "Titre"
-      : kind === "list" || kind === "orderedList"
-        ? "Element de liste"
-        : kind === "quote"
-          ? "Citation"
-          : kind === "link"
-            ? "texte du lien"
-            : "texte");
-  const prefix = value.slice(0, start);
-  const suffix = value.slice(end);
-  const needsLineStart = prefix.length > 0 && !prefix.endsWith("\n");
-  let replacement = fallback;
-
-  if (kind === "titleLarge") replacement = `${needsLineStart ? "\n" : ""}# ${fallback}`;
-  if (kind === "titleSmall") replacement = `${needsLineStart ? "\n" : ""}## ${fallback}`;
-  if (kind === "bold") replacement = `**${fallback}**`;
-  if (kind === "underline") replacement = `__${fallback}__`;
-  if (kind === "italic") replacement = `*${fallback}*`;
-  if (kind === "strike") replacement = `~~${fallback}~~`;
-  if (kind === "link") replacement = `[${fallback}](${extra || "https://"})`;
-  if (kind === "list") {
-    replacement = `${needsLineStart ? "\n" : ""}${fallback
-      .split("\n")
-      .map((line) => `- ${line.replace(/^-\s*/, "")}`)
-      .join("\n")}`;
-  }
-  if (kind === "orderedList") {
-    replacement = `${needsLineStart ? "\n" : ""}${fallback
-      .split("\n")
-      .map((line) => `1. ${line.replace(/^\d+\.\s*/, "")}`)
-      .join("\n")}`;
-  }
-  if (kind === "quote") {
-    replacement = `${needsLineStart ? "\n" : ""}${fallback
-      .split("\n")
-      .map((line) => `> ${line.replace(/^>\s*/, "")}`)
-      .join("\n")}`;
-  }
-  if (kind === "divider") {
-    replacement = `${needsLineStart ? "\n" : ""}---\n`;
-  }
-
-  const nextValue = `${prefix}${replacement}${suffix}`;
-  return {
-    value: nextValue,
-    selectionStart: prefix.length,
-    selectionEnd: prefix.length + replacement.length,
-  };
-}
-
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function MessagesEditor() {
@@ -239,8 +173,6 @@ export default function MessagesEditor() {
   const [selectedTemplateKey, setSelectedTemplateKey] = useState("");
   const [quickTemplateName, setQuickTemplateName] = useState("");
   const [searchManualMembers, setSearchManualMembers] = useState("");
-  const composerTextareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const templateTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   // Template editing
   const [editingTemplate, setEditingTemplate] = useState<{
@@ -366,9 +298,12 @@ export default function MessagesEditor() {
     return true;
   }, [draft]);
 
-  const composerPreviewHtml = useMemo(() => renderRichTextToHtml(draft.content), [draft.content]);
+  const composerPreviewHtml = useMemo(
+    () => renderComposedContentToEmailHtml(draft.content),
+    [draft.content],
+  );
   const templatePreviewHtml = useMemo(
-    () => renderRichTextToHtml(editingTemplate?.content ?? ""),
+    () => renderComposedContentToEmailHtml(editingTemplate?.content ?? ""),
     [editingTemplate?.content],
   );
 
@@ -378,51 +313,6 @@ export default function MessagesEditor() {
     if (!tmpl) return;
     setDraft((prev) => ({ ...prev, subject: tmpl.subject ?? "", content: tmpl.content ?? "" }));
     setStatusMsg({ type: "info", text: "Modèle appliqué." });
-  };
-
-  const promptLinkUrl = () => {
-    const url = window.prompt("Adresse du lien (https://...)", "https://");
-    return url && url.trim() ? url.trim() : null;
-  };
-
-  const formatComposerContent = (kind: FormatKind) => {
-    const textarea = composerTextareaRef.current;
-    if (!textarea) return;
-    let extra: string | undefined;
-    if (kind === "link") {
-      const url = promptLinkUrl();
-      if (!url) return;
-      extra = url;
-    }
-    const formatted = applyTextFormat(draft.content, textarea.selectionStart, textarea.selectionEnd, kind, extra);
-    setDraft((prev) => ({ ...prev, content: formatted.value }));
-    window.requestAnimationFrame(() => {
-      textarea.focus();
-      textarea.setSelectionRange(formatted.selectionStart, formatted.selectionEnd);
-    });
-  };
-
-  const formatTemplateContent = (kind: FormatKind) => {
-    const textarea = templateTextareaRef.current;
-    if (!textarea || !editingTemplate) return;
-    let extra: string | undefined;
-    if (kind === "link") {
-      const url = promptLinkUrl();
-      if (!url) return;
-      extra = url;
-    }
-    const formatted = applyTextFormat(
-      editingTemplate.content,
-      textarea.selectionStart,
-      textarea.selectionEnd,
-      kind,
-      extra,
-    );
-    setEditingTemplate((prev) => (prev ? { ...prev, content: formatted.value } : prev));
-    window.requestAnimationFrame(() => {
-      textarea.focus();
-      textarea.setSelectionRange(formatted.selectionStart, formatted.selectionEnd);
-    });
   };
 
   const toggleManualMember = (memberId: string) => {
@@ -957,45 +847,16 @@ export default function MessagesEditor() {
                 </div>
                 <div className="flex flex-col gap-1.5">
                   <label className="text-xs font-semibold text-ink/60">Contenu</label>
-                  <div className="flex flex-wrap gap-2 rounded-[14px] border border-ink/10 bg-stone/35 p-2">
-                    {[
-                      { kind: "titleLarge" as const, label: "Titre" },
-                      { kind: "titleSmall" as const, label: "Sous-titre" },
-                      { kind: "bold" as const, label: "Gras" },
-                      { kind: "italic" as const, label: "Italique" },
-                      { kind: "underline" as const, label: "Souligner" },
-                      { kind: "strike" as const, label: "Barré" },
-                      { kind: "link" as const, label: "Lien" },
-                      { kind: "list" as const, label: "Liste" },
-                      { kind: "orderedList" as const, label: "Liste num." },
-                      { kind: "quote" as const, label: "Citation" },
-                      { kind: "divider" as const, label: "Séparateur" },
-                    ].map((item) => (
-                      <button
-                        key={item.kind}
-                        type="button"
-                        className="rounded-[10px] border border-ink/15 bg-white px-3 py-1.5 text-xs font-semibold text-ink/70 transition hover:border-forest/35 hover:text-forest"
-                        onClick={() => formatComposerContent(item.kind)}
-                      >
-                        {item.label}
-                      </button>
-                    ))}
-                  </div>
-                  <textarea
-                    ref={composerTextareaRef}
-                    className="min-h-[300px] resize-y rounded-[18px] border border-ink/15 bg-white px-4 py-4 text-sm leading-7 focus:outline-none focus:ring-2 focus:ring-forest/30"
-                    placeholder={"Bonjour,\n\nVotre message ici...\n\nÀ bientôt,\nLa Brouette"}
+                  <RichTextEditor
                     value={draft.content}
-                    onChange={(e) => setDraft((prev) => ({ ...prev, content: e.target.value }))}
+                    onChange={(html) => setDraft((prev) => ({ ...prev, content: html }))}
+                    placeholder={"Bonjour,\n\nVotre message ici...\n\nÀ bientôt,\nLa Brouette"}
+                    minHeightClass="min-h-[300px]"
                   />
-                  <div className="grid gap-3 lg:grid-cols-2">
-                    <p className="text-[10px] text-ink/45">Syntaxe: {RICH_TEXT_SYNTAX_HELP}</p>
-                    <p className="text-right text-[10px] text-ink/35">{draft.content.length} caracteres</p>
-                  </div>
                   {draft.content.trim() ? (
                     <div className="rounded-[16px] border border-clay/70 bg-stone/30 p-4">
                       <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-ink/45">
-                        Apercu email
+                        Apercu email final
                       </p>
                       <div
                         className="markdown max-w-none text-sm leading-6 text-ink/75"
@@ -1131,43 +992,17 @@ export default function MessagesEditor() {
                 </div>
                 <div className="flex flex-col gap-1.5">
                   <label className="text-xs font-semibold text-ink/60">Contenu</label>
-                  <div className="flex flex-wrap gap-2 rounded-[14px] border border-ink/10 bg-stone/35 p-2">
-                    {[
-                      { kind: "titleLarge" as const, label: "Titre" },
-                      { kind: "titleSmall" as const, label: "Sous-titre" },
-                      { kind: "bold" as const, label: "Gras" },
-                      { kind: "italic" as const, label: "Italique" },
-                      { kind: "underline" as const, label: "Souligner" },
-                      { kind: "strike" as const, label: "Barré" },
-                      { kind: "link" as const, label: "Lien" },
-                      { kind: "list" as const, label: "Liste" },
-                      { kind: "orderedList" as const, label: "Liste num." },
-                      { kind: "quote" as const, label: "Citation" },
-                      { kind: "divider" as const, label: "Séparateur" },
-                    ].map((item) => (
-                      <button
-                        key={item.kind}
-                        type="button"
-                        className="rounded-[10px] border border-ink/15 bg-white px-3 py-1.5 text-xs font-semibold text-ink/70 transition hover:border-forest/35 hover:text-forest"
-                        onClick={() => formatTemplateContent(item.kind)}
-                      >
-                        {item.label}
-                      </button>
-                    ))}
-                  </div>
-                  <textarea
-                    ref={templateTextareaRef}
-                    className="min-h-[200px] resize-y rounded-[18px] border border-ink/15 bg-white px-4 py-4 text-sm leading-7 focus:outline-none focus:ring-2 focus:ring-forest/30"
+                  <RichTextEditor
                     value={editingTemplate.content}
-                    onChange={(e) =>
-                      setEditingTemplate((prev) => (prev ? { ...prev, content: e.target.value } : prev))
+                    onChange={(html) =>
+                      setEditingTemplate((prev) => (prev ? { ...prev, content: html } : prev))
                     }
+                    minHeightClass="min-h-[200px]"
                   />
-                  <p className="text-[10px] text-ink/45">Syntaxe: {RICH_TEXT_SYNTAX_HELP}</p>
                   {editingTemplate.content.trim() ? (
                     <div className="rounded-[16px] border border-clay/70 bg-stone/30 p-4">
                       <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-ink/45">
-                        Apercu email
+                        Apercu email final
                       </p>
                       <div
                         className="markdown max-w-none text-sm leading-6 text-ink/75"
@@ -1259,7 +1094,9 @@ export default function MessagesEditor() {
                         </button>
                       </div>
                     </div>
-                    <p className="mt-3 line-clamp-3 text-[12px] leading-5 text-ink/50">{tmpl.content}</p>
+                    <p className="mt-3 line-clamp-3 text-[12px] leading-5 text-ink/50">
+                      {stripHtmlToText(tmpl.content ?? "")}
+                    </p>
                     <p className="mt-2 text-[10px] text-ink/35">Modifie: {fmtDate(tmpl.updatedAt)}</p>
                     <button
                       className="mt-3 w-full rounded-[12px] bg-forest/8 py-2 text-xs font-semibold text-forest transition-colors hover:bg-forest/15"
@@ -1657,7 +1494,7 @@ export default function MessagesEditor() {
                     </div>
 
                     <p className="mt-3 line-clamp-2 rounded-[10px] bg-stone/30 px-3 py-2 text-[12px] leading-5 text-ink/60">
-                      {item.content ?? "-"}
+                      {stripHtmlToText(item.content ?? "") || "-"}
                     </p>
 
                     {(item.stats?.recipientsPreview?.length ?? 0) > 0 && (

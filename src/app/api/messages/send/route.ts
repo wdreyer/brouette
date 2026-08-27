@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { Timestamp } from "firebase-admin/firestore";
 import { getAdminDb } from "@/lib/firebase/admin";
-import { renderRichTextToHtml } from "@/lib/messageFormatting";
+import { renderComposedContentToEmailHtml, stripHtmlToText } from "@/lib/messageFormatting";
 
 export const runtime = "nodejs";
 
@@ -89,6 +89,8 @@ async function sendBrevoEmail(params: {
   const recipientChunks = chunk(params.recipients, 80);
   let sent = 0;
   const providerMessageIds: string[] = [];
+  const htmlContent = renderComposedContentToEmailHtml(params.content);
+  const textContent = stripHtmlToText(htmlContent);
 
   for (const group of recipientChunks) {
     const payloadBase = {
@@ -97,8 +99,8 @@ async function sendBrevoEmail(params: {
         name: senderName,
       },
       subject: params.subject,
-      htmlContent: renderRichTextToHtml(params.content),
-      textContent: params.content,
+      htmlContent,
+      textContent,
       tags: ["brouette", "admin-message"],
     };
     const payload =

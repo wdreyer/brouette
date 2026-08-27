@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { renderRichTextToHtml } from "@/lib/messageFormatting";
+import {
+  isLegacyPlainTextContent,
+  renderComposedContentToEmailHtml,
+  renderRichTextToHtml,
+  stripHtmlToText,
+} from "@/lib/messageFormatting";
 
 describe("renderRichTextToHtml", () => {
   it("renders basic rich text markup safely", () => {
@@ -43,5 +48,55 @@ describe("renderRichTextToHtml", () => {
   it("refuses to turn a javascript: url into a usable link scheme", () => {
     const html = renderRichTextToHtml("[Clique](javascript:alert(1))");
     expect(html).not.toContain('href="javascript:');
+  });
+});
+
+describe("isLegacyPlainTextContent", () => {
+  it("treats plain text without tags as legacy content", () => {
+    expect(isLegacyPlainTextContent("Bonjour,\n\nTexte simple.")).toBe(true);
+  });
+
+  it("treats Tiptap HTML output as non-legacy content", () => {
+    expect(isLegacyPlainTextContent("<p>Bonjour <strong>tous</strong></p>")).toBe(false);
+  });
+});
+
+describe("renderComposedContentToEmailHtml", () => {
+  it("inlines styles onto Tiptap semantic HTML for email clients", () => {
+    const html = renderComposedContentToEmailHtml(
+      "<h2>Titre</h2><p>Bonjour <strong>gras</strong></p><ul><li><p>Un</p></li></ul><hr>",
+    );
+
+    expect(html).toMatch(/<h2 style="[^"]*font-size:24px[^"]*">Titre<\/h2>/);
+    expect(html).toContain("<strong>gras</strong>");
+    expect(html).toMatch(/<ul style="[^"]*"><li style="[^"]*">/);
+    expect(html).toContain("<hr");
+  });
+
+  it("turns a blockquote into a styled callout box and sanitizes link hrefs", () => {
+    const html = renderComposedContentToEmailHtml(
+      '<blockquote><p>Important</p></blockquote><p><a href="javascript:alert(1)">clic</a></p>',
+    );
+
+    expect(html).not.toContain("<blockquote");
+    expect(html).toContain("Important");
+    expect(html).not.toContain('href="javascript:');
+  });
+
+  it("still renders legacy plain-text content the old way", () => {
+    const html = renderComposedContentToEmailHtml("Bonjour,\n\n**gras**");
+    expect(html).toContain("<strong>gras</strong>");
+  });
+});
+
+describe("stripHtmlToText", () => {
+  it("turns rendered email html back into readable plain text", () => {
+    const html = renderComposedContentToEmailHtml("<h2>Titre</h2><p>Ligne <strong>un</strong></p><p>Ligne deux</p>");
+    const text = stripHtmlToText(html);
+
+    expect(text).toContain("Titre");
+    expect(text).toContain("Ligne un");
+    expect(text).toContain("Ligne deux");
+    expect(text).not.toContain("<");
   });
 });

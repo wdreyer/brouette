@@ -12,6 +12,10 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
+    "@tiptap/extensions": "^3.30.5",
+    "@tiptap/pm": "^3.30.5",
+    "@tiptap/react": "^3.30.5",
+    "@tiptap/starter-kit": "^3.30.5",
     "firebase": "^12.8.0",
     "firebase-admin": "^13.7.0",
     "jspdf": "^4.2.1",

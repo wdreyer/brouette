@@ -124,6 +124,108 @@ img {
   list-style: decimal;
 }
 
+.rte-content {
+  outline: none;
+}
+
+.rte-content p {
+  margin: 0 0 0.75rem;
+  line-height: 1.65;
+}
+
+.rte-content p:last-child {
+  margin-bottom: 0;
+}
+
+.rte-content h2,
+.rte-content h3 {
+  font-family: var(--font-serif), serif;
+  font-weight: 700;
+  color: #2f2a24;
+  line-height: 1.25;
+  margin: 0.9rem 0 0.5rem;
+}
+
+.rte-content h2 {
+  font-size: 1.5rem;
+}
+
+.rte-content h3 {
+  font-size: 1.25rem;
+}
+
+.rte-content strong {
+  font-weight: 600;
+  color: #2f2a24;
+}
+
+.rte-content em {
+  font-style: italic;
+}
+
+.rte-content u {
+  text-decoration: underline;
+}
+
+.rte-content s {
+  text-decoration: line-through;
+}
+
+.rte-content ul,
+.rte-content ol {
+  margin: 0 0 0.75rem 1.25rem;
+  padding: 0;
+}
+
+.rte-content ul {
+  list-style: disc;
+}
+
+.rte-content ol {
+  list-style: decimal;
+}
+
+.rte-content li {
+  margin-bottom: 0.3rem;
+}
+
+.rte-content li p {
+  margin: 0;
+}
+
+.rte-content blockquote {
+  margin: 0 0 0.75rem;
+  padding: 0.5rem 1rem;
+  border-left: 4px solid rgba(75, 122, 92, 0.6);
+  background: rgba(75, 122, 92, 0.06);
+  border-radius: 6px;
+  color: #4a4438;
+}
+
+.rte-content blockquote p {
+  margin: 0;
+}
+
+.rte-content hr {
+  border: none;
+  border-top: 1px solid #ddd1bd;
+  margin: 1rem 0;
+}
+
+.rte-content a {
+  color: #3f6b4a;
+  text-decoration: underline;
+}
+
+.rte-content p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  color: rgba(47, 42, 36, 0.35);
+  pointer-events: none;
+  white-space: pre-line;
+}
+
 .markdown hr {
   border: none;
   border-top: 1px solid #ddd1bd;

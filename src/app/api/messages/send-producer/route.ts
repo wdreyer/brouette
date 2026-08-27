@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getAdminDb } from "@/lib/firebase/admin";
-import { renderRichTextToHtml } from "@/lib/messageFormatting";
+import { renderComposedContentToEmailHtml, stripHtmlToText } from "@/lib/messageFormatting";
 
 export const runtime = "nodejs";
 
@@ -45,12 +45,13 @@ export async function POST(request: Request) {
     if (!apiKey) throw new Error("BREVO_API_KEY manquant.");
     if (!senderEmail) throw new Error("BREVO_SENDER_EMAIL manquant.");
 
+    const htmlContent = renderComposedContentToEmailHtml(content);
     const payload: Record<string, unknown> = {
       sender: { email: senderEmail, name: senderName },
       to: [{ email: producerEmail, name: producerName || undefined }],
       subject,
-      htmlContent: renderRichTextToHtml(content),
-      textContent: content,
+      htmlContent,
+      textContent: stripHtmlToText(htmlContent),
       tags: ["brouette", "commande-producteur"],
     };
 
