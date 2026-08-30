@@ -1,10 +1,9 @@
 import { NextResponse } from "next/server";
 import { FieldValue } from "firebase-admin/firestore";
 import { getAdminAuth, getAdminDb } from "@/lib/firebase/admin";
+import { DEFAULT_MEMBER_PASSWORD, normalizeMemberEmail } from "@/lib/memberAuthSync";
 
 export const runtime = "nodejs";
-
-const DEFAULT_PASSWORD = "brouette2026";
 
 type CreatePayload = {
   firstName?: string;
@@ -12,8 +11,10 @@ type CreatePayload = {
   email?: string;
 };
 
-function normalizeEmail(value: unknown) {
-  return String(value ?? "").trim().toLowerCase();
+function errorCode(error: unknown) {
+  return error && typeof error === "object" && "code" in error
+    ? String((error as { code?: string }).code ?? "")
+    : "";
 }
 
 function toHtml(content: string) {
@@ -32,17 +33,17 @@ async function sendWelcomeEmail(params: { email: string; firstName: string; pass
   if (!apiKey) throw new Error("BREVO_API_KEY missing in server env.");
   if (!senderEmail) throw new Error("BREVO_SENDER_EMAIL missing in server env.");
 
-  const subject = "Bienvenue chez La Brouette — tes identifiants de connexion";
+  const subject = "Bienvenue chez La Brouette - tes identifiants de connexion";
   const content = `Bonjour ${params.firstName},
 
-Un compte adhérent vient d'être créé pour toi chez La Brouette et le Panier.
+Un compte adherent vient d'etre cree pour toi chez La Brouette et le Panier.
 
 Identifiant : ${params.email}
 Mot de passe temporaire : ${params.password}
 
-Connecte-toi sur ${params.loginUrl} puis change ce mot de passe dès ta première connexion depuis ton espace membre.
+Connecte-toi sur ${params.loginUrl} puis change ce mot de passe des ta premiere connexion depuis ton espace membre.
 
-Si tu n'es pas à l'origine de cette demande, ignore cet email.`;
+Si tu n'es pas a l'origine de cette demande, ignore cet email.`;
 
   const response = await fetch("https://api.brevo.com/v3/smtp/email", {
     method: "POST",
@@ -78,11 +79,11 @@ export async function POST(request: Request) {
     const body = (await request.json()) as CreatePayload;
     const firstName = String(body.firstName ?? "").trim();
     const lastName = String(body.lastName ?? "").trim();
-    const email = normalizeEmail(body.email);
+    const email = normalizeMemberEmail(body.email);
 
     if (!firstName || !lastName || !email) {
       return NextResponse.json(
-        { ok: false, error: "Prénom, nom et email sont obligatoires." },
+        { ok: false, error: "Prenom, nom et email sont obligatoires." },
         { status: 400 },
       );
     }
@@ -95,26 +96,37 @@ export async function POST(request: Request) {
       db.collection("members").where("accessEmails", "array-contains", email).limit(1).get(),
     ]);
     if (!byEmail.empty || !byAccessEmail.empty) {
-      return NextResponse.json({ ok: false, error: "Cet email est déjà utilisé." }, { status: 409 });
+      return NextResponse.json({ ok: false, error: "Cet email est deja utilise." }, { status: 409 });
     }
 
     let userRecord;
+    let reusedExistingAuthUser = false;
     try {
       userRecord = await auth.createUser({
         email,
-        password: DEFAULT_PASSWORD,
+        password: DEFAULT_MEMBER_PASSWORD,
         emailVerified: false,
         disabled: false,
       });
     } catch (error) {
-      const code = error && typeof error === "object" && "code" in error ? String((error as { code?: string }).code) : "";
+      const code = errorCode(error);
       if (code === "auth/email-already-exists") {
-        return NextResponse.json({ ok: false, error: "Cet email est déjà utilisé." }, { status: 409 });
-      }
-      if (code === "auth/invalid-email") {
+        userRecord = await auth.getUserByEmail(email);
+        const existingMember = await db.collection("members").doc(userRecord.uid).get();
+        if (existingMember.exists) {
+          return NextResponse.json({ ok: false, error: "Cet email est deja utilise." }, { status: 409 });
+        }
+        await auth.updateUser(userRecord.uid, {
+          email,
+          password: DEFAULT_MEMBER_PASSWORD,
+          disabled: false,
+        });
+        reusedExistingAuthUser = true;
+      } else if (code === "auth/invalid-email") {
         return NextResponse.json({ ok: false, error: "Adresse email invalide." }, { status: 400 });
+      } else {
+        throw error;
       }
-      throw error;
     }
 
     const uid = userRecord.uid;
@@ -138,17 +150,18 @@ export async function POST(request: Request) {
       memberId: uid,
       role: "member",
       email,
+      accessEmails: [email],
       updatedAt: now,
     });
 
     await sendWelcomeEmail({
       email,
       firstName,
-      password: DEFAULT_PASSWORD,
+      password: DEFAULT_MEMBER_PASSWORD,
       loginUrl: `${resolveOrigin(request)}/auth`,
     });
 
-    return NextResponse.json({ ok: true, memberId: uid });
+    return NextResponse.json({ ok: true, memberId: uid, reusedExistingAuthUser });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Erreur inconnue.";
     return NextResponse.json({ ok: false, error: message }, { status: 500 });

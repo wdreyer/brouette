@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from "react";
 import {
   addDoc,
   collection,
-  deleteDoc,
   deleteField,
   doc,
   getDocs,
@@ -179,7 +178,7 @@ export default function MembersEditor({
   fields,
   viewMode = "all",
 }: EditorProps) {
-  const { role, memberId } = useAuth();
+  const { role, memberId, user } = useAuth();
   const canEditMembers = role === "admin" || role === "referent";
   const isAdmin = role === "admin";
   const [docs, setDocs] = useState<DocEntry[]>([]);
@@ -236,6 +235,31 @@ export default function MembersEditor({
       String(data.phone ?? ""),
     ]);
     return values.length ? values : [""];
+  };
+
+  const authHeaders = async () => {
+    if (!user) throw new Error("Session admin invalide.");
+    return {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${await user.getIdToken()}`,
+    };
+  };
+
+  const syncMemberAuth = async (body: Record<string, unknown>) => {
+    const response = await fetch("/api/members/auth-sync", {
+      method: "POST",
+      headers: await authHeaders(),
+      body: JSON.stringify(body),
+    });
+    const result = (await response.json().catch(() => ({}))) as {
+      ok?: boolean;
+      error?: string;
+      createdAuthUser?: boolean;
+    };
+    if (!response.ok || !result.ok) {
+      throw new Error(result.error || "Synchronisation du compte de connexion impossible.");
+    }
+    return result;
   };
 
   const loadBalances = async (entries: DocEntry[]) => {
@@ -410,7 +434,7 @@ export default function MembersEditor({
   const saveEdit = async () => {
     if (!editingId) return;
     try {
-      const normalizedEmails = uniqueList(editEmails);
+      const normalizedEmails = uniqueList(editEmails).map((value) => value.toLowerCase());
       const normalizedPhones = uniqueList(editPhones);
       if (!normalizedEmails.length || !normalizedPhones.length) {
         setMessage("Ajoute au moins un email et un téléphone.");
@@ -447,8 +471,19 @@ export default function MembersEditor({
       ) {
         payload.membershipJoinedAt = null;
       }
+      const syncResult = await syncMemberAuth({
+        action: "sync",
+        memberId: editingId,
+        email: normalizedEmails[0],
+        emails: normalizedEmails,
+        role: getByPath(payload, "auth.role") ?? "member",
+      });
       await setDoc(doc(firebaseDb, collectionName, editingId), payload, { merge: true });
-      setMessage("Adhérent mis à jour.");
+      setMessage(
+        syncResult.createdAuthUser
+          ? "Adherent mis a jour. Compte de connexion recree avec le mot de passe temporaire."
+          : "Adhérent mis à jour.",
+      );
       setEditingId(null);
       setViewingEntry(null);
       setEditEmails([""]);
@@ -486,7 +521,7 @@ export default function MembersEditor({
       query(collection(firebaseDb, "producers"), where("referentId", "==", targetMemberId)),
     );
     if (!producerSnap.empty) {
-      let batch = writeBatch(firebaseDb);
+      const batch = writeBatch(firebaseDb);
       let count = 0;
       producerSnap.docs.forEach((docSnap) => {
         batch.set(
@@ -515,7 +550,7 @@ export default function MembersEditor({
       );
       if (rowsSnap.empty) continue;
 
-      let batch = writeBatch(firebaseDb);
+      const batch = writeBatch(firebaseDb);
       let count = 0;
       rowsSnap.docs.forEach((rowDoc) => {
         batch.set(
@@ -580,7 +615,10 @@ export default function MembersEditor({
 
       const deletedLedger = await deleteMemberLedger(editingId);
       const cleanup = await cleanupReferentLinks(editingId);
-      await deleteDoc(doc(firebaseDb, collectionName, editingId));
+      await syncMemberAuth({
+        action: "delete",
+        memberId: editingId,
+      });
 
       setMessage(
         `Membre supprime. Ledger: ${deletedLedger} ligne(s), producteurs nettoyes: ${cleanup.producerLinksUpdated}, lignes distributions nettoyees: ${cleanup.distributionLinksUpdated}.`,
@@ -610,7 +648,7 @@ export default function MembersEditor({
       setCreateSubmitting(true);
       const response = await fetch("/api/members/create", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: await authHeaders(),
         body: JSON.stringify({ firstName, lastName, email }),
       });
       const result = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string };
