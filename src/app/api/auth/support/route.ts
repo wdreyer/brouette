@@ -66,7 +66,7 @@ export async function POST(request: Request) {
 
     const subject = `[La Brouette] Probleme de connexion - ${failingEmail}`;
     const textContent = [
-      "Demande d'aide connexion",
+      "Probleme de connexion",
       "",
       `Question : ${question}`,
       `Email qui ne fonctionne pas : ${failingEmail}`,
@@ -74,7 +74,7 @@ export async function POST(request: Request) {
       `Email de contact : ${contactEmail || "-"}`,
     ].join("\n");
     const htmlContent = [
-      "<h2>Demande d'aide connexion</h2>",
+      "<h2>Probleme de connexion</h2>",
       supportLine("Question", question),
       supportLine("Email qui ne fonctionne pas", failingEmail),
       supportLine("Nom / prenom", name),

@@ -214,7 +214,7 @@ export default function AuthClient() {
 
       <section className="rounded-xl border border-clay/70 bg-white/95 p-6 shadow-card">
         <div className="mb-5 rounded-xl border border-forest/20 bg-forest/5 p-4 text-sm text-ink/75">
-          <p className="font-semibold text-ink">Besoin d&apos;aide pour te connecter ?</p>
+          <p className="font-semibold text-ink">Probleme de connexion ?</p>
           <p className="mt-2">
             Utilise l&apos;email principal de ta fiche adherent. Si ton email a change, ou si le mot
             de passe ne fonctionne pas, essaie d&apos;abord une reinitialisation.
@@ -235,11 +235,11 @@ export default function AuthClient() {
             </button>
             <button
               type="button"
-              className="rounded-full border border-ink/15 bg-white px-3 py-1.5 text-xs font-semibold text-ink"
+              className="rounded-full border border-ink/15 bg-white px-3 py-1.5 text-xs font-semibold text-ink hover:border-ink/35"
               onClick={openSupport}
               disabled={loading}
             >
-              Envoyer un message d&apos;aide
+              Signaler un probleme de connexion
             </button>
           </div>
           <p className="mt-3 text-xs text-ink/60">
@@ -411,83 +411,94 @@ export default function AuthClient() {
       </section>
 
       {supportOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 p-6">
-          <div className="w-full max-w-md rounded-2xl border border-clay/70 bg-white p-6 shadow-card">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-ink/60">
-                  Support connexion
-                </p>
-                <h2 className="mt-1 font-serif text-2xl text-ink">Demander de l&apos;aide</h2>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-lg overflow-hidden rounded-2xl border border-clay/70 bg-white shadow-card">
+            <div className="border-b border-clay/70 bg-stone px-6 py-5">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-ink/55">
+                    Connexion
+                  </p>
+                  <h2 className="mt-1 font-serif text-2xl text-ink">Probleme de connexion</h2>
+                  <p className="mt-2 text-sm text-ink/70">
+                    Envoie les informations utiles pour verifier rapidement ta fiche et ton compte.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="rounded-full border border-ink/15 bg-white px-3 py-1 text-sm font-semibold text-ink hover:border-ink/35"
+                  onClick={() => setSupportOpen(false)}
+                  disabled={supportSending}
+                >
+                  Fermer
+                </button>
               </div>
-              <button
-                type="button"
-                className="rounded-full border border-ink/15 px-3 py-1 text-sm font-semibold text-ink"
-                onClick={() => setSupportOpen(false)}
-                disabled={supportSending}
-              >
-                Fermer
-              </button>
             </div>
 
-            <div className="mt-4 flex flex-col gap-3">
+            <div className="flex flex-col gap-4 px-6 py-5">
               <label className="flex flex-col gap-1 text-sm font-semibold text-ink/70">
-                Question
+                Question <span className="text-xs font-normal text-ink/45">obligatoire</span>
                 <textarea
-                  className="min-h-24 rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
+                  className="min-h-28 rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm outline-none focus:border-forest/60"
                   value={supportQuestion}
                   onChange={(event) => setSupportQuestion(event.target.value)}
-                  placeholder="Explique ce qui bloque..."
+                  placeholder="Explique ce qui bloque, par exemple le message affiche ou l'etape ou ca coince."
                 />
               </label>
-              <label className="flex flex-col gap-1 text-sm font-semibold text-ink/70">
-                Email qui ne fonctionne pas
-                <input
-                  className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
-                  type="email"
-                  value={supportFailingEmail}
-                  onChange={(event) => setSupportFailingEmail(event.target.value)}
-                  placeholder="ton@email.com"
-                />
-              </label>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="flex flex-col gap-1 text-sm font-semibold text-ink/70">
+                  Email qui ne fonctionne pas <span className="text-xs font-normal text-ink/45">obligatoire</span>
+                  <input
+                    className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm outline-none focus:border-forest/60"
+                    type="email"
+                    value={supportFailingEmail}
+                    onChange={(event) => setSupportFailingEmail(event.target.value)}
+                    placeholder="ton@email.com"
+                  />
+                </label>
+                <label className="flex flex-col gap-1 text-sm font-semibold text-ink/70">
+                  Email de contact
+                  <input
+                    className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm outline-none focus:border-forest/60"
+                    type="email"
+                    value={supportContactEmail}
+                    onChange={(event) => setSupportContactEmail(event.target.value)}
+                    placeholder="si different"
+                  />
+                </label>
+              </div>
               <label className="flex flex-col gap-1 text-sm font-semibold text-ink/70">
                 Nom / prenom
                 <input
-                  className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
+                  className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm outline-none focus:border-forest/60"
                   value={supportName}
                   onChange={(event) => setSupportName(event.target.value)}
                 />
               </label>
-              <label className="flex flex-col gap-1 text-sm font-semibold text-ink/70">
-                Email de contact
-                <input
-                  className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
-                  type="email"
-                  value={supportContactEmail}
-                  onChange={(event) => setSupportContactEmail(event.target.value)}
-                  placeholder="si different"
-                />
-              </label>
+
+              {supportMessage ? (
+                <p className="rounded-xl border border-clay/70 bg-stone px-3 py-2 text-sm text-ink/70">
+                  {supportMessage}
+                </p>
+              ) : null}
             </div>
 
-            {supportMessage ? <p className="mt-3 text-sm text-ink/70">{supportMessage}</p> : null}
-
-            <div className="mt-5 flex flex-wrap items-center gap-3">
+            <div className="flex flex-wrap items-center justify-end gap-3 border-t border-clay/70 px-6 py-4">
+              <button
+                type="button"
+                className="rounded-full border border-ink/20 px-4 py-2 text-sm font-semibold text-ink hover:border-ink/40"
+                onClick={() => setSupportOpen(false)}
+                disabled={supportSending}
+              >
+                Annuler
+              </button>
               <button
                 type="button"
                 className="rounded-full bg-ink px-5 py-2 text-sm font-semibold text-stone disabled:opacity-50"
                 onClick={() => handleSupportSend().catch(() => undefined)}
                 disabled={supportSending}
               >
-                {supportSending ? "Envoi..." : "Envoyer"}
-              </button>
-              <button
-                type="button"
-                className="rounded-full border border-ink/20 px-4 py-2 text-sm font-semibold text-ink"
-                onClick={() => setSupportOpen(false)}
-                disabled={supportSending}
-              >
-                Annuler
+                {supportSending ? "Envoi..." : "Envoyer le probleme"}
               </button>
             </div>
           </div>
