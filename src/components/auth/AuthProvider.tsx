@@ -4,6 +4,7 @@ import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { onAuthStateChanged, signOut, type User } from "firebase/auth";
 import { firebaseAuth, firebaseDb } from "@/lib/firebase/client";
 import { setCartUser } from "@/lib/cart";
+import { doc, serverTimestamp, setDoc } from "firebase/firestore";
 import { classifyMemberEmail, findMemberByUser } from "@/lib/members";
 
 type AuthContextValue = {
@@ -44,13 +45,33 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const member = await findMemberByUser(firebaseDb, nextUser);
         if (member) {
           const emailMatch = classifyMemberEmail(member.data, String(nextUser.email ?? ""));
-          if (emailMatch === "secondary") {
+          const memberAuthUid = String((member.data.auth as { uid?: unknown } | undefined)?.uid ?? "").trim();
+          const authUidMatchesMember = member.id === nextUser.uid || memberAuthUid === nextUser.uid;
+          if (emailMatch === "secondary" && !authUidMatchesMember) {
             setCartUser(null);
             await signOut(firebaseAuth);
             setRole(null);
             setMemberId(null);
             setLoading(false);
             return;
+          }
+          if (emailMatch !== "primary" && authUidMatchesMember && nextUser.email) {
+            const primaryEmail = nextUser.email.trim().toLowerCase();
+            const storedEmails = Array.isArray(member.data.emails)
+              ? member.data.emails.map((item) => String(item ?? "").trim().toLowerCase()).filter(Boolean)
+              : [];
+            const emails = [primaryEmail, ...storedEmails.filter((item) => item !== primaryEmail)];
+            await setDoc(
+              doc(firebaseDb, "members", member.id),
+              {
+                email: primaryEmail,
+                emails,
+                accessEmails: emails,
+                auth: { uid: nextUser.uid, role: member.role },
+                updatedAt: serverTimestamp(),
+              },
+              { merge: true },
+            ).catch(() => undefined);
           }
           setMemberId(member.id);
           setCartUser(member.id);
