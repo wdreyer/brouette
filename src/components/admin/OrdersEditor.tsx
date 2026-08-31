@@ -12,6 +12,11 @@ import {
 } from "firebase/firestore";
 import { firebaseDb } from "@/lib/firebase/client";
 import { useAuth } from "@/components/auth/AuthProvider";
+import {
+  buildOrderTrendPoints,
+  parseOrderTrendDateTime,
+  type OrderTrendPoint,
+} from "@/lib/orderTrends";
 
 type Order = {
   id: string;
@@ -46,14 +51,6 @@ type Producer = {
   name?: string;
 };
 
-type TrendPoint = {
-  key: string;
-  label: string;
-  orders: number;
-  revenue: number;
-  items: number;
-};
-
 type Distribution = {
   id: string;
   dates?: { toDate: () => Date }[];
@@ -63,18 +60,8 @@ function formatMoney(amount: number) {
   return amount.toFixed(2).replace(".", ",");
 }
 
-function dateKey(date: Date) {
-  return date.toISOString().slice(0, 10);
-}
-
 function parseSaleDateTime(raw?: string | null) {
-  const value = String(raw ?? "").trim();
-  if (!value) return Number.POSITIVE_INFINITY;
-  const isoCandidate = new Date(`${value}T00:00:00.000Z`);
-  if (!Number.isNaN(isoCandidate.getTime())) return isoCandidate.getTime();
-  const fallback = new Date(value);
-  if (!Number.isNaN(fallback.getTime())) return fallback.getTime();
-  return Number.POSITIVE_INFINITY;
+  return parseOrderTrendDateTime(raw);
 }
 
 function ChartCard({
@@ -83,7 +70,7 @@ function ChartCard({
   valueKey,
 }: {
   title: string;
-  series: TrendPoint[];
+  series: OrderTrendPoint[];
   valueKey: "orders" | "revenue" | "items";
 }) {
   const values = series.map((point) => point[valueKey]);
@@ -254,47 +241,16 @@ export default function OrdersEditor() {
   }, [orderItems]);
 
   const trends = useMemo(() => {
-    const totalsByDate = new Map<string, { members: Set<string>; revenue: number; items: number }>();
-
-    orders.forEach((order) => {
-      const lines = orderItems[order.id] ?? [];
-      const byDate = new Map<string, { revenue: number; items: number }>();
-      lines.forEach((line) => {
-        const key = String(line.saleDateKey ?? "");
-        if (!key) return;
-        const current = byDate.get(key) ?? { revenue: 0, items: 0 };
-        current.revenue += Number(line.lineTotal ?? 0);
-        current.items += Number(line.quantity ?? 0);
-        byDate.set(key, current);
-      });
-      const memberKey = order.memberId ? String(order.memberId) : `order:${order.id}`;
-      byDate.forEach((dateTotals, key) => {
-        const current = totalsByDate.get(key) ?? { members: new Set<string>(), revenue: 0, items: 0 };
-        current.members.add(memberKey);
-        current.revenue += dateTotals.revenue;
-        current.items += dateTotals.items;
-        totalsByDate.set(key, current);
-      });
+    return buildOrderTrendPoints({
+      distributionDates: distributions.flatMap((distribution) =>
+        (distribution.dates ?? []).slice(0, 3).map((d) => d.toDate()).filter(Boolean),
+      ),
+      orders: orders.map((order) => ({
+        id: order.id,
+        memberId: order.memberId,
+        items: orderItems[order.id] ?? [],
+      })),
     });
-
-    const recentDates = distributions
-      .flatMap((distribution) => (distribution.dates ?? []).slice(0, 3).map((d) => d.toDate()).filter(Boolean))
-      .sort((a, b) => a.getTime() - b.getTime())
-      .slice(-6);
-
-    const points: TrendPoint[] = recentDates.map((date, index) => {
-      const key = dateKey(date);
-      const totals = totalsByDate.get(key);
-      return {
-        key: `${key}-${index}`,
-        label: date.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" }),
-        orders: totals?.members.size ?? 0,
-        revenue: totals?.revenue ?? 0,
-        items: totals?.items ?? 0,
-      };
-    });
-
-    return points;
   }, [orders, orderItems, distributions]);
 
   const openedOrder = useMemo(
