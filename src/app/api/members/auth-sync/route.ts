@@ -11,11 +11,12 @@ import {
 export const runtime = "nodejs";
 
 type SyncPayload = {
-  action?: "sync" | "delete";
+  action?: "sync" | "delete" | "password";
   memberId?: string;
   email?: string;
   emails?: string[];
   role?: string;
+  password?: string;
 };
 
 function errorCode(error: unknown) {
@@ -157,6 +158,104 @@ async function syncMember(payload: SyncPayload) {
   return NextResponse.json({ ok: true, createdAuthUser });
 }
 
+async function setMemberPassword(payload: SyncPayload) {
+  const memberId = String(payload.memberId ?? "").trim();
+  const password = String(payload.password ?? "");
+  const emails = normalizeMemberEmails(payload.emails, payload.email);
+  const email = emails[0] ?? "";
+  const role = normalizeMemberRole(payload.role);
+
+  if (!memberId) {
+    return NextResponse.json({ ok: false, error: "Adherent manquant." }, { status: 400 });
+  }
+  if (password.length < 6) {
+    return NextResponse.json(
+      { ok: false, error: "Le mot de passe doit contenir au moins 6 caracteres." },
+      { status: 400 },
+    );
+  }
+  if (!email) {
+    return NextResponse.json({ ok: false, error: "Email principal manquant." }, { status: 400 });
+  }
+
+  const conflict = await ensureEmailAvailable(memberId, email);
+  if (conflict) {
+    return NextResponse.json({ ok: false, error: conflict }, { status: 409 });
+  }
+
+  const db = getAdminDb();
+  const auth = getAdminAuth();
+  const memberRef = db.collection("members").doc(memberId);
+  const memberSnap = await memberRef.get();
+  const existingData = memberSnap.exists ? memberSnap.data() ?? {} : {};
+  const authData = existingData.auth as { uid?: unknown } | undefined;
+  const authUid = String(authData?.uid ?? memberId).trim() || memberId;
+  const now = FieldValue.serverTimestamp();
+  let createdAuthUser = false;
+
+  try {
+    await auth.updateUser(authUid, {
+      email,
+      password,
+      disabled: false,
+    });
+  } catch (error) {
+    const code = errorCode(error);
+    if (code === "auth/user-not-found") {
+      await auth.createUser({
+        uid: authUid,
+        email,
+        password,
+        emailVerified: false,
+        disabled: false,
+      });
+      createdAuthUser = true;
+    } else if (code === "auth/email-already-exists") {
+      return NextResponse.json(
+        { ok: false, error: "Cet email est deja utilise par un autre compte de connexion." },
+        { status: 409 },
+      );
+    } else if (code === "auth/invalid-email") {
+      return NextResponse.json({ ok: false, error: "Adresse email invalide." }, { status: 400 });
+    } else if (code === "auth/invalid-password") {
+      return NextResponse.json({ ok: false, error: "Mot de passe invalide." }, { status: 400 });
+    } else {
+      throw error;
+    }
+  }
+
+  await Promise.all([
+    memberRef.set(
+      {
+        email,
+        emails,
+        accessEmails: emails,
+        auth: {
+          uid: authUid,
+          role,
+          mustChangePassword: false,
+          passwordUpdatedAt: now,
+        },
+        updatedAt: now,
+      },
+      { merge: true },
+    ),
+    db.collection("memberAccess").doc(authUid).set(
+      {
+        uid: authUid,
+        memberId,
+        role,
+        email,
+        accessEmails: emails,
+        updatedAt: now,
+      },
+      { merge: true },
+    ),
+  ]);
+
+  return NextResponse.json({ ok: true, createdAuthUser });
+}
+
 async function deleteMember(payload: SyncPayload) {
   const memberId = String(payload.memberId ?? "").trim();
   if (!memberId) {
@@ -192,13 +291,20 @@ export async function POST(request: Request) {
     }
 
     const body = (await request.json()) as SyncPayload;
-    const action = body.action === "delete" ? "delete" : "sync";
+    const action = body.action === "delete" || body.action === "password" ? body.action : "sync";
 
     if (action === "delete") {
       if (requesterRole !== "admin") {
         return NextResponse.json({ ok: false, error: "Action reservee aux admins." }, { status: 403 });
       }
       return await deleteMember(body);
+    }
+
+    if (action === "password") {
+      if (requesterRole !== "admin") {
+        return NextResponse.json({ ok: false, error: "Action reservee aux admins." }, { status: 403 });
+      }
+      return await setMemberPassword(body);
     }
 
     if (requesterRole !== "admin" && requesterRole !== "referent") {

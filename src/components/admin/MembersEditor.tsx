@@ -190,6 +190,8 @@ export default function MembersEditor({
   const [editDraft, setEditDraft] = useState<Record<string, unknown>>({});
   const [editEmails, setEditEmails] = useState<string[]>([""]);
   const [editPhones, setEditPhones] = useState<string[]>([""]);
+  const [editPassword, setEditPassword] = useState("");
+  const [passwordSaving, setPasswordSaving] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [createFirstName, setCreateFirstName] = useState("");
   const [createLastName, setCreateLastName] = useState("");
@@ -428,7 +430,47 @@ export default function MembersEditor({
     setEditDraft(normalizedDraft);
     setEditEmails(emails);
     setEditPhones(phones);
+    setEditPassword("");
     setMessage("");
+  };
+
+  const setEditingMemberPassword = async () => {
+    if (!isAdmin || !editingId) return;
+    const password = editPassword.trim();
+    const normalizedEmails = uniqueList(editEmails).map((value) => value.toLowerCase());
+    if (password.length < 6) {
+      setMessage("Le mot de passe doit contenir au moins 6 caracteres.");
+      return;
+    }
+    if (!normalizedEmails.length) {
+      setMessage("Ajoute un email principal avant de definir le mot de passe.");
+      return;
+    }
+
+    try {
+      setPasswordSaving(true);
+      setMessage("");
+      const result = await syncMemberAuth({
+        action: "password",
+        memberId: editingId,
+        email: normalizedEmails[0],
+        emails: normalizedEmails,
+        role: getByPath(editDraft, "auth.role") ?? "member",
+        password,
+      });
+      setEditPassword("");
+      setMessage(
+        result.createdAuthUser
+          ? "Mot de passe defini. Compte de connexion cree et utilisable immediatement."
+          : "Mot de passe defini, utilisable immediatement.",
+      );
+      await load();
+    } catch (error) {
+      const err = error instanceof Error ? error.message : "Erreur inconnue.";
+      setMessage(err);
+    } finally {
+      setPasswordSaving(false);
+    }
   };
 
   const saveEdit = async () => {
@@ -488,6 +530,7 @@ export default function MembersEditor({
       setViewingEntry(null);
       setEditEmails([""]);
       setEditPhones([""]);
+      setEditPassword("");
       await load();
     } catch (error) {
       const err = error instanceof Error ? error.message : "Erreur inconnue.";
@@ -627,6 +670,7 @@ export default function MembersEditor({
       setViewingEntry((prev) => (prev?.id === editingId ? null : prev));
       setEditEmails([""]);
       setEditPhones([""]);
+      setEditPassword("");
       await load();
     } catch (error) {
       const err = error instanceof Error ? error.message : "Erreur inconnue.";
@@ -1244,6 +1288,35 @@ export default function MembersEditor({
                     </button>
                   </div>
                 </div>
+                {isAdmin ? (
+                  <div className="md:col-span-2 rounded-xl border border-clay/70 bg-stone/60 p-4">
+                    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">
+                      Mot de passe
+                    </p>
+                    <div className="mt-3 grid gap-3 md:grid-cols-[1fr_auto] md:items-end">
+                      <label className="flex flex-col gap-2 text-sm font-semibold text-ink/70">
+                        Nouveau mot de passe
+                        <input
+                          className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
+                          type="text"
+                          value={editPassword}
+                          onChange={(event) => setEditPassword(event.target.value)}
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        className="rounded-full bg-ink px-5 py-2 text-sm font-semibold text-stone disabled:opacity-50"
+                        onClick={() => setEditingMemberPassword().catch(() => undefined)}
+                        disabled={passwordSaving || deletingMember}
+                      >
+                        {passwordSaving ? "Mise a jour..." : "Definir"}
+                      </button>
+                    </div>
+                    <p className="mt-2 text-xs text-ink/60">
+                      Le mot de passe est actif immediatement. Aucun changement ne sera impose a la connexion.
+                    </p>
+                  </div>
+                ) : null}
                 <div className="md:col-span-2">
                   <p className="mb-2 text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">Téléphones</p>
                   <div className="flex flex-col gap-2">
@@ -1281,7 +1354,7 @@ export default function MembersEditor({
               <button
                 className="rounded-full bg-moss px-5 py-2 text-sm font-semibold text-white"
                 onClick={saveEdit}
-                disabled={deletingMember}
+                disabled={deletingMember || passwordSaving}
               >
                 Enregistrer
               </button>
@@ -1289,7 +1362,7 @@ export default function MembersEditor({
                 <button
                   className="rounded-full border border-ember/40 px-4 py-2 text-sm font-semibold text-ember disabled:opacity-50"
                   onClick={() => deleteEditingMember().catch(() => undefined)}
-                  disabled={deletingMember}
+                  disabled={deletingMember || passwordSaving}
                 >
                   {deletingMember ? "Suppression..." : "Supprimer"}
                 </button>
@@ -1297,7 +1370,7 @@ export default function MembersEditor({
               <button
                 className="rounded-full border border-ink/20 px-4 py-2 text-sm font-semibold"
                 onClick={() => setEditingId(null)}
-                disabled={deletingMember}
+                disabled={deletingMember || passwordSaving}
               >
                 Fermer
               </button>
