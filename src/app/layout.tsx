@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 import HeaderBar from "@/components/HeaderBar";
 import { AuthProvider } from "@/components/auth/AuthProvider";
 import AuthGate from "@/components/auth/AuthGate";
-import ProfileGate from "@/components/profile/ProfileGate";
 import { Toaster } from "sonner";
 import "./globals.css";
 
@@ -30,9 +29,7 @@ export default function RootLayout({
           <AuthProvider>
             <HeaderBar />
             <AuthGate>
-              <ProfileGate>
-                <main className="relative z-10">{children}</main>
-              </ProfileGate>
+              <main className="relative z-10">{children}</main>
             </AuthGate>
           </AuthProvider>
         </div>
