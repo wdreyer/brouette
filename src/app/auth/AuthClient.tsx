@@ -9,17 +9,6 @@ import { useAuth } from "@/components/auth/AuthProvider";
 import { findMemberByUser } from "@/lib/members";
 
 const ADHESION_EMAIL = "contact@labrouetteetlepanier.fr";
-const SUPPORT_SUBJECT = "Probleme de connexion La Brouette";
-const SUPPORT_BODY = `Bonjour,
-
-Je n'arrive pas a me connecter.
-
-Question :
-
-Email qui ne fonctionne pas :
-
-Nom / prenom :
-`;
 
 function secondaryEmailMessage(loginEmail: string, primaryEmail: string) {
   return primaryEmail
@@ -79,6 +68,13 @@ export default function AuthClient() {
   const [loading, setLoading] = useState(false);
   const [resetSent, setResetSent] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [supportOpen, setSupportOpen] = useState(false);
+  const [supportQuestion, setSupportQuestion] = useState("");
+  const [supportFailingEmail, setSupportFailingEmail] = useState("");
+  const [supportName, setSupportName] = useState("");
+  const [supportContactEmail, setSupportContactEmail] = useState("");
+  const [supportSending, setSupportSending] = useState(false);
+  const [supportMessage, setSupportMessage] = useState("");
 
   const redirectByRole = async (nextUser: typeof user) => {
     if (!nextUser) return;
@@ -159,6 +155,49 @@ export default function AuthClient() {
     }
   };
 
+  const openSupport = () => {
+    setSupportFailingEmail(email || resetEmail);
+    setSupportContactEmail(email || resetEmail);
+    setSupportMessage("");
+    setSupportOpen(true);
+  };
+
+  const handleSupportSend = async () => {
+    setSupportMessage("");
+    const question = supportQuestion.trim();
+    const failingEmail = supportFailingEmail.trim();
+    if (!question || !failingEmail) {
+      setSupportMessage("Renseigne la question et l'email qui ne fonctionne pas.");
+      return;
+    }
+
+    try {
+      setSupportSending(true);
+      const response = await fetch("/api/auth/support", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          question,
+          failingEmail,
+          name: supportName.trim(),
+          contactEmail: supportContactEmail.trim(),
+        }),
+      });
+      const result = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+      if (!response.ok || !result.ok) {
+        setSupportMessage(result.error || "Impossible d'envoyer le message.");
+        return;
+      }
+      setSupportQuestion("");
+      setSupportName("");
+      setSupportMessage("Message envoye. On revient vers toi rapidement.");
+    } catch (error) {
+      setSupportMessage(error instanceof Error ? error.message : "Impossible d'envoyer le message.");
+    } finally {
+      setSupportSending(false);
+    }
+  };
+
   return (
     <div className="mx-auto flex w-full max-w-lg flex-col gap-6 px-6 py-12">
       <section className="rounded-xl border border-clay/70 bg-white/95 p-6 shadow-card">
@@ -194,12 +233,14 @@ export default function AuthClient() {
             >
               Reinitialiser mon mot de passe
             </button>
-            <a
+            <button
+              type="button"
               className="rounded-full border border-ink/15 bg-white px-3 py-1.5 text-xs font-semibold text-ink"
-              href={`mailto:${ADHESION_EMAIL}?subject=${encodeURIComponent(SUPPORT_SUBJECT)}&body=${encodeURIComponent(SUPPORT_BODY)}`}
+              onClick={openSupport}
+              disabled={loading}
             >
               Envoyer un message d&apos;aide
-            </a>
+            </button>
           </div>
           <p className="mt-3 text-xs text-ink/60">
             Dans ton message, indique ta question et l&apos;email avec lequel la connexion echoue.
@@ -368,6 +409,90 @@ export default function AuthClient() {
           </a>
         </div>
       </section>
+
+      {supportOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 p-6">
+          <div className="w-full max-w-md rounded-2xl border border-clay/70 bg-white p-6 shadow-card">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-ink/60">
+                  Support connexion
+                </p>
+                <h2 className="mt-1 font-serif text-2xl text-ink">Demander de l&apos;aide</h2>
+              </div>
+              <button
+                type="button"
+                className="rounded-full border border-ink/15 px-3 py-1 text-sm font-semibold text-ink"
+                onClick={() => setSupportOpen(false)}
+                disabled={supportSending}
+              >
+                Fermer
+              </button>
+            </div>
+
+            <div className="mt-4 flex flex-col gap-3">
+              <label className="flex flex-col gap-1 text-sm font-semibold text-ink/70">
+                Question
+                <textarea
+                  className="min-h-24 rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
+                  value={supportQuestion}
+                  onChange={(event) => setSupportQuestion(event.target.value)}
+                  placeholder="Explique ce qui bloque..."
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-sm font-semibold text-ink/70">
+                Email qui ne fonctionne pas
+                <input
+                  className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
+                  type="email"
+                  value={supportFailingEmail}
+                  onChange={(event) => setSupportFailingEmail(event.target.value)}
+                  placeholder="ton@email.com"
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-sm font-semibold text-ink/70">
+                Nom / prenom
+                <input
+                  className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
+                  value={supportName}
+                  onChange={(event) => setSupportName(event.target.value)}
+                />
+              </label>
+              <label className="flex flex-col gap-1 text-sm font-semibold text-ink/70">
+                Email de contact
+                <input
+                  className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm"
+                  type="email"
+                  value={supportContactEmail}
+                  onChange={(event) => setSupportContactEmail(event.target.value)}
+                  placeholder="si different"
+                />
+              </label>
+            </div>
+
+            {supportMessage ? <p className="mt-3 text-sm text-ink/70">{supportMessage}</p> : null}
+
+            <div className="mt-5 flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                className="rounded-full bg-ink px-5 py-2 text-sm font-semibold text-stone disabled:opacity-50"
+                onClick={() => handleSupportSend().catch(() => undefined)}
+                disabled={supportSending}
+              >
+                {supportSending ? "Envoi..." : "Envoyer"}
+              </button>
+              <button
+                type="button"
+                className="rounded-full border border-ink/20 px-4 py-2 text-sm font-semibold text-ink"
+                onClick={() => setSupportOpen(false)}
+                disabled={supportSending}
+              >
+                Annuler
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
