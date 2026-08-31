@@ -9,6 +9,17 @@ import { useAuth } from "@/components/auth/AuthProvider";
 import { findMemberByUser } from "@/lib/members";
 
 const ADHESION_EMAIL = "contact@labrouetteetlepanier.fr";
+const SUPPORT_SUBJECT = "Probleme de connexion La Brouette";
+const SUPPORT_BODY = `Bonjour,
+
+Je n'arrive pas a me connecter.
+
+Question :
+
+Email qui ne fonctionne pas :
+
+Nom / prenom :
+`;
 
 function secondaryEmailMessage(loginEmail: string, primaryEmail: string) {
   return primaryEmail
@@ -163,6 +174,38 @@ export default function AuthClient() {
       </section>
 
       <section className="rounded-xl border border-clay/70 bg-white/95 p-6 shadow-card">
+        <div className="mb-5 rounded-xl border border-forest/20 bg-forest/5 p-4 text-sm text-ink/75">
+          <p className="font-semibold text-ink">Besoin d&apos;aide pour te connecter ?</p>
+          <p className="mt-2">
+            Utilise l&apos;email principal de ta fiche adherent. Si ton email a change, ou si le mot
+            de passe ne fonctionne pas, essaie d&apos;abord une reinitialisation.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              className="rounded-full border border-forest/30 bg-white px-3 py-1.5 text-xs font-semibold text-forest"
+              onClick={() => {
+                setResetEmail(email);
+                setMode("forgot");
+                setMessage("");
+                setResetSent(false);
+              }}
+              disabled={loading}
+            >
+              Reinitialiser mon mot de passe
+            </button>
+            <a
+              className="rounded-full border border-ink/15 bg-white px-3 py-1.5 text-xs font-semibold text-ink"
+              href={`mailto:${ADHESION_EMAIL}?subject=${encodeURIComponent(SUPPORT_SUBJECT)}&body=${encodeURIComponent(SUPPORT_BODY)}`}
+            >
+              Envoyer un message d&apos;aide
+            </a>
+          </div>
+          <p className="mt-3 text-xs text-ink/60">
+            Dans ton message, indique ta question et l&apos;email avec lequel la connexion echoue.
+          </p>
+        </div>
+
         {mode === "forgot" ? (
           <form
             className="mt-2 flex flex-col gap-4"
