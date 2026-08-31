@@ -110,6 +110,7 @@ export default function ProfileForm({
   const [passwordConfirm, setPasswordConfirm] = useState("");
   const [passwordMessage, setPasswordMessage] = useState("");
   const [passwordSaving, setPasswordSaving] = useState(false);
+  const [passwordOpen, setPasswordOpen] = useState(false);
 
   const editable = useMemo(() => (!requireEditToggle ? true : editing), [editing, requireEditToggle]);
   const isOwnProfile = useMemo(() => {
@@ -306,6 +307,11 @@ export default function ProfileForm({
     setDraft(initialDraft);
     setEditing(false);
     setMessage("");
+    setPasswordOpen(false);
+    setPasswordCurrent("");
+    setPasswordNext("");
+    setPasswordConfirm("");
+    setPasswordMessage("");
   };
 
   const savePassword = async () => {
@@ -340,6 +346,7 @@ export default function ProfileForm({
       setPasswordCurrent("");
       setPasswordNext("");
       setPasswordConfirm("");
+      setPasswordOpen(false);
       setPasswordMessage("Mot de passe mis à jour.");
     } catch (error) {
       const code = (error as { code?: string } | undefined)?.code ?? "";
@@ -571,10 +578,21 @@ export default function ProfileForm({
           )}
 
           {isOwnProfile ? (
-            <div className="rounded-xl border border-clay/70 bg-stone/50 p-4">
+            <div className="rounded-xl border border-clay/70 bg-stone/40 p-4">
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">Securite</p>
-              <p className="mt-1 text-sm text-ink/70">Changer mon mot de passe</p>
-              <div className="mt-3 grid gap-3 md:grid-cols-3">
+              <div className="mt-1 flex flex-wrap items-center justify-between gap-3">
+                <p className="text-sm text-ink/70">Optionnel</p>
+                <button
+                  type="button"
+                  className="rounded-full border border-ink/20 bg-white px-4 py-2 text-sm font-semibold text-ink shadow-sm"
+                  onClick={() => setPasswordOpen((open) => !open)}
+                >
+                  {passwordOpen ? "Masquer" : "Changer mon mot de passe"}
+                </button>
+              </div>
+              {passwordOpen ? (
+                <>
+                  <div className="mt-3 grid gap-3 md:grid-cols-3">
                 <label className="flex flex-col gap-1 text-xs font-semibold text-ink/70">
                   Mot de passe actuel
                   <input
@@ -603,7 +621,7 @@ export default function ProfileForm({
                   />
                 </label>
               </div>
-              <div className="mt-3 flex flex-wrap items-center gap-3">
+                  <div className="mt-3 flex flex-wrap items-center gap-3">
                 <button
                   className="w-fit rounded-full border border-ink/20 px-4 py-2 text-sm font-semibold text-ink"
                   onClick={savePassword}
@@ -612,7 +630,11 @@ export default function ProfileForm({
                   {passwordSaving ? "Mise à jour..." : "Mettre à jour le mot de passe"}
                 </button>
                 {passwordMessage ? <p className="text-sm text-moss">{passwordMessage}</p> : null}
-              </div>
+                  </div>
+                </>
+              ) : passwordMessage ? (
+                <p className="mt-3 text-sm text-moss">{passwordMessage}</p>
+              ) : null}
             </div>
           ) : null}
 
