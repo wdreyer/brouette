@@ -9,6 +9,7 @@ import { useAuth } from "@/components/auth/AuthProvider";
 import { findMemberByUser } from "@/lib/members";
 
 const ADHESION_EMAIL = "contact@labrouetteetlepanier.fr";
+const PASSWORD_RESET_EMAIL_KEY = "brouette:passwordResetEmail";
 
 function secondaryEmailMessage(loginEmail: string, primaryEmail: string) {
   return primaryEmail
@@ -109,6 +110,14 @@ export default function AuthClient() {
       }
 
       const cred = await signInWithEmailAndPassword(firebaseAuth, email, password);
+      const resetEmailMarker =
+        typeof window !== "undefined"
+          ? String(window.localStorage.getItem(PASSWORD_RESET_EMAIL_KEY) ?? "").trim().toLowerCase()
+          : "";
+      if (resetEmailMarker && resetEmailMarker === requestedEmail) {
+        await markPasswordUpdated(await cred.user.getIdToken(true));
+        window.localStorage.removeItem(PASSWORD_RESET_EMAIL_KEY);
+      }
       await redirectByRole(cred.user);
     } catch (error) {
       try {
@@ -143,6 +152,9 @@ export default function AuthClient() {
         url: `${window.location.origin}/auth`,
         handleCodeInApp: false,
       });
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(PASSWORD_RESET_EMAIL_KEY, resetEmail.trim().toLowerCase());
+      }
       setResetSent(true);
       setMessage(
         "Si ce compte existe, un lien de réinitialisation vient d'être envoyé. Vérifie aussi tes spams.",
@@ -490,4 +502,17 @@ export default function AuthClient() {
       ) : null}
     </div>
   );
+}
+
+async function markPasswordUpdated(idToken: string) {
+  const response = await fetch("/api/auth/password-updated", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${idToken}`,
+    },
+  });
+  const result = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+  if (!response.ok || !result.ok) {
+    throw new Error(result.error || "Validation du changement de mot de passe impossible.");
+  }
 }

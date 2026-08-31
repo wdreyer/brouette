@@ -7,7 +7,7 @@ import {
   updateEmail,
   updatePassword,
 } from "firebase/auth";
-import { deleteField, doc, getDoc, serverTimestamp, setDoc, updateDoc } from "firebase/firestore";
+import { deleteField, doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { firebaseAuth, firebaseDb } from "@/lib/firebase/client";
 import { reportError } from "@/lib/reportError";
@@ -61,6 +61,19 @@ function includesEmail(values: string[], email: string) {
   const target = email.trim().toLowerCase();
   if (!target) return false;
   return values.some((value) => value.trim().toLowerCase() === target);
+}
+
+async function markPasswordUpdated(idToken: string) {
+  const response = await fetch("/api/auth/password-updated", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${idToken}`,
+    },
+  });
+  const result = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+  if (!response.ok || !result.ok) {
+    throw new Error(result.error || "Validation du changement de mot de passe impossible.");
+  }
 }
 
 function toDateString(value: unknown) {
@@ -323,10 +336,7 @@ export default function ProfileForm({
       const credential = EmailAuthProvider.credential(currentEmail, passwordCurrent);
       await reauthenticateWithCredential(currentUser, credential);
       await updatePassword(currentUser, passwordNext);
-      await updateDoc(doc(firebaseDb, "members", userId), {
-        "auth.mustChangePassword": false,
-        "auth.passwordUpdatedAt": serverTimestamp(),
-      });
+      await markPasswordUpdated(await currentUser.getIdToken(true));
       setPasswordCurrent("");
       setPasswordNext("");
       setPasswordConfirm("");

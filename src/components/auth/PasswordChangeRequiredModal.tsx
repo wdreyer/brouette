@@ -2,11 +2,24 @@
 
 import { useEffect, useState } from "react";
 import { EmailAuthProvider, reauthenticateWithCredential, updatePassword } from "firebase/auth";
-import { doc, getDoc, serverTimestamp, updateDoc } from "firebase/firestore";
+import { doc, getDoc } from "firebase/firestore";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { firebaseAuth, firebaseDb } from "@/lib/firebase/client";
 
 const QUICK_LOGIN_BYPASS_KEY = "brouette:skipMustChangePasswordForEmail";
+
+async function markPasswordUpdated(idToken: string) {
+  const response = await fetch("/api/auth/password-updated", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${idToken}`,
+    },
+  });
+  const result = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+  if (!response.ok || !result.ok) {
+    throw new Error(result.error || "Validation du changement de mot de passe impossible.");
+  }
+}
 
 export default function PasswordChangeRequiredModal() {
   const { user, memberId } = useAuth();
@@ -85,10 +98,7 @@ export default function PasswordChangeRequiredModal() {
       const credential = EmailAuthProvider.credential(authUser.email, currentPassword);
       await reauthenticateWithCredential(authUser, credential);
       await updatePassword(authUser, nextPassword);
-      await updateDoc(doc(firebaseDb, "members", memberId), {
-        "auth.mustChangePassword": false,
-        "auth.passwordUpdatedAt": serverTimestamp(),
-      });
+      await markPasswordUpdated(await authUser.getIdToken(true));
       setOpen(false);
       setCurrentPassword("");
       setNextPassword("");
