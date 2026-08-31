@@ -256,6 +256,19 @@ export default function ProfileForm({
 
     try {
       await setDoc(doc(firebaseDb, "members", userId), payload, { merge: true });
+      if (isOwnProfile && user) {
+        await setDoc(
+          doc(firebaseDb, "memberAccess", user.uid),
+          {
+            uid: user.uid,
+            memberId: userId,
+            email: emails[0],
+            accessEmails: emails.map((item) => item.toLowerCase()),
+            updatedAt: serverTimestamp(),
+          },
+          { merge: true },
+        );
+      }
     } catch (error) {
       reportError("Echec de l'enregistrement du profil", error);
       setMessage("Echec de l'enregistrement du profil, réessaie.");

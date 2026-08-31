@@ -61,17 +61,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               ? member.data.emails.map((item) => String(item ?? "").trim().toLowerCase()).filter(Boolean)
               : [];
             const emails = [primaryEmail, ...storedEmails.filter((item) => item !== primaryEmail)];
-            await setDoc(
-              doc(firebaseDb, "members", member.id),
-              {
-                email: primaryEmail,
-                emails,
-                accessEmails: emails,
-                auth: { uid: nextUser.uid, role: member.role },
-                updatedAt: serverTimestamp(),
-              },
-              { merge: true },
-            ).catch(() => undefined);
+            await Promise.all([
+              setDoc(
+                doc(firebaseDb, "members", member.id),
+                {
+                  email: primaryEmail,
+                  emails,
+                  accessEmails: emails,
+                  auth: { uid: nextUser.uid, role: member.role },
+                  updatedAt: serverTimestamp(),
+                },
+                { merge: true },
+              ),
+              setDoc(
+                doc(firebaseDb, "memberAccess", nextUser.uid),
+                {
+                  uid: nextUser.uid,
+                  memberId: member.id,
+                  role: member.role,
+                  email: primaryEmail,
+                  accessEmails: emails,
+                  updatedAt: serverTimestamp(),
+                },
+                { merge: true },
+              ),
+            ]).catch(() => undefined);
           }
           setMemberId(member.id);
           setCartUser(member.id);
