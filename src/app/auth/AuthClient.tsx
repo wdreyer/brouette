@@ -72,7 +72,6 @@ export default function AuthClient() {
   const [supportQuestion, setSupportQuestion] = useState("");
   const [supportFailingEmail, setSupportFailingEmail] = useState("");
   const [supportName, setSupportName] = useState("");
-  const [supportContactEmail, setSupportContactEmail] = useState("");
   const [supportSending, setSupportSending] = useState(false);
   const [supportMessage, setSupportMessage] = useState("");
 
@@ -157,7 +156,6 @@ export default function AuthClient() {
 
   const openSupport = () => {
     setSupportFailingEmail(email || resetEmail);
-    setSupportContactEmail(email || resetEmail);
     setSupportMessage("");
     setSupportOpen(true);
   };
@@ -180,7 +178,6 @@ export default function AuthClient() {
           question,
           failingEmail,
           name: supportName.trim(),
-          contactEmail: supportContactEmail.trim(),
         }),
       });
       const result = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string };
@@ -262,7 +259,6 @@ export default function AuthClient() {
                 type="email"
                 value={resetEmail}
                 onChange={(event) => setResetEmail(event.target.value)}
-                placeholder="ton@email.com"
                 autoComplete="email"
               />
             </label>
@@ -442,7 +438,6 @@ export default function AuthClient() {
                   className="min-h-28 rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm outline-none focus:border-forest/60"
                   value={supportQuestion}
                   onChange={(event) => setSupportQuestion(event.target.value)}
-                  placeholder="Explique ce qui bloque, par exemple le message affiche ou l'etape ou ca coince."
                 />
               </label>
               <div className="grid gap-3 sm:grid-cols-2">
@@ -453,28 +448,17 @@ export default function AuthClient() {
                     type="email"
                     value={supportFailingEmail}
                     onChange={(event) => setSupportFailingEmail(event.target.value)}
-                    placeholder="ton@email.com"
                   />
                 </label>
                 <label className="flex flex-col gap-1 text-sm font-semibold text-ink/70">
-                  Email de contact
+                  Nom / prenom <span className="text-xs font-normal text-ink/45">optionnel</span>
                   <input
                     className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm outline-none focus:border-forest/60"
-                    type="email"
-                    value={supportContactEmail}
-                    onChange={(event) => setSupportContactEmail(event.target.value)}
-                    placeholder="si different"
+                    value={supportName}
+                    onChange={(event) => setSupportName(event.target.value)}
                   />
                 </label>
               </div>
-              <label className="flex flex-col gap-1 text-sm font-semibold text-ink/70">
-                Nom / prenom
-                <input
-                  className="rounded-xl border border-ink/20 bg-white px-3 py-2 text-sm outline-none focus:border-forest/60"
-                  value={supportName}
-                  onChange={(event) => setSupportName(event.target.value)}
-                />
-              </label>
 
               {supportMessage ? (
                 <p className="rounded-xl border border-clay/70 bg-stone px-3 py-2 text-sm text-ink/70">

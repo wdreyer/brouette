@@ -11,7 +11,6 @@ type SupportPayload = {
   question?: string;
   failingEmail?: string;
   name?: string;
-  contactEmail?: string;
 };
 
 function normalize(value: unknown) {
@@ -45,7 +44,6 @@ export async function POST(request: Request) {
     const question = normalize(body.question);
     const failingEmail = normalizeEmail(body.failingEmail);
     const name = normalize(body.name);
-    const contactEmail = normalizeEmail(body.contactEmail);
 
     if (!question || !failingEmail) {
       return NextResponse.json(
@@ -53,7 +51,7 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     }
-    if (!isEmail(failingEmail) || (contactEmail && !isEmail(contactEmail))) {
+    if (!isEmail(failingEmail)) {
       return NextResponse.json({ ok: false, error: "Adresse email invalide." }, { status: 400 });
     }
 
@@ -71,14 +69,12 @@ export async function POST(request: Request) {
       `Question : ${question}`,
       `Email qui ne fonctionne pas : ${failingEmail}`,
       `Nom / prenom : ${name || "-"}`,
-      `Email de contact : ${contactEmail || "-"}`,
     ].join("\n");
     const htmlContent = [
       "<h2>Probleme de connexion</h2>",
       supportLine("Question", question),
       supportLine("Email qui ne fonctionne pas", failingEmail),
       supportLine("Nom / prenom", name),
-      supportLine("Email de contact", contactEmail),
     ].join("");
 
     const response = await fetch("https://api.brevo.com/v3/smtp/email", {
@@ -90,7 +86,7 @@ export async function POST(request: Request) {
       body: JSON.stringify({
         sender: { email: senderEmail, name: senderName },
         to: SUPPORT_RECIPIENTS,
-        replyTo: contactEmail ? { email: contactEmail, name: name || undefined } : undefined,
+        replyTo: { email: failingEmail, name: name || undefined },
         subject,
         htmlContent,
         textContent,
