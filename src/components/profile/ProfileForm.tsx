@@ -336,7 +336,7 @@ export default function ProfileForm({
       const credential = EmailAuthProvider.credential(currentEmail, passwordCurrent);
       await reauthenticateWithCredential(currentUser, credential);
       await updatePassword(currentUser, passwordNext);
-      await markPasswordUpdated(await currentUser.getIdToken(true));
+      await markPasswordUpdated(await currentUser.getIdToken(true)).catch(() => undefined);
       setPasswordCurrent("");
       setPasswordNext("");
       setPasswordConfirm("");

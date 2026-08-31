@@ -135,7 +135,7 @@ async function syncMember(payload: SyncPayload) {
       auth: {
         uid: authUid,
         role,
-        mustChangePassword: createdAuthUser ? true : Boolean(authData?.mustChangePassword ?? false),
+        mustChangePassword: false,
       },
       updatedAt: now,
     },

@@ -138,7 +138,7 @@ export async function POST(request: Request) {
       email,
       emails: [email],
       accessEmails: [email],
-      auth: { uid, role: "member", mustChangePassword: true },
+      auth: { uid, role: "member", mustChangePassword: false },
       membershipStatus: "active",
       membershipPaymentStatus: "to_pay",
       membershipJoinedAt: null,
