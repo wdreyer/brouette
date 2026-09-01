@@ -67,6 +67,22 @@ type MemberDoc = {
   emails?: string[];
 };
 
+type ProducerDoc = {
+  id: string;
+  name?: string;
+  email?: string;
+};
+
+type OrderDoc = {
+  id: string;
+  memberId?: string;
+  createdAt?: Timestamp;
+  memberSnapshot?: {
+    email?: string | null;
+    name?: string | null;
+  };
+};
+
 type TargetKind =
   | "all-members-and-coop"
   | "adherents-only"
@@ -152,6 +168,8 @@ export default function MessagesEditor() {
   const [templates, setTemplates] = useState<TemplateDoc[]>([]);
   const [contactLists, setContactLists] = useState<ContactListDoc[]>([]);
   const [members, setMembers] = useState<MemberDoc[]>([]);
+  const [producers, setProducers] = useState<ProducerDoc[]>([]);
+  const [orders, setOrders] = useState<OrderDoc[]>([]);
   const [loading, setLoading] = useState(true);
 
   // UI
@@ -198,11 +216,13 @@ export default function MessagesEditor() {
   const load = async () => {
     setLoading(true);
     try {
-      const [messagesSnap, templatesSnap, listsSnap, membersSnap] = await Promise.all([
+      const [messagesSnap, templatesSnap, listsSnap, membersSnap, producersSnap, ordersSnap] = await Promise.all([
         getDocs(query(collection(firebaseDb, "messages"), orderBy("createdAt", "desc"), limit(120))),
         getDocs(query(collection(firebaseDb, "messageTemplates"), orderBy("updatedAt", "desc"), limit(120))),
         getDocs(query(collection(firebaseDb, "contactLists"), orderBy("updatedAt", "desc"), limit(100))),
         getDocs(collection(firebaseDb, "members")),
+        getDocs(collection(firebaseDb, "producers")),
+        getDocs(query(collection(firebaseDb, "orders"), orderBy("createdAt", "desc"), limit(1000))),
       ]);
       setMessages(messagesSnap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<MessageDoc, "id">) })));
       setTemplates(templatesSnap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<TemplateDoc, "id">) })));
@@ -228,6 +248,8 @@ export default function MessagesEditor() {
           };
         }),
       );
+      setProducers(producersSnap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<ProducerDoc, "id">) })));
+      setOrders(ordersSnap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<OrderDoc, "id">) })));
     } catch (err) {
       setStatusMsg({ type: "error", text: err instanceof Error ? err.message : "Erreur de chargement." });
     } finally {
@@ -237,7 +259,6 @@ export default function MessagesEditor() {
 
   useEffect(() => {
     load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ─── Derived ─────────────────────────────────────────────────────────────────
@@ -277,19 +298,64 @@ export default function MessagesEditor() {
 
   const estimatedTargetCount = useMemo(() => {
     const allow = (m: MemberDoc) => draft.includeInactive || !isInactive(m.membershipStatus);
-    if (draft.target === "all-members-and-coop") return members.filter(allow).length;
-    if (draft.target === "adherents-only") return adherents.filter(allow).length;
-    if (draft.target === "coop-only") return coopMembers.filter(allow).length;
+    const countMemberEmails = (rows: MemberDoc[]) => {
+      const emails = new Set<string>();
+      rows.filter(allow).forEach((member) => {
+        [normalizeEmail(member.email), ...(member.emails ?? []).map(normalizeEmail)]
+          .filter(Boolean)
+          .forEach((email) => emails.add(email));
+      });
+      return emails.size;
+    };
+
+    if (draft.target === "all-members-and-coop") return countMemberEmails(members);
+    if (draft.target === "adherents-only") return countMemberEmails(adherents);
+    if (draft.target === "coop-only") return countMemberEmails(coopMembers);
     if (draft.target === "selected-adherents")
-      return draft.selectedMemberIds
-        .map((id) => adherents.find((m) => m.id === id))
-        .filter((m): m is MemberDoc => Boolean(m))
-        .filter(allow).length;
+      return countMemberEmails(
+        draft.selectedMemberIds
+          .map((id) => adherents.find((m) => m.id === id))
+          .filter((m): m is MemberDoc => Boolean(m)),
+      );
     if (draft.target === "contact-list" && draft.contactListId) {
-      return contactLists.find((l) => l.id === draft.contactListId)?.memberIds?.length ?? 0;
+      const memberIds = contactLists.find((l) => l.id === draft.contactListId)?.memberIds ?? [];
+      return countMemberEmails(
+        memberIds
+          .map((id) => members.find((m) => m.id === id))
+          .filter((m): m is MemberDoc => Boolean(m)),
+      );
+    }
+    if (draft.target === "producers") {
+      return new Set(producers.map((producer) => normalizeEmail(producer.email)).filter(Boolean)).size;
+    }
+    if (draft.target === "recent-buyers") {
+      const since = new Date();
+      since.setDate(since.getDate() - draft.recentDays);
+      const memberById = new Map(members.map((member) => [member.id, member]));
+      const emails = new Set<string>();
+
+      orders.forEach((order) => {
+        const createdAt = order.createdAt?.toDate?.();
+        if (!createdAt || createdAt < since) return;
+
+        const memberId = String(order.memberId ?? "").trim();
+        if (memberId) {
+          const member = memberById.get(memberId);
+          if (!member || !allow(member)) return;
+          [normalizeEmail(member.email), ...(member.emails ?? []).map(normalizeEmail)]
+            .filter(Boolean)
+            .forEach((email) => emails.add(email));
+          return;
+        }
+
+        const snapshotEmail = normalizeEmail(order.memberSnapshot?.email);
+        if (snapshotEmail) emails.add(snapshotEmail);
+      });
+
+      return emails.size;
     }
     return null;
-  }, [adherents, coopMembers, contactLists, draft, members]);
+  }, [adherents, contactLists, coopMembers, draft, members, orders, producers]);
 
   const canSendMain = useMemo(() => {
     if (!draft.subject.trim() || !draft.content.trim()) return false;
