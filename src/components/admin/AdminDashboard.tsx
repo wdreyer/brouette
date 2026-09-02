@@ -9,7 +9,6 @@ import { reportError } from "@/lib/reportError";
 import {
   distributionStatusLabel,
   distributionLabel,
-  isOpenStatus,
   isPlannedStatus,
   pickOpenDistribution,
   resolveDistributionStatus,
@@ -220,7 +219,6 @@ export default function AdminDashboard({
   focusMode = false,
   showExtendedStats = false,
 }: AdminDashboardProps) {
-  if (focusMode) return <div>{children}</div>;
   const { effectiveMemberId, effectiveRole } = useAuth();
 
   const [loading, setLoading] = useState(true);
@@ -260,6 +258,10 @@ export default function AdminDashboard({
   const [calendarModal, setCalendarModal] = useState<CalendarRow | null>(null);
 
   useEffect(() => {
+    if (focusMode) {
+      return;
+    }
+
     const load = async () => {
       const now = new Date();
       const season = seasonRanges(now);
@@ -543,7 +545,7 @@ export default function AdminDashboard({
       reportError("Echec du chargement du tableau de bord", error);
       setLoading(false);
     });
-  }, [effectiveMemberId]);
+  }, [effectiveMemberId, focusMode]);
 
   const roleLabel = effectiveRole === "admin" ? "Admin" : effectiveRole === "referent" ? "Référent" : "Membre";
   const fullName = `${viewer?.firstName ?? ""} ${viewer?.lastName ?? ""}`.trim();
@@ -554,6 +556,10 @@ export default function AdminDashboard({
   );
   const nextDate = saleDates[0] ?? null;
   const daysBefore = daysUntil(nextDate);
+  const saleScopeLabel = activeDistribution ? distributionLabel(activeDistribution) : "Aucune vente";
+  const saleDateSummary = saleDates.length
+    ? saleDates.map((date) => date.toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit" })).join(" ; ")
+    : "-";
 
   const referentRows = useMemo(() => {
     if (effectiveRole !== "referent" || !effectiveMemberId) return [];
@@ -566,7 +572,7 @@ export default function AdminDashboard({
     return `/admin/vente/gerer?distributionId=${encodeURIComponent(activeDistribution.id)}&producerIds=${encodeURIComponent(
       producerIds,
     )}&idx=0`;
-  }, [activeDistribution?.id, referentRows]);
+  }, [activeDistribution, referentRows]);
 
   const visualCalendarRows = useMemo(() => {
     return [...calendarRows]
@@ -590,6 +596,8 @@ export default function AdminDashboard({
       previous: previous?.trim() || String(new Date().getFullYear() - 1),
     };
   }, [seasonSummary.label]);
+
+  if (focusMode) return <div>{children}</div>;
 
   return (
     <div className="flex flex-col gap-4">
@@ -638,26 +646,24 @@ export default function AdminDashboard({
 
       <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <article className="rounded-[10px] border border-clay/90 bg-stone p-4">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-ink/60">Adhérents actifs</p>
-          <p className="mt-2 text-2xl font-semibold text-ink">{formatNumber(seasonSummary.activeMembersCurrent)}</p>
-          <p className="mt-2 text-xs text-ink/65">Saison {seasonSummary.label}</p>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-ink/60">Membres commandeurs</p>
+          <p className="mt-2 text-2xl font-semibold text-ink">{formatNumber(saleStats.orderingMembers)}</p>
+          <p className="mt-2 text-xs text-ink/65">Membres uniques sur cette vente</p>
         </article>
         <article className="rounded-[10px] border border-clay/90 bg-stone p-4">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-ink/60">Commandes saison</p>
-          <p className="mt-2 text-2xl font-semibold text-ink">{formatNumber(seasonSummary.ordersCurrent)}</p>
-          <p className="mt-2 text-xs text-ink/65">Saison {seasonSummary.label}</p>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-ink/60">Commandes vente</p>
+          <p className="mt-2 text-2xl font-semibold text-ink">{formatNumber(saleStats.orderCount)}</p>
+          <p className="mt-2 text-xs text-ink/65">{saleScopeLabel}</p>
         </article>
         <article className="rounded-[10px] border border-clay/90 bg-stone p-4">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-ink/60">CA cumule saison</p>
-          <p className="mt-2 text-2xl font-semibold text-ink">{formatMoney(seasonSummary.revenueCurrent)} EUR</p>
-          <p className="mt-2 text-xs text-ink/65">Saison {seasonSummary.label}</p>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-ink/60">CA vente</p>
+          <p className="mt-2 text-2xl font-semibold text-ink">{formatMoney(saleStats.revenue)} EUR</p>
+          <p className="mt-2 text-xs text-ink/65">Total des commandes non annulees</p>
         </article>
         <article className="rounded-[10px] border border-clay/90 bg-stone p-4">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-ink/60">Distributions exercice</p>
-          <p className="mt-2 text-2xl font-semibold text-ink">{formatNumber(seasonSummary.distributionsTotal)}</p>
-          <p className="mt-2 text-xs text-ink/65">
-            Passees: {seasonSummary.distributionsPast} - A venir: {seasonSummary.distributionsUpcoming}
-          </p>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-ink/60">Dates de retrait</p>
+          <p className="mt-2 text-2xl font-semibold text-ink">{formatNumber(saleDates.length)}</p>
+          <p className="mt-2 text-xs text-ink/65">{saleDateSummary}</p>
         </article>
       </section>
 
