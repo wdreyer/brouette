@@ -646,9 +646,9 @@ export default function AdminDashboard({
 
       <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <article className="rounded-[10px] border border-clay/90 bg-stone p-4">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-ink/60">Membres commandeurs</p>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-ink/60">Adhérents ayant commandé</p>
           <p className="mt-2 text-2xl font-semibold text-ink">{formatNumber(saleStats.orderingMembers)}</p>
-          <p className="mt-2 text-xs text-ink/65">Membres uniques sur cette vente</p>
+          <p className="mt-2 text-xs text-ink/65">Adhérents uniques sur cette vente</p>
         </article>
         <article className="rounded-[10px] border border-clay/90 bg-stone p-4">
           <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-ink/60">Commandes vente</p>
