@@ -381,6 +381,7 @@ export async function POST(request: Request) {
         stats: {
           recipients: sendResult.sent,
           sentAt: now,
+          recipientsList: recipients.map((row) => row.email),
           recipientsPreview: recipients.slice(0, 25).map((row) => row.email),
           provider: "brevo",
           providerMessageIds: sendResult.providerMessageIds,
