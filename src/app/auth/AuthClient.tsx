@@ -133,19 +133,21 @@ export default function AuthClient() {
   const handleForgotPassword = async () => {
     setMessage("");
     setResetSent(false);
-    if (!resetEmail.trim()) {
+    const normalizedResetEmail = resetEmail.trim().toLowerCase();
+    if (!normalizedResetEmail) {
       setMessage("Renseigne ton email.");
       return;
     }
     setLoading(true);
     try {
-      await sendPasswordResetEmail(firebaseAuth, resetEmail.trim(), {
+      await sendPasswordResetEmail(firebaseAuth, normalizedResetEmail, {
         url: `${window.location.origin}/auth`,
         handleCodeInApp: false,
       });
+      setResetEmail(normalizedResetEmail);
       setResetSent(true);
       setMessage(
-        "Si ce compte existe, un lien de réinitialisation vient d'être envoyé. Vérifie aussi tes spams.",
+        "Si ce compte existe, un lien de réinitialisation vient d'être envoyé. Vérifie aussi tes spams. Si rien n'arrive, signale le problème de connexion.",
       );
     } catch (error) {
       setMessage(authErrorMessage(error));

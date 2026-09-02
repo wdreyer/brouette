@@ -18,6 +18,7 @@ import {
 import { firebaseDb } from "@/lib/firebase/client";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { readBalanceTrackingEnabled } from "@/lib/balanceTracking";
+import { DEFAULT_MEMBER_PASSWORD } from "@/lib/memberAuthSync";
 
 type FieldType = "text" | "number" | "boolean" | "date" | "datetime";
 
@@ -191,6 +192,7 @@ export default function MembersEditor({
   const [editEmails, setEditEmails] = useState<string[]>([""]);
   const [editPhones, setEditPhones] = useState<string[]>([""]);
   const [editPassword, setEditPassword] = useState("");
+  const [lastSetPassword, setLastSetPassword] = useState("");
   const [passwordSaving, setPasswordSaving] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [createFirstName, setCreateFirstName] = useState("");
@@ -431,6 +433,7 @@ export default function MembersEditor({
     setEditEmails(emails);
     setEditPhones(phones);
     setEditPassword("");
+    setLastSetPassword("");
     setMessage("");
   };
 
@@ -458,6 +461,7 @@ export default function MembersEditor({
         role: getByPath(editDraft, "auth.role") ?? "member",
         password,
       });
+      setLastSetPassword(password);
       setEditPassword("");
       setMessage(
         result.createdAuthUser
@@ -1312,8 +1316,24 @@ export default function MembersEditor({
                         {passwordSaving ? "Mise a jour..." : "Definir"}
                       </button>
                     </div>
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        className="rounded-full border border-forest/30 bg-white px-3 py-1.5 text-xs font-semibold text-forest"
+                        onClick={() => setEditPassword(DEFAULT_MEMBER_PASSWORD)}
+                        disabled={passwordSaving || deletingMember}
+                      >
+                        Utiliser brouette2026
+                      </button>
+                      {lastSetPassword ? (
+                        <span className="rounded-full bg-forest/10 px-3 py-1.5 text-xs font-semibold text-forest">
+                          Dernier mot de passe defini : {lastSetPassword}
+                        </span>
+                      ) : null}
+                    </div>
                     <p className="mt-2 text-xs text-ink/60">
-                      Le mot de passe est actif immediatement. Aucun changement ne sera impose a la connexion.
+                      Les mots de passe existants ne sont pas lisibles. L&apos;admin peut definir un nouveau mot de passe,
+                      actif immediatement, sans changement impose a la connexion.
                     </p>
                   </div>
                 ) : null}
