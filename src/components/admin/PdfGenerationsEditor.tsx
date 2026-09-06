@@ -13,6 +13,12 @@ function notifiedKey(distributionId: string, producerId: string) {
 type Order = {
   id: string;
   memberId?: string | null;
+  memberSnapshot?: {
+    email?: string | null;
+    firstName?: string | null;
+    lastName?: string | null;
+    name?: string | null;
+  };
 };
 
 type Member = {
@@ -165,12 +171,11 @@ function sanitizeFileNamePart(value: string) {
     .slice(0, 80);
 }
 
-function memberLabel(member?: Member | null, fallback = "Adhérent inconnu") {
-  if (!member) return fallback;
-  const first = String(member.firstName ?? "").trim();
-  const last = String(member.lastName ?? "").trim();
+function memberLabel(member?: Member | null, fallback = "Adhérent inconnu", snapshot?: Order["memberSnapshot"]) {
+  const first = String(member?.firstName ?? snapshot?.firstName ?? "").trim();
+  const last = String(member?.lastName ?? snapshot?.lastName ?? "").trim();
   const label = `${last.toUpperCase()} ${first}`.trim();
-  return label || fallback;
+  return label || String(snapshot?.name ?? "").trim() || String(snapshot?.email ?? "").trim() || fallback;
 }
 
 function isStatusOpenOrFinished(status?: string) {
@@ -543,7 +548,7 @@ export default function PdfGenerationsEditor() {
     orders.forEach((order) => {
       const memberId = String(order.memberId ?? "unknown");
       const member = order.memberId ? membersById[order.memberId] : undefined;
-      const memberName = memberLabel(member);
+      const memberName = memberLabel(member, "Adhérent inconnu", order.memberSnapshot);
       const items = orderItemsByOrder[order.id] ?? [];
       items.forEach((item) => {
         if (String(item.saleDateKey ?? "").trim() !== targetDateKey) return;

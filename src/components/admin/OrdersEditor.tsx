@@ -22,6 +22,12 @@ type Order = {
   id: string;
   memberId?: string;
   distributionId?: string | null;
+  memberSnapshot?: {
+    email?: string | null;
+    firstName?: string | null;
+    lastName?: string | null;
+    name?: string | null;
+  };
   totals?: { totalAmount?: number; itemCount?: number };
   createdAt?: { toDate: () => Date };
 };
@@ -58,6 +64,20 @@ type Distribution = {
 
 function formatMoney(amount: number) {
   return amount.toFixed(2).replace(".", ",");
+}
+
+function orderMemberName(order: Order, member?: Member) {
+  const memberName = member ? `${member.firstName ?? ""} ${member.lastName ?? ""}`.replace(/\s+/g, " ").trim() : "";
+  const snapshotName =
+    String(order.memberSnapshot?.name ?? "").trim() ||
+    `${String(order.memberSnapshot?.firstName ?? "").trim()} ${String(order.memberSnapshot?.lastName ?? "").trim()}`
+      .replace(/\s+/g, " ")
+      .trim();
+  return memberName || snapshotName || String(order.memberSnapshot?.email ?? "").trim() || "-";
+}
+
+function orderMemberEmail(order: Order, member?: Member) {
+  return member?.email || String(order.memberSnapshot?.email ?? "").trim() || "-";
 }
 
 function parseSaleDateTime(raw?: string | null) {
@@ -461,9 +481,9 @@ export default function OrdersEditor() {
                           {order.createdAt?.toDate ? order.createdAt.toDate().toLocaleDateString("fr-FR") : "-"}
                         </td>
                         <td className="px-4 py-3">
-                          {member ? `${member.firstName ?? ""} ${member.lastName ?? ""}`.trim() : "-"}
+                          {orderMemberName(order, member)}
                         </td>
-                        <td className="px-4 py-3">{member?.email ?? "-"}</td>
+                        <td className="px-4 py-3">{orderMemberEmail(order, member)}</td>
                         <td className="px-4 py-3">
                           {formatMoney(order.totals?.totalAmount ?? 0)} EUR
                         </td>
@@ -550,15 +570,13 @@ export default function OrdersEditor() {
               <div>
                 <p className="text-[11px] uppercase tracking-[0.16em] text-ink/55">Adhérent</p>
                 <p className="font-semibold">
-                  {openedOrder.memberId
-                    ? `${members[openedOrder.memberId]?.firstName ?? ""} ${members[openedOrder.memberId]?.lastName ?? ""}`.trim() || "-"
-                    : "-"}
+                  {orderMemberName(openedOrder, openedOrder.memberId ? members[openedOrder.memberId] : undefined)}
                 </p>
               </div>
               <div>
                 <p className="text-[11px] uppercase tracking-[0.16em] text-ink/55">Email</p>
                 <p className="font-semibold">
-                  {openedOrder.memberId ? members[openedOrder.memberId]?.email ?? "-" : "-"}
+                  {orderMemberEmail(openedOrder, openedOrder.memberId ? members[openedOrder.memberId] : undefined)}
                 </p>
               </div>
               <div>

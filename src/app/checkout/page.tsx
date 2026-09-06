@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { addDoc, collection, getDocs, serverTimestamp } from "firebase/firestore";
+import { addDoc, collection, doc, getDoc, getDocs, serverTimestamp } from "firebase/firestore";
 import { useRouter } from "next/navigation";
 import { CartItem, clearCart, getCart, removeFromCart, updateCartItem } from "@/lib/cart";
 import { firebaseDb } from "@/lib/firebase/client";
@@ -152,6 +152,14 @@ export default function CheckoutPage() {
 
       const memberMatch = memberId ? { id: memberId } : await findMemberByUser(firebaseDb, user);
       const orderMemberId = memberMatch?.id ?? user.uid;
+      const memberSnap = orderMemberId ? await getDoc(doc(firebaseDb, "members", orderMemberId)) : null;
+      const memberData = memberSnap?.exists()
+        ? (memberSnap.data() as { firstName?: string; lastName?: string; email?: string; emails?: string[] })
+        : null;
+      const memberEmail = String(memberData?.email ?? memberData?.emails?.[0] ?? user.email ?? "").trim() || null;
+      const memberFirstName = String(memberData?.firstName ?? "").trim();
+      const memberLastName = String(memberData?.lastName ?? "").trim();
+      const memberName = `${memberFirstName} ${memberLastName}`.replace(/\s+/g, " ").trim() || null;
 
       const distSnap = await getDocs(collection(firebaseDb, "distributionDates"));
       const distItems = distSnap.docs.map((docSnap) => ({
@@ -196,7 +204,10 @@ export default function CheckoutPage() {
           estimatedTotalAmount: freshTotal + freshWeightedEstimateTotal,
         },
         memberSnapshot: {
-          email: user.email ?? null,
+          email: memberEmail,
+          firstName: memberFirstName || null,
+          lastName: memberLastName || null,
+          name: memberName,
         },
         createdAt: serverTimestamp(),
         validatedAt: serverTimestamp(),
