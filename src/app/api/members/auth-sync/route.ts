@@ -19,13 +19,20 @@ type SyncPayload = {
   password?: string;
 };
 
+type RequesterContext = {
+  uid: string;
+  memberId: string;
+  email?: string | null;
+  role: MemberRole;
+};
+
 function errorCode(error: unknown) {
   return error && typeof error === "object" && "code" in error
     ? String((error as { code?: string }).code ?? "")
     : "";
 }
 
-async function readRequesterRole(request: Request): Promise<MemberRole | null> {
+async function readRequesterContext(request: Request): Promise<RequesterContext | null> {
   const header = request.headers.get("authorization") ?? "";
   const match = header.match(/^Bearer\s+(.+)$/i);
   if (!match) return null;
@@ -41,9 +48,13 @@ async function readRequesterRole(request: Request): Promise<MemberRole | null> {
     : null;
   const memberData = memberSnap?.exists ? memberSnap.data() ?? {} : {};
 
-  return normalizeMemberRole(
-    (memberData.auth as { role?: unknown } | undefined)?.role ?? accessData.role,
-  );
+  const role = normalizeMemberRole((memberData.auth as { role?: unknown } | undefined)?.role ?? accessData.role);
+  return {
+    uid: decoded.uid,
+    memberId: resolvedMemberId,
+    email: decoded.email ?? null,
+    role,
+  };
 }
 
 async function ensureEmailAvailable(memberId: string, email: string) {
@@ -256,7 +267,7 @@ async function setMemberPassword(payload: SyncPayload) {
   return NextResponse.json({ ok: true, createdAuthUser });
 }
 
-async function deleteMember(payload: SyncPayload) {
+async function deleteMember(payload: SyncPayload, requester: RequesterContext) {
   const memberId = String(payload.memberId ?? "").trim();
   if (!memberId) {
     return NextResponse.json({ ok: false, error: "Adherent manquant." }, { status: 400 });
@@ -268,12 +279,32 @@ async function deleteMember(payload: SyncPayload) {
   const memberSnap = await memberRef.get();
   const memberData = memberSnap.exists ? memberSnap.data() ?? {} : {};
   const authUid = String((memberData.auth as { uid?: unknown } | undefined)?.uid ?? memberId).trim() || memberId;
+  const memberEmail = String(memberData.email ?? "").trim();
+  const memberEmails = Array.isArray(memberData.emails)
+    ? memberData.emails.map((item) => String(item ?? "").trim()).filter(Boolean)
+    : [];
 
   try {
     await auth.deleteUser(authUid);
   } catch (error) {
     if (errorCode(error) !== "auth/user-not-found") throw error;
   }
+
+  await db.collection("adminAuditLogs").add({
+    action: "member.delete",
+    requester,
+    target: {
+      collection: "members",
+      memberId,
+      authUid,
+      firstName: memberData.firstName ?? null,
+      lastName: memberData.lastName ?? null,
+      email: memberEmail || null,
+      emails: memberEmails,
+      role: (memberData.auth as { role?: unknown } | undefined)?.role ?? null,
+    },
+    createdAt: FieldValue.serverTimestamp(),
+  });
 
   await Promise.all([
     db.collection("memberAccess").doc(authUid).delete(),
@@ -285,8 +316,8 @@ async function deleteMember(payload: SyncPayload) {
 
 export async function POST(request: Request) {
   try {
-    const requesterRole = await readRequesterRole(request);
-    if (!requesterRole) {
+    const requester = await readRequesterContext(request);
+    if (!requester) {
       return NextResponse.json({ ok: false, error: "Session admin invalide." }, { status: 401 });
     }
 
@@ -294,20 +325,20 @@ export async function POST(request: Request) {
     const action = body.action === "delete" || body.action === "password" ? body.action : "sync";
 
     if (action === "delete") {
-      if (requesterRole !== "admin") {
+      if (requester.role !== "admin") {
         return NextResponse.json({ ok: false, error: "Action reservee aux admins." }, { status: 403 });
       }
-      return await deleteMember(body);
+      return await deleteMember(body, requester);
     }
 
     if (action === "password") {
-      if (requesterRole !== "admin") {
+      if (requester.role !== "admin") {
         return NextResponse.json({ ok: false, error: "Action reservee aux admins." }, { status: 403 });
       }
       return await setMemberPassword(body);
     }
 
-    if (requesterRole !== "admin" && requesterRole !== "referent") {
+    if (requester.role !== "admin" && requester.role !== "referent") {
       return NextResponse.json({ ok: false, error: "Action reservee aux admins." }, { status: 403 });
     }
 
