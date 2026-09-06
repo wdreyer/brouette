@@ -83,6 +83,7 @@ export default function SettingsEditor({
               membershipPaymentStatus: "to_pay",
               membershipJoinedAt: null,
               membershipPaymentDate: null,
+              membershipNumber: null,
               updatedAt: serverTimestamp(),
             },
             { merge: true },
@@ -155,7 +156,7 @@ export default function SettingsEditor({
             <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-ink/55">Adhésions</p>
             <h3 className="mt-1 text-lg font-semibold text-ink">Basculement annuel</h3>
             <p className="mt-1 text-sm text-ink/65">
-              Remettre tous les adhérents à "Non payé" pour démarrer une nouvelle année.
+              Remettre tous les adhérents à &quot;Non payé&quot; pour démarrer une nouvelle année.
             </p>
             {membershipMessage ? <p className="mt-2 text-xs text-ink/70">{membershipMessage}</p> : null}
           </div>

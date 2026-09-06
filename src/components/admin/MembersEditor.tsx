@@ -1008,6 +1008,10 @@ export default function MembersEditor({
                 </p>
               </div>
               <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">N° adhésion</p>
+                <p className="text-sm text-ink">{displayValue(getByPath(viewingEntry.data, "membershipNumber"))}</p>
+              </div>
+              <div>
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">Rôle</p>
                 <p className="text-sm text-ink">
                   {formatRole(getByPath(viewingEntry.data, "auth.role") ?? "member")}
@@ -1164,6 +1168,7 @@ export default function MembersEditor({
                     "membershipStatus",
                     "membershipPaymentStatus",
                     "membershipJoinedAt",
+                    "membershipNumber",
                   ].includes(field.path);
                   const fieldDisabled = adminOnlyField && !isAdmin;
                   const paymentDateLocked =
