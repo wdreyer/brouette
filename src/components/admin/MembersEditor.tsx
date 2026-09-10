@@ -150,6 +150,13 @@ function formatMembershipPaymentStatus(value: unknown) {
   return displayValue(value);
 }
 
+function membershipPaymentStatusKey(value: unknown) {
+  const normalized = String(value ?? "").toLowerCase();
+  if (["up_to_date", "a_jour", "a-jour", "paid", "ok"].includes(normalized)) return "up_to_date";
+  if (["to_pay", "a_payer", "a-payer", "unpaid", "due", ""].includes(normalized)) return "to_pay";
+  return normalized;
+}
+
 function formatDateValue(value: unknown) {
   if (value instanceof Timestamp) return value.toDate().toLocaleDateString("fr-FR");
   if (value instanceof Date) return value.toLocaleDateString("fr-FR");
@@ -222,6 +229,7 @@ export default function MembersEditor({
   const [createSubmitting, setCreateSubmitting] = useState(false);
   const [filter, setFilter] = useState("");
   const [filterStatus, setFilterStatus] = useState<string>("all");
+  const [filterPaymentStatus, setFilterPaymentStatus] = useState<string>("all");
   const [filterRole, setFilterRole] = useState<string>("all");
   const [sortKey, setSortKey] = useState<string>("lastName");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
@@ -774,8 +782,10 @@ export default function MembersEditor({
     const term = filter.trim().toLowerCase();
     return docs.filter((entry) => {
       const status = String(getByPath(entry.data, "membershipStatus") ?? "");
+      const paymentStatus = membershipPaymentStatusKey(getByPath(entry.data, "membershipPaymentStatus"));
       const role = String(getByPath(entry.data, "auth.role") ?? "member") || "member";
       if (filterStatus !== "all" && status !== filterStatus) return false;
+      if (filterPaymentStatus !== "all" && paymentStatus !== filterPaymentStatus) return false;
       if (viewMode === "adherents" && role !== "member") return false;
       if (viewMode === "coopMembers" && role !== "admin" && role !== "referent") return false;
       if (filterRole !== "all" && role !== filterRole) return false;
@@ -788,13 +798,14 @@ export default function MembersEditor({
         ...(toList(getByPath(entry.data, "emails")) ?? []),
         ...(toList(getByPath(entry.data, "phones")) ?? []),
         getByPath(entry.data, "membershipStatus"),
+        getByPath(entry.data, "membershipPaymentStatus"),
         getByPath(entry.data, "auth.role"),
       ]
         .map((value) => (value ? String(value).toLowerCase() : ""))
         .join(" ");
       return haystack.includes(term);
     });
-  }, [docs, filter, filterRole, filterStatus, viewMode]);
+  }, [docs, filter, filterPaymentStatus, filterRole, filterStatus, viewMode]);
 
   const sortedDocs = useMemo(() => {
     const items = [...filteredDocs];
@@ -882,6 +893,15 @@ export default function MembersEditor({
         </select>
         <select
           className="rounded-full border border-ink/20 bg-white px-3 py-2 text-sm"
+          value={filterPaymentStatus}
+          onChange={(event) => setFilterPaymentStatus(event.target.value)}
+        >
+          <option value="all">Toutes les adhésions</option>
+          <option value="up_to_date">Payé</option>
+          <option value="to_pay">Non payé</option>
+        </select>
+        <select
+          className="rounded-full border border-ink/20 bg-white px-3 py-2 text-sm"
           value={filterRole}
           onChange={(event) => setFilterRole(event.target.value)}
         >
@@ -896,6 +916,7 @@ export default function MembersEditor({
           onClick={() => {
             setFilter("");
             setFilterStatus("all");
+            setFilterPaymentStatus("all");
             setFilterRole(viewMode === "adherents" ? "member" : "all");
           }}
         >
