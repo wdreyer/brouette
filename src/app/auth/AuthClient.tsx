@@ -213,10 +213,12 @@ export default function AuthClient() {
 
       <section className="rounded-xl border border-clay/70 bg-white/95 p-6 shadow-card">
         <div className="mb-5 rounded-xl border border-forest/20 bg-forest/5 p-4 text-sm text-ink/75">
-          <p className="font-semibold text-ink">Probleme de connexion ?</p>
+          <p className="font-semibold text-ink">Vous rencontrez des difficultés pour vous connecter ?</p>
           <p className="mt-2">
-            Utilise l&apos;email principal de ta fiche adherent. Si ton email a change, ou si le mot
-            de passe ne fonctionne pas, essaie d&apos;abord une reinitialisation.
+            Utilisez l&apos;adresse e-mail principale enregistrée sur votre fiche adhérent.
+            <br />
+            Si votre adresse e-mail a changé ou si votre mot de passe n&apos;est plus reconnu, commencez par
+            réinitialiser votre mot de passe.
           </p>
           <div className="mt-3 flex flex-wrap gap-2">
             <button
@@ -230,7 +232,7 @@ export default function AuthClient() {
               }}
               disabled={loading}
             >
-              Reinitialiser mon mot de passe
+              Réinitialiser mon mot de passe
             </button>
             <button
               type="button"
@@ -238,11 +240,11 @@ export default function AuthClient() {
               onClick={openSupport}
               disabled={loading}
             >
-              Signaler un probleme de connexion
+              Signaler un problème de connexion
             </button>
           </div>
           <p className="mt-3 text-xs text-ink/60">
-            Dans ton message, indique ta question et l&apos;email avec lequel la connexion echoue.
+            Lors de votre message, merci de préciser votre demande ainsi que l&apos;adresse e-mail utilisée lors de la tentative de connexion.
           </p>
         </div>
 
