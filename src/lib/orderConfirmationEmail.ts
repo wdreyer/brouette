@@ -68,7 +68,7 @@ export function buildOrderConfirmationTextContent(params: OrderConfirmationParam
   const lines = [
     "Bonjour,",
     "",
-    "Ta commande a bien ete validee.",
+    "Nous vous remercions pour votre commande et celle-ci a bien été enregistrée :",
     "",
     `Commande: ${params.orderId}`,
     `Total commande: ${formatMoney(params.totalAmount)} EUR`,
@@ -79,7 +79,7 @@ export function buildOrderConfirmationTextContent(params: OrderConfirmationParam
     lines.push(`Total estime: ~${formatMoney(params.totalAmount + params.weightedEstimateTotal)} EUR`);
   }
 
-  lines.push("", "Details:");
+  lines.push("", "Détail de la commande :");
   groupItems(params.items, params.producerLabels).forEach((dateGroup) => {
     lines.push("", dateGroup.label);
     dateGroup.items.forEach((item) => {
@@ -92,7 +92,27 @@ export function buildOrderConfirmationTextContent(params: OrderConfirmationParam
     });
   });
 
-  lines.push("", "Paiement sur place lors du retrait.", "", "A bientot,", "La Brouette");
+  lines.push(
+    "",
+    "Pour régler vos achats, merci d’alimenter votre compte Coop’ :",
+    "- soit par chèque à envoyer à l’adresse postale",
+    "  La Brouette et le Panier",
+    "  105 Avenue des Thézières",
+    "  74440 TANINGES",
+    "- soit par virement bancaire :",
+    "  Nom du bénéficiaire : ASS DECL LA BROUETTE ET LE PANIER",
+    "  IBAN : FR7616807000253175041821394",
+    "  BIC : CCBPFRPPGRE",
+    "",
+    "Afin de faciliter la gestion comptable de l'association, nous vous remercions de privilégier des versements par multiples de 25 €.",
+    "Veillez également à maintenir un solde positif sur votre compte afin de couvrir le montant de vos commandes.",
+    "",
+    "Nous aurons le plaisir de vous retrouver lors de la ou des distributions, entre 19h00 et 20h00.",
+    "Pensez à noter les dates de retrait dans votre agenda.",
+    "",
+    "À très bientôt,",
+    "L'équipe de La Brouette et le Panier",
+  );
   return lines.join("\n");
 }
 
@@ -102,9 +122,9 @@ export function buildOrderConfirmationHtmlContent(params: OrderConfirmationParam
 
   return `
     <div style="font-family:Arial,sans-serif;color:#2f2a24;font-size:15px;line-height:1.5">
-      <h1 style="font-family:Georgia,serif;font-size:26px;margin:0 0 12px">Commande confirmee</h1>
+      <h1 style="font-family:Georgia,serif;font-size:26px;margin:0 0 12px">Commande confirmée</h1>
       <p>Bonjour,</p>
-      <p>Ta commande a bien ete validee.</p>
+      <p>Nous vous remercions pour votre commande et celle-ci a bien été enregistrée :</p>
       <div style="margin:18px 0;padding:14px;border:1px solid #ddd1bd;background:#fbf8f1">
         <p style="margin:0 0 6px"><strong>Total commande:</strong> ${formatMoney(params.totalAmount)} EUR</p>
         ${
@@ -141,8 +161,30 @@ export function buildOrderConfirmationHtmlContent(params: OrderConfirmationParam
             </table>`
         )
         .join("")}
-      <p style="margin-top:18px">Paiement sur place lors du retrait.</p>
-      <p>A bientot,<br/>La Brouette</p>
+      <div style="margin-top:22px;padding:14px;border:1px solid #ddd1bd;background:#fbf8f1">
+        <p style="margin:0 0 10px"><strong>Pour régler vos achats, merci d’alimenter votre compte Coop’ :</strong></p>
+        <p style="margin:0 0 8px">
+          - soit par chèque à envoyer à l’adresse postale<br/>
+          <span style="display:inline-block;margin-left:18px">
+            La Brouette et le Panier<br/>
+            105 Avenue des Thézières<br/>
+            74440 TANINGES
+          </span>
+        </p>
+        <p style="margin:0">
+          - soit par virement bancaire :<br/>
+          <span style="display:inline-block;margin-left:18px">
+            Nom du bénéficiaire : ASS DECL LA BROUETTE ET LE PANIER<br/>
+            IBAN : FR7616807000253175041821394<br/>
+            BIC : CCBPFRPPGRE
+          </span>
+        </p>
+      </div>
+      <p>Afin de faciliter la gestion comptable de l'association, nous vous remercions de privilégier des versements par multiples de 25 €.</p>
+      <p>Veillez également à maintenir un solde positif sur votre compte afin de couvrir le montant de vos commandes.</p>
+      <p>Nous aurons le plaisir de vous retrouver lors de la ou des distributions, entre 19h00 et 20h00.<br/>
+      Pensez à noter les dates de retrait dans votre agenda.</p>
+      <p>À très bientôt,<br/>L'équipe de La Brouette et le Panier</p>
     </div>`;
 }
 

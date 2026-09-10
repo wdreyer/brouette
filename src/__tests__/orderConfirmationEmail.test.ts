@@ -9,11 +9,14 @@ describe("orderConfirmationEmail", () => {
   it("renders the sample order without crashing and includes the totals", () => {
     const html = buildOrderConfirmationHtmlContent(SAMPLE_ORDER_CONFIRMATION);
 
-    expect(html).toContain("Commande confirmee");
+    expect(html).toContain("Commande confirmée");
     expect(html).toContain("15,20 EUR");
     expect(html).toContain("10,00 EUR");
     expect(html).toContain("Pommes Golden");
     expect(html).toContain("Le Verger d'Automne");
+    expect(html).toContain("compte Coop’");
+    expect(html).toContain("105 Avenue des Thézières");
+    expect(html).toContain("FR7616807000253175041821394");
   });
 
   it("escapes html found in producer or product names", () => {
@@ -59,5 +62,7 @@ describe("orderConfirmationEmail", () => {
 
     expect(text).toContain("Total commande: 15,20 EUR");
     expect(text).toContain("Total estime: ~25,20 EUR");
+    expect(text).toContain("À très bientôt,");
+    expect(text).toContain("multiples de 25 €");
   });
 });
