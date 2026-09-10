@@ -103,6 +103,8 @@ type ProducerDistributionRow = {
 
 type ProducerMatrixColumn = {
   key: string;
+  productLabel: string;
+  variantLabel: string;
   title: string;
   unitPrice: number;
 };
@@ -113,6 +115,11 @@ type ProducerMatrixRow = {
   quantitiesByProduct: Record<string, number>;
   totalQuantity: number;
 };
+
+function matrixProductTitle(label: string, variantLabel: string) {
+  const cleanedVariant = variantLabel.trim();
+  return cleanedVariant || label.trim() || "Produit";
+}
 
 type ProducerMatrix = {
   producerId: string;
@@ -569,9 +576,15 @@ export default function PdfGenerationsEditor() {
         const variantLabel = String(item.variantLabel ?? "").trim();
         const unitPrice = Number(item.unitPrice ?? 0);
         const productKey = [String(item.productId ?? ""), label, variantLabel, String(unitPrice)].join("||");
-        const title = variantLabel ? `${label}\n${variantLabel}` : label;
+        const title = matrixProductTitle(label, variantLabel);
         if (!producerBucket.columns.has(productKey)) {
-          producerBucket.columns.set(productKey, { key: productKey, title, unitPrice });
+          producerBucket.columns.set(productKey, {
+            key: productKey,
+            productLabel: label,
+            variantLabel,
+            title,
+            unitPrice,
+          });
         }
 
         if (!producerBucket.rowsByMember.has(memberId)) {
@@ -591,9 +604,21 @@ export default function PdfGenerationsEditor() {
 
     return Array.from(producerBuckets.entries())
       .map(([producerId, bucket]) => {
-        const columns = Array.from(bucket.columns.values()).sort((a, b) =>
-          a.title.localeCompare(b.title, "fr", { sensitivity: "base" }),
-        );
+        const titleCounts = Array.from(bucket.columns.values()).reduce<Record<string, number>>((acc, column) => {
+          const key = column.title.toLocaleLowerCase("fr");
+          acc[key] = (acc[key] ?? 0) + 1;
+          return acc;
+        }, {});
+        const columns = Array.from(bucket.columns.values())
+          .map((column) => {
+            const duplicateTitle = titleCounts[column.title.toLocaleLowerCase("fr")] > 1;
+            if (!duplicateTitle || !column.variantLabel.trim()) return column;
+            return {
+              ...column,
+              title: `${column.variantLabel}\n${column.productLabel}`,
+            };
+          })
+          .sort((a, b) => a.title.localeCompare(b.title, "fr", { sensitivity: "base" }));
         const rows = Array.from(bucket.rowsByMember.values())
           .sort((a, b) => a.memberLabel.localeCompare(b.memberLabel, "fr", { sensitivity: "base" }))
           .filter((row) => row.totalQuantity > 0);
