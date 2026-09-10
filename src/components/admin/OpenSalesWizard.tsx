@@ -21,10 +21,8 @@ import { toast } from "sonner";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { firebaseDb } from "@/lib/firebase/client";
 import {
-  computeCloseAt,
   distributionLabel,
   isArchivedStatus,
-  isDistributionExpired,
   isFinishedStatus,
   isOpenStatus,
   isPlannedStatus,
@@ -374,31 +372,7 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
       getDocs(collectionGroup(firebaseDb, "variants")),
     ]);
 
-    let distSnap = initialDistSnap;
-    let distItems = distSnap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Distribution, "id">) }));
-
-    const autoClosed = distItems.filter((distribution) =>
-      isOpenStatus(distribution.status) && isDistributionExpired(distribution),
-    );
-
-    if (autoClosed.length > 0) {
-      for (const distribution of autoClosed) {
-        await sanitizeOfferItemsForDistribution(distribution);
-      }
-      const batch = writeBatch(firebaseDb);
-      autoClosed.forEach((distribution) => {
-        batch.update(doc(firebaseDb, "distributionDates", distribution.id), {
-          status: "finished",
-          closedAt: Timestamp.now(),
-        });
-      });
-      await batch.commit();
-      distSnap = await getDocs(collection(firebaseDb, "distributionDates"));
-      distItems = distSnap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Distribution, "id">) }));
-      setMessage(
-        `${autoClosed.length} vente(s) fermée(s) automatiquement (date limite dépassée).`,
-      );
-    }
+    const distItems = initialDistSnap.docs.map((d) => ({ id: d.id, ...(d.data() as Omit<Distribution, "id">) }));
 
     distItems.sort(
       (a, b) =>
@@ -1200,26 +1174,19 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
       }
 
       const batch = writeBatch(firebaseDb);
-      const firstDate = toDate(targetDistribution.dates?.[0]);
-      const closeDate = computeCloseAt(firstDate ?? null);
-      const closeAt = closeDate ? Timestamp.fromDate(closeDate) : null;
       otherOpenDistributions.forEach((distribution) => {
         batch.update(doc(firebaseDb, "distributionDates", distribution.id), { status: "finished" });
       });
       batch.update(doc(firebaseDb, "distributionDates", targetDistribution.id), {
         status: "open",
         openedAt: Timestamp.now(),
-        closeAt,
+        closeAt: null,
       });
       await batch.commit();
       await load();
-      const closeWarning = firstDate && !closeDate
-        ? " Attention : la date de vente est trop proche pour calculer une fermeture automatique — pense à fermer la vente manuellement le moment venu."
-        : "";
       setMessage(
-        `Vente ouverte. ${offerSync.offersCreated} offres publiees pour ${offerSync.producersWithOffers} producteurs.${closeWarning}`,
+        `Vente ouverte. ${offerSync.offersCreated} offres publiees pour ${offerSync.producersWithOffers} producteurs.`,
       );
-      if (closeWarning) toast.warning(closeWarning.trim());
     } catch (error) {
       reportError("Echec de l'ouverture de la vente", error);
     } finally {
@@ -1272,7 +1239,7 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
             </h2>
             <p className="mt-2 text-sm text-ink/70">
               {openDistribution
-                ? `Ouverte le ${formatLongDate(toDate(openDistribution.openedAt))}${toDate(openDistribution.closeAt) ? ` - fermeture auto le ${formatLongDate(toDate(openDistribution.closeAt))} à 22h` : ""}.`
+                ? `Ouverte le ${formatLongDate(toDate(openDistribution.openedAt))}.`
                 : "La boutique est actuellement fermée."}
             </p>
             <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -1435,7 +1402,7 @@ export default function OpenSalesWizard({ mode = "overview" }: { mode?: SalesVie
             ) : null}
             {openDistribution ? (
               <span className="rounded-sm border border-ink/20 bg-ink/5 px-3 py-2 text-xs text-ink/70">
-                Ferme la vente en cours avant d'ouvrir celle-ci.
+                Ferme la vente en cours avant d&apos;ouvrir celle-ci.
               </span>
             ) : null}
           </div>

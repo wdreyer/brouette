@@ -63,16 +63,15 @@ export function distributionStatusSelectValue(status?: string): "planned" | "ope
 }
 
 export function isDistributionExpired(item?: DistributionLike | null, now = new Date()) {
-  const closeAt = item?.closeAt?.toDate?.();
-  if (!closeAt) return false;
-  return closeAt.getTime() <= now.getTime();
+  void item;
+  void now;
+  return false;
 }
 
 export function isDistributionOpenNow(item?: DistributionLike | null, now = new Date()) {
+  void now;
   if (!item) return false;
-  if (!isOpenStatus(item.status)) return false;
-  if (isDistributionExpired(item, now)) return false;
-  return true;
+  return isOpenStatus(item.status);
 }
 
 export function pickOpenDistribution<T extends DistributionLike>(items: T[]) {
@@ -86,19 +85,10 @@ export function pickOpenDistribution<T extends DistributionLike>(items: T[]) {
   })[openItems.length - 1];
 }
 
-/**
- * Calcule la fermeture automatique d'une vente : 10 jours avant la première
- * date, 22h. Retourne null si cette date de fermeture tombe déjà dans le
- * passé (dates trop proches) — dans ce cas la vente ne doit pas se fermer
- * automatiquement à une heure fictive, l'admin devra la fermer à la main.
- */
 export function computeCloseAt(firstDate: Date | null | undefined, now = new Date()): Date | null {
-  if (!firstDate) return null;
-  const closeDate = new Date(firstDate);
-  closeDate.setDate(closeDate.getDate() - 10);
-  closeDate.setHours(22, 0, 0, 0);
-  if (closeDate.getTime() <= now.getTime()) return null;
-  return closeDate;
+  void firstDate;
+  void now;
+  return null;
 }
 
 export function distributionLabel(item?: DistributionLike | null) {

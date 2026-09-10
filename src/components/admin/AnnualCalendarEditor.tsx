@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Timestamp, collection, doc, getDocs, setDoc, writeBatch } from "firebase/firestore";
 import { firebaseDb } from "@/lib/firebase/client";
 import {
-  computeCloseAt,
   distributionLabel,
   distributionStatusLabel,
   distributionStatusSelectValue,
@@ -237,20 +236,13 @@ export default function AnnualCalendarEditor() {
         status: nextStatus,
         updatedAt: Timestamp.now(),
       };
-      let closeWarning = "";
       if (nextStatus === "open") {
         payload.openedAt = Timestamp.now();
         payload.closedAt = null;
-        const firstDate = distribution.dates?.[0]?.toDate?.() ?? null;
-        const closeDate = computeCloseAt(firstDate);
-        payload.closeAt = closeDate ? Timestamp.fromDate(closeDate) : null;
-        if (firstDate && !closeDate) {
-          closeWarning =
-            " Attention : la date de vente est trop proche pour calculer une fermeture automatique — pense à fermer la vente manuellement.";
-        }
+        payload.closeAt = null;
       } else if (nextStatus === "finished") {
         payload.closedAt = Timestamp.now();
-        payload.closeAt = Timestamp.now();
+        payload.closeAt = null;
       } else {
         payload.openedAt = null;
         payload.closedAt = null;
@@ -260,7 +252,7 @@ export default function AnnualCalendarEditor() {
       setDistributions((prev) =>
         prev.map((item) => (item.id === distribution.id ? { ...item, status: nextStatus } : item)),
       );
-      setMessage(`Statut de la distribution mis à jour.${closeWarning}`);
+      setMessage("Statut de la distribution mis à jour.");
     } catch (error) {
       reportError("Impossible de mettre à jour le statut", error);
     } finally {

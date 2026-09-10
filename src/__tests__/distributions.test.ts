@@ -60,9 +60,9 @@ describe("isDistributionExpired", () => {
     expect(isDistributionExpired({ id: "d1", status: "open" })).toBe(false);
   });
 
-  it("retourne true si closeAt est passé", () => {
+  it("retourne false meme si closeAt est passe", () => {
     const past = new Date(Date.now() - 1000);
-    expect(isDistributionExpired({ id: "d1", closeAt: { toDate: () => past } })).toBe(true);
+    expect(isDistributionExpired({ id: "d1", closeAt: { toDate: () => past } })).toBe(false);
   });
 
   it("retourne false si closeAt est dans le futur", () => {
@@ -73,7 +73,7 @@ describe("isDistributionExpired", () => {
   it("utilise le now fourni en paramètre", () => {
     const date = new Date("2025-06-01");
     const dist = { id: "d1", closeAt: { toDate: () => new Date("2025-05-31") } };
-    expect(isDistributionExpired(dist, date)).toBe(true);
+    expect(isDistributionExpired(dist, date)).toBe(false);
     expect(isDistributionExpired(dist, new Date("2025-05-30"))).toBe(false);
   });
 });
@@ -93,11 +93,11 @@ describe("isDistributionOpenNow", () => {
     ).toBe(false);
   });
 
-  it("retourne false si ouvert mais expiré", () => {
+  it("retourne true si ouvert avec ancien closeAt depasse", () => {
     const past = new Date(Date.now() - 1000);
     expect(
       isDistributionOpenNow({ id: "d1", status: "open", closeAt: { toDate: () => past } }),
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it("retourne true si ouvert et non expiré", () => {
@@ -158,13 +158,13 @@ describe("pickOpenDistribution", () => {
     expect(pickOpenDistribution(items)?.id).toBe("d2");
   });
 
-  it("ignore les distributions ouvertes mais expirées", () => {
+  it("retourne une distribution ouverte meme avec ancien closeAt depasse", () => {
     const past = new Date(Date.now() - 1000);
     const items = [
       { id: "d1", status: "open", closeAt: { toDate: () => past } },
       { id: "d2", status: "planned" },
     ];
-    expect(pickOpenDistribution(items)).toBeNull();
+    expect(pickOpenDistribution(items)?.id).toBe("d1");
   });
 });
 
