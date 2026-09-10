@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { type ChangeEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   Timestamp,
   addDoc,
@@ -27,6 +27,11 @@ type MessageDoc = {
   subject?: string;
   status?: string;
   content?: string;
+  attachment?: {
+    name?: string;
+    size?: number | null;
+    type?: string | null;
+  } | null;
   createdAt?: Timestamp;
   stats?: {
     recipients?: number;
@@ -95,6 +100,13 @@ type TargetKind =
 
 type ActiveTab = "composer" | "templates" | "lists" | "history";
 
+type MessageAttachmentDraft = {
+  name: string;
+  content: string;
+  type: string | null;
+  size: number;
+};
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const BUILTIN_TEMPLATES = [
@@ -123,6 +135,8 @@ const TARGET_OPTIONS: { value: TargetKind; label: string; desc: string }[] = [
   { value: "contact-list", label: "Liste de diffusion", desc: "Utiliser une liste enregistree" },
   { value: "producers", label: "Producteurs", desc: "Tous les producteurs (email de la fiche producteur)" },
 ];
+
+const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -161,6 +175,24 @@ function getTargetLabel(target: TargetKind, listName?: string) {
   return TARGET_OPTIONS.find((o) => o.value === target)?.label ?? target;
 }
 
+function formatFileSize(bytes: number) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 Ko";
+  if (bytes < 1024 * 1024) return `${Math.ceil(bytes / 1024)} Ko`;
+  return `${(bytes / (1024 * 1024)).toFixed(1).replace(".", ",")} Mo`;
+}
+
+function readFileAsBase64(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const raw = String(reader.result ?? "");
+      resolve(raw.includes(",") ? raw.split(",").pop() ?? "" : raw);
+    };
+    reader.onerror = () => reject(reader.error ?? new Error("Lecture du fichier impossible."));
+    reader.readAsDataURL(file);
+  });
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function MessagesEditor() {
@@ -193,6 +225,9 @@ export default function MessagesEditor() {
   const [selectedTemplateKey, setSelectedTemplateKey] = useState("");
   const [quickTemplateName, setQuickTemplateName] = useState("");
   const [searchManualMembers, setSearchManualMembers] = useState("");
+  const [attachment, setAttachment] = useState<MessageAttachmentDraft | null>(null);
+  const [attachmentError, setAttachmentError] = useState("");
+  const attachmentInputRef = useRef<HTMLInputElement | null>(null);
 
   // Template editing
   const [editingTemplate, setEditingTemplate] = useState<{
@@ -392,6 +427,32 @@ export default function MessagesEditor() {
     }));
   };
 
+  const handleAttachmentChange = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0] ?? null;
+    setAttachmentError("");
+    setAttachment(null);
+
+    if (!file) return;
+    if (file.size > MAX_ATTACHMENT_BYTES) {
+      setAttachmentError(`Fichier trop lourd. Maximum ${formatFileSize(MAX_ATTACHMENT_BYTES)}.`);
+      event.target.value = "";
+      return;
+    }
+
+    try {
+      const content = await readFileAsBase64(file);
+      setAttachment({
+        name: file.name,
+        content,
+        type: file.type || null,
+        size: file.size,
+      });
+    } catch (error) {
+      setAttachmentError(error instanceof Error ? error.message : "Lecture du fichier impossible.");
+      event.target.value = "";
+    }
+  };
+
   const sendMessage = async (mode: "send" | "test") => {
     if (!draft.subject.trim() || !draft.content.trim()) {
       setStatusMsg({ type: "error", text: "Objet et contenu obligatoires." });
@@ -430,6 +491,14 @@ export default function MessagesEditor() {
             ? selectedTemplateKey.replace("custom:", "")
             : null,
           templateName: selectedTemplate?.name ?? null,
+          attachment: attachment
+            ? {
+                name: attachment.name,
+                content: attachment.content,
+                type: attachment.type,
+                size: attachment.size,
+              }
+            : null,
         }),
       });
       const result = (await response.json()) as {
@@ -459,6 +528,11 @@ export default function MessagesEditor() {
           type: "info",
           text: `${mode === "test" ? "Test envoyé." : "Message envoyé."} ${result.warning}`,
         });
+      }
+      if (mode === "send") {
+        setAttachment(null);
+        setAttachmentError("");
+        if (attachmentInputRef.current) attachmentInputRef.current.value = "";
       }
       await load();
     } catch (err) {
@@ -940,8 +1014,50 @@ export default function MessagesEditor() {
             <div className="rounded-[24px] border border-clay/60 bg-white/90 p-5 shadow-card">
               <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-ink/50">Envoyer</p>
 
+              <div className="mt-4 rounded-[16px] border border-ink/8 bg-white p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-semibold text-ink/55">Piece jointe</p>
+                    <p className="mt-0.5 text-[11px] text-ink/45">
+                      Un fichier maximum, {formatFileSize(MAX_ATTACHMENT_BYTES)} max.
+                    </p>
+                  </div>
+                  <label className="cursor-pointer rounded-full border border-ink/15 px-4 py-2 text-xs font-semibold text-ink/65 transition-colors hover:border-forest/40 hover:text-forest">
+                    Choisir un fichier
+                    <input
+                      ref={attachmentInputRef}
+                      className="sr-only"
+                      type="file"
+                      onChange={handleAttachmentChange}
+                      disabled={sending}
+                    />
+                  </label>
+                </div>
+                {attachment ? (
+                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-[12px] bg-stone/35 px-3 py-2">
+                    <span className="min-w-0 truncate text-sm font-semibold text-ink/70">
+                      {attachment.name}{" "}
+                      <span className="font-normal text-ink/45">({formatFileSize(attachment.size)})</span>
+                    </span>
+                    <button
+                      type="button"
+                      className="rounded-full border border-ink/15 px-3 py-1 text-xs font-semibold text-ink/55 transition-colors hover:border-ink/30 hover:text-ink disabled:opacity-40"
+                      onClick={() => {
+                        setAttachment(null);
+                        setAttachmentError("");
+                        if (attachmentInputRef.current) attachmentInputRef.current.value = "";
+                      }}
+                      disabled={sending}
+                    >
+                      Retirer
+                    </button>
+                  </div>
+                ) : null}
+                {attachmentError ? <p className="mt-2 text-xs font-semibold text-red-700">{attachmentError}</p> : null}
+              </div>
+
               {/* Test */}
-              <div className="mt-4 rounded-[16px] border border-ink/8 bg-stone/30 p-4">
+              <div className="mt-3 rounded-[16px] border border-ink/8 bg-stone/30 p-4">
                 <p className="text-xs font-semibold text-ink/55">Test - envoyer à une seule adresse</p>
                 <div className="mt-2 flex gap-2">
                   <input
@@ -1553,6 +1669,15 @@ export default function MessagesEditor() {
                           <span className="font-semibold text-forest">
                             {item.stats?.recipients ?? 0} destinataires
                           </span>
+                          {item.attachment?.name ? (
+                            <>
+                              <span>Â·</span>
+                              <span>
+                                Piece jointe : {item.attachment.name}
+                                {typeof item.attachment.size === "number" ? ` (${formatFileSize(item.attachment.size)})` : ""}
+                              </span>
+                            </>
+                          ) : null}
                         </div>
                       </div>
                       <span

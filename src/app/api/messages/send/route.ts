@@ -28,6 +28,14 @@ type SendPayload = {
   contactListName?: string | null;
   templateId?: string | null;
   templateName?: string | null;
+  attachment?: MessageAttachmentPayload | null;
+};
+
+type MessageAttachmentPayload = {
+  name?: string;
+  content?: string;
+  type?: string | null;
+  size?: number | null;
 };
 
 type Recipient = {
@@ -35,6 +43,8 @@ type Recipient = {
   name?: string;
   memberId?: string;
 };
+
+const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
 
 function normalizeEmail(value: unknown) {
   return String(value ?? "").trim().toLowerCase();
@@ -69,11 +79,42 @@ function chunk<T>(items: T[], size: number) {
   return out;
 }
 
+function sanitizeAttachment(input: unknown) {
+  if (!input || typeof input !== "object") return null;
+  const row = input as MessageAttachmentPayload;
+  const name = String(row.name ?? "").trim();
+  const content = String(row.content ?? "").trim();
+  const type = row.type ? String(row.type).trim().slice(0, 120) : null;
+  const size = Number.isFinite(Number(row.size)) ? Number(row.size) : null;
+
+  if (!name && !content) return null;
+  if (!name || !content) {
+    throw new Error("Piece jointe incomplete.");
+  }
+  if (size !== null && size > MAX_ATTACHMENT_BYTES) {
+    throw new Error("Piece jointe trop lourde.");
+  }
+  if (content.length > Math.ceil((MAX_ATTACHMENT_BYTES * 4) / 3) + 1000) {
+    throw new Error("Piece jointe trop lourde.");
+  }
+  if (!/^[A-Za-z0-9+/=]+$/.test(content)) {
+    throw new Error("Piece jointe invalide.");
+  }
+
+  return {
+    name: name.replace(/[\\/\r\n]/g, "_").slice(0, 180),
+    content,
+    type,
+    size,
+  };
+}
+
 async function sendBrevoEmail(params: {
   recipients: Recipient[];
   subject: string;
   content: string;
   mode: SendMode;
+  attachment: ReturnType<typeof sanitizeAttachment>;
 }) {
   const apiKey = process.env.BREVO_API_KEY;
   const senderEmail = process.env.BREVO_SENDER_EMAIL;
@@ -102,6 +143,16 @@ async function sendBrevoEmail(params: {
       htmlContent,
       textContent,
       tags: ["brouette", "admin-message"],
+      ...(params.attachment
+        ? {
+            attachment: [
+              {
+                name: params.attachment.name,
+                content: params.attachment.content,
+              },
+            ],
+          }
+        : {}),
     };
     const payload =
       params.mode === "test"
@@ -328,6 +379,7 @@ export async function POST(request: Request) {
     const includeInactive = body.includeInactive === true;
     const testEmail = normalizeEmail(body.testEmail);
     const contactListId = String(body.contactListId ?? "").trim();
+    const attachment = sanitizeAttachment(body.attachment);
 
     if (!subject || !content) {
       return NextResponse.json({ ok: false, error: "Objet et message obligatoires." }, { status: 400 });
@@ -357,6 +409,7 @@ export async function POST(request: Request) {
       subject,
       content,
       mode,
+      attachment,
     });
 
     let archiveWarning: string | null = null;
@@ -378,6 +431,13 @@ export async function POST(request: Request) {
           id: body.templateId ?? null,
           name: body.templateName ?? null,
         },
+        attachment: attachment
+          ? {
+              name: attachment.name,
+              size: attachment.size,
+              type: attachment.type,
+            }
+          : null,
         stats: {
           recipients: sendResult.sent,
           sentAt: now,
