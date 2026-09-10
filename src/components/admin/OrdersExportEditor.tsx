@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { collection, getDocs, orderBy, query, Timestamp, where } from "firebase/firestore";
 import { firebaseDb } from "@/lib/firebase/client";
+import { buildOrdersExportCsv } from "@/lib/ordersExport";
+import type { OrdersExportRow } from "@/lib/ordersExport";
 
 type OrderItem = {
   saleDateKey?: string | null;
@@ -47,60 +49,6 @@ function memberLabel(member?: Member | null) {
   const first = String(member.firstName ?? "").trim();
   const last = String(member.lastName ?? "").trim();
   return `${last} ${first}`.trim();
-}
-
-function escapeCsv(value: string) {
-  if (value.includes(";") || value.includes('"') || value.includes("\n")) {
-    return `"${value.replace(/"/g, '""')}"`;
-  }
-  return value;
-}
-
-function buildCsv(
-  rows: Array<{
-    orderDate: string;
-    member: string;
-    memberEmail: string;
-    retrait: string;
-    producer: string;
-    product: string;
-    variant: string;
-    qty: number;
-    unitPrice: number;
-    total: number;
-  }>,
-): string {
-  const headers = [
-    "Date commande",
-    "Adhérent",
-    "Email",
-    "Date retrait",
-    "Producteur",
-    "Produit",
-    "Variante",
-    "Quantité",
-    "Prix unitaire (EUR)",
-    "Total (EUR)",
-  ];
-
-  const lines = [
-    headers.map(escapeCsv).join(";"),
-    ...rows.map((row) =>
-      [
-        escapeCsv(row.orderDate),
-        escapeCsv(row.member),
-        escapeCsv(row.memberEmail),
-        escapeCsv(row.retrait),
-        escapeCsv(row.producer),
-        escapeCsv(row.product),
-        escapeCsv(row.variant),
-        String(row.qty),
-        row.unitPrice.toFixed(2).replace(".", ","),
-        row.total.toFixed(2).replace(".", ","),
-      ].join(";"),
-    ),
-  ];
-  return lines.join("\r\n");
 }
 
 function downloadCsv(content: string, fileName: string) {
@@ -191,7 +139,7 @@ export default function OrdersExportEditor() {
         }),
       );
 
-      const rows: Parameters<typeof buildCsv>[0] = [];
+      const rows: OrdersExportRow[] = [];
 
       for (const order of orders) {
         const member = order.memberId ? membersById[order.memberId] ?? null : null;
@@ -203,9 +151,8 @@ export default function OrdersExportEditor() {
 
         const items = itemsByOrder[order.id] ?? [];
         for (const item of items) {
-          if (item.isSoldByWeight) continue;
-
           const producer = item.producerId ? producersById[item.producerId] : null;
+          const isSoldByWeight = Boolean(item.isSoldByWeight);
           rows.push({
             orderDate,
             member: memberName,
@@ -215,19 +162,20 @@ export default function OrdersExportEditor() {
             product: item.label ?? "",
             variant: item.variantLabel ?? "",
             qty: Number(item.quantity ?? 0),
-            unitPrice: Number(item.unitPrice ?? 0),
-            total: Number(item.lineTotal ?? 0),
+            isSoldByWeight,
+            unitPrice: isSoldByWeight ? 0 : Number(item.unitPrice ?? 0),
+            total: isSoldByWeight ? 0 : Number(item.lineTotal ?? 0),
           });
         }
       }
 
       if (rows.length === 0) {
-        setMessage("Aucune ligne exportable sur cette période (tous les produits sont au poids).");
+        setMessage("Aucune ligne exportable sur cette période.");
         setExporting(false);
         return;
       }
 
-      const csv = buildCsv(rows);
+      const csv = buildOrdersExportCsv(rows);
       const fileName = `Commandes_${from}_${to}.csv`;
       downloadCsv(csv, fileName);
 
@@ -248,8 +196,8 @@ export default function OrdersExportEditor() {
         <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-ink/55">Export</p>
         <h2 className="mt-1 font-serif text-3xl text-ink">Export des commandes</h2>
         <p className="mt-2 text-sm text-ink/70">
-          Génère un fichier CSV des commandes validées sur une période. Les produits au poids (prix
-          à définir le jour J) sont exclus.
+          Génère un fichier CSV des commandes validées sur une période. Les produits au poids sont inclus
+          avec une colonne d&apos;identification et un montant à 0 EUR.
         </p>
       </section>
 
@@ -294,10 +242,10 @@ export default function OrdersExportEditor() {
         <div className="mt-6 rounded-xl border border-clay/60 bg-stone/50 p-4 text-xs text-ink/65">
           <p className="font-semibold text-ink/80 mb-1">Colonnes exportées :</p>
           Date commande · Adhérent · Email · Date retrait · Producteur · Produit · Variante ·
-          Quantité · Prix unitaire · Total
+          Quantité · Produit au poids · Prix unitaire · Total
           <br />
           <span className="mt-1 block text-ink/55">
-            Produits au poids exclus (montant à définir lors du retrait).
+            Les produits au poids restent visibles dans le CSV avec prix unitaire et total à 0 EUR.
           </span>
         </div>
       </section>
