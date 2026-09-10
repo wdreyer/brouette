@@ -157,6 +157,28 @@ function formatDateValue(value: unknown) {
   return displayValue(value);
 }
 
+function toDateValue(value: unknown) {
+  if (value instanceof Timestamp) return value.toDate();
+  if (value instanceof Date) return value;
+  if (typeof value === "string" && value.trim()) {
+    const date = new Date(value);
+    if (!Number.isNaN(date.getTime())) return date;
+  }
+  return null;
+}
+
+function formatDateTimeValue(value: unknown) {
+  const date = toDateValue(value);
+  if (!date) return "-";
+  return date.toLocaleString("fr-FR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 function formatRole(value: unknown) {
   if (value === "admin") return "Admin";
   if (value === "referent") return "Référent";
@@ -291,10 +313,41 @@ export default function MembersEditor({
       getDocs(collection(firebaseDb, "producers")),
       readBalanceTrackingEnabled(firebaseDb),
     ]);
-    const items = membersSnap.docs.map((docSnap) => ({
+    let items = membersSnap.docs.map((docSnap) => ({
       id: docSnap.id,
       data: docSnap.data() as Record<string, unknown>,
     }));
+    try {
+      const response = await fetch("/api/members/last-login", {
+        headers: await authHeaders(),
+      });
+      const result = (await response.json().catch(() => ({}))) as {
+        ok?: boolean;
+        lastLoginByMemberId?: Record<string, { lastLoginAt?: string | null }>;
+      };
+      if (response.ok && result.ok && result.lastLoginByMemberId) {
+        items = items.map((entry) => {
+          const lastLoginAt = result.lastLoginByMemberId?.[entry.id]?.lastLoginAt;
+          if (!lastLoginAt) return entry;
+          const authData =
+            entry.data.auth && typeof entry.data.auth === "object"
+              ? (entry.data.auth as Record<string, unknown>)
+              : {};
+          return {
+            ...entry,
+            data: {
+              ...entry.data,
+              auth: {
+                ...authData,
+                lastLoginAt,
+              },
+            },
+          };
+        });
+      }
+    } catch {
+      // La colonne gardera la valeur Firestore si la lecture Auth n'est pas disponible.
+    }
     const producerItems = producersSnap.docs.map((docSnap) => ({
       id: docSnap.id,
       ...(docSnap.data() as Omit<Producer, "id">),
@@ -749,8 +802,10 @@ export default function MembersEditor({
     items.sort((a, b) => {
       const aValue = getByPath(a.data, sortKey);
       const bValue = getByPath(b.data, sortKey);
-      const aText = aValue instanceof Timestamp ? aValue.toDate().getTime() : String(aValue ?? "");
-      const bText = bValue instanceof Timestamp ? bValue.toDate().getTime() : String(bValue ?? "");
+      const aDate = toDateValue(aValue);
+      const bDate = toDateValue(bValue);
+      const aText = aDate ? aDate.getTime() : String(aValue ?? "");
+      const bText = bDate ? bDate.getTime() : String(bValue ?? "");
       if (aText < bText) return sortDir === "asc" ? -1 : 1;
       if (aText > bText) return sortDir === "asc" ? 1 : -1;
       return 0;
@@ -905,9 +960,11 @@ export default function MembersEditor({
                                   getByPath(entry.data, "membershipJoinedAt") ??
                                     getByPath(entry.data, "membershipPaymentDate"),
                                 )
-                          : field.path === "auth.role"
-                            ? formatRole(getByPath(entry.data, field.path))
-                            : displayValue(getByPath(entry.data, field.path))}
+                            : field.path === "auth.role"
+                              ? formatRole(getByPath(entry.data, field.path))
+                              : field.path === "auth.lastLoginAt"
+                                ? formatDateTimeValue(getByPath(entry.data, field.path))
+                              : displayValue(getByPath(entry.data, field.path))}
                       </td>
                     ))}
                     {balanceTrackingEnabled ? (
@@ -1015,6 +1072,12 @@ export default function MembersEditor({
                 <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">Rôle</p>
                 <p className="text-sm text-ink">
                   {formatRole(getByPath(viewingEntry.data, "auth.role") ?? "member")}
+                </p>
+              </div>
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink/60">Dernière connexion</p>
+                <p className="text-sm text-ink">
+                  {formatDateTimeValue(getByPath(viewingEntry.data, "auth.lastLoginAt"))}
                 </p>
               </div>
             </div>

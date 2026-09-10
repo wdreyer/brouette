@@ -87,6 +87,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               ),
             ]).catch(() => undefined);
           }
+          await setDoc(
+            doc(firebaseDb, "members", member.id),
+            {
+              auth: {
+                uid: nextUser.uid,
+                role: member.role,
+                lastLoginAt: serverTimestamp(),
+              },
+              updatedAt: serverTimestamp(),
+            },
+            { merge: true },
+          ).catch(() => undefined);
           setMemberId(member.id);
           setCartUser(member.id);
           if (member.role === "admin") {
