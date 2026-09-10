@@ -19,6 +19,7 @@ import { firebaseDb } from "@/lib/firebase/client";
 import { useAuth } from "@/components/auth/AuthProvider";
 import { readBalanceTrackingEnabled } from "@/lib/balanceTracking";
 import { DEFAULT_MEMBER_PASSWORD } from "@/lib/memberAuthSync";
+import { formatDateForInput, formatDateTimeForInput, timestampFromDateInput } from "@/lib/dateInput";
 
 type FieldType = "text" | "number" | "boolean" | "date" | "datetime";
 
@@ -90,12 +91,10 @@ function toInputValue(value: unknown, type: FieldType) {
   if (type === "number") return value === undefined || value === null ? "" : String(value);
   if (value instanceof Timestamp) {
     const date = value.toDate();
-    return type === "date"
-      ? date.toISOString().slice(0, 10)
-      : date.toISOString().slice(0, 16);
+    return type === "date" ? formatDateForInput(date) : formatDateTimeForInput(date);
   }
   if (value instanceof Date) {
-    return type === "date" ? value.toISOString().slice(0, 10) : value.toISOString().slice(0, 16);
+    return type === "date" ? formatDateForInput(value) : formatDateTimeForInput(value);
   }
   return value === undefined || value === null ? "" : String(value);
 }
@@ -103,16 +102,16 @@ function toInputValue(value: unknown, type: FieldType) {
 function fromInputValue(value: string, type: FieldType) {
   if (type === "number") return value === "" ? null : Number(value);
   if (type === "boolean") return value === "true";
-  if (type === "date" && value) return Timestamp.fromDate(new Date(`${value}T00:00:00`));
+  if (type === "date" && value) return timestampFromDateInput(value);
   if (type === "datetime" && value) return Timestamp.fromDate(new Date(value));
   return value;
 }
 
 function displayValue(value: unknown) {
   if (value instanceof Timestamp) {
-    return value.toDate().toISOString().slice(0, 10);
+    return formatDateForInput(value.toDate());
   }
-  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  if (value instanceof Date) return formatDateForInput(value);
   if (typeof value === "boolean") return value ? "Oui" : "Non";
   if (value === undefined || value === null || value === "") return "-";
   return String(value);
