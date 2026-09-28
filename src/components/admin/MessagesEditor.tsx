@@ -32,6 +32,11 @@ type MessageDoc = {
     size?: number | null;
     type?: string | null;
   } | null;
+  attachments?: {
+    name?: string;
+    size?: number | null;
+    type?: string | null;
+  }[];
   createdAt?: Timestamp;
   stats?: {
     recipients?: number;
@@ -131,12 +136,13 @@ const TARGET_OPTIONS: { value: TargetKind; label: string; desc: string }[] = [
   { value: "adherents-only", label: "Adhérents", desc: "Membres avec rôle adhérent" },
   { value: "recent-buyers", label: "Commandes recentes", desc: "Personnes ayant commande recemment" },
   { value: "coop-only", label: "Membres Coop", desc: "Admins et référents" },
-  { value: "selected-adherents", label: "Sélection manuelle", desc: "Choisir les adhérents un par un" },
+  { value: "selected-adherents", label: "Sélection manuelle", desc: "Choisir parmi toutes les personnes" },
   { value: "contact-list", label: "Liste de diffusion", desc: "Utiliser une liste enregistree" },
   { value: "producers", label: "Producteurs", desc: "Tous les producteurs (email de la fiche producteur)" },
 ];
 
 const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
+const MAX_ATTACHMENT_COUNT = 10;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -156,6 +162,13 @@ function isInactive(status: unknown) {
 function firstEmail(member: MemberDoc) {
   const all = [normalizeEmail(member.email), ...(member.emails ?? []).map(normalizeEmail)].filter(Boolean);
   return all[0] ?? "";
+}
+
+function memberRoleLabel(role: string) {
+  if (role === "admin") return "Admin";
+  if (role === "referent") return "Référent";
+  if (role === "coop" || role === "coop-member") return "Membre Coop";
+  return "Adhérent";
 }
 
 function fmtDate(ts?: Timestamp) {
@@ -225,7 +238,7 @@ export default function MessagesEditor() {
   const [selectedTemplateKey, setSelectedTemplateKey] = useState("");
   const [quickTemplateName, setQuickTemplateName] = useState("");
   const [searchManualMembers, setSearchManualMembers] = useState("");
-  const [attachment, setAttachment] = useState<MessageAttachmentDraft | null>(null);
+  const [attachments, setAttachments] = useState<MessageAttachmentDraft[]>([]);
   const [attachmentError, setAttachmentError] = useState("");
   const attachmentInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -308,11 +321,18 @@ export default function MessagesEditor() {
 
   const manualCandidates = useMemo(() => {
     const term = searchManualMembers.trim().toLowerCase();
-    return adherents.filter((m) => {
-      const hay = [fullName(m.firstName, m.lastName), firstEmail(m), m.membershipStatus ?? ""].join(" ").toLowerCase();
+    return members.filter((m) => {
+      const hay = [
+        fullName(m.firstName, m.lastName),
+        firstEmail(m),
+        m.membershipStatus ?? "",
+        memberRoleLabel(m.role),
+      ]
+        .join(" ")
+        .toLowerCase();
       return term ? hay.includes(term) : true;
     });
-  }, [adherents, searchManualMembers]);
+  }, [members, searchManualMembers]);
 
   const listMemberCandidates = useMemo(() => {
     const term = listSearchMembers.trim().toLowerCase();
@@ -351,7 +371,7 @@ export default function MessagesEditor() {
     if (draft.target === "selected-adherents")
       return countMemberEmails(
         draft.selectedMemberIds
-          .map((id) => adherents.find((m) => m.id === id))
+          .map((id) => members.find((m) => m.id === id))
           .filter((m): m is MemberDoc => Boolean(m)),
       );
     if (draft.target === "contact-list" && draft.contactListId) {
@@ -428,27 +448,43 @@ export default function MessagesEditor() {
   };
 
   const handleAttachmentChange = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0] ?? null;
+    const files = Array.from(event.target.files ?? []);
     setAttachmentError("");
-    setAttachment(null);
 
-    if (!file) return;
-    if (file.size > MAX_ATTACHMENT_BYTES) {
-      setAttachmentError(`Fichier trop lourd. Maximum ${formatFileSize(MAX_ATTACHMENT_BYTES)}.`);
+    if (!files.length) return;
+    if (attachments.length + files.length > MAX_ATTACHMENT_COUNT) {
+      setAttachmentError(`Maximum ${MAX_ATTACHMENT_COUNT} pièces jointes par message.`);
+      event.target.value = "";
+      return;
+    }
+
+    const oversizedFile = files.find((file) => file.size > MAX_ATTACHMENT_BYTES);
+    if (oversizedFile) {
+      setAttachmentError(`${oversizedFile.name} dépasse la limite de ${formatFileSize(MAX_ATTACHMENT_BYTES)}.`);
+      event.target.value = "";
+      return;
+    }
+
+    const totalSize = [...attachments, ...files].reduce((total, file) => total + file.size, 0);
+    if (totalSize > MAX_ATTACHMENT_BYTES) {
+      setAttachmentError(`L'ensemble des pièces jointes ne doit pas dépasser ${formatFileSize(MAX_ATTACHMENT_BYTES)}.`);
       event.target.value = "";
       return;
     }
 
     try {
-      const content = await readFileAsBase64(file);
-      setAttachment({
-        name: file.name,
-        content,
-        type: file.type || null,
-        size: file.size,
-      });
+      const nextAttachments = await Promise.all(
+        files.map(async (file) => ({
+          name: file.name,
+          content: await readFileAsBase64(file),
+          type: file.type || null,
+          size: file.size,
+        })),
+      );
+      setAttachments((current) => [...current, ...nextAttachments]);
     } catch (error) {
       setAttachmentError(error instanceof Error ? error.message : "Lecture du fichier impossible.");
+    } finally {
       event.target.value = "";
     }
   };
@@ -459,7 +495,7 @@ export default function MessagesEditor() {
       return;
     }
     if (mode === "send" && draft.target === "selected-adherents" && draft.selectedMemberIds.length === 0) {
-      setStatusMsg({ type: "error", text: "Sélectionne au moins un adhérent." });
+      setStatusMsg({ type: "error", text: "Sélectionne au moins une personne." });
       return;
     }
     if (mode === "send" && draft.target === "contact-list" && !draft.contactListId) {
@@ -491,14 +527,12 @@ export default function MessagesEditor() {
             ? selectedTemplateKey.replace("custom:", "")
             : null,
           templateName: selectedTemplate?.name ?? null,
-          attachment: attachment
-            ? {
-                name: attachment.name,
-                content: attachment.content,
-                type: attachment.type,
-                size: attachment.size,
-              }
-            : null,
+          attachments: attachments.map((attachment) => ({
+            name: attachment.name,
+            content: attachment.content,
+            type: attachment.type,
+            size: attachment.size,
+          })),
         }),
       });
       const result = (await response.json()) as {
@@ -530,7 +564,7 @@ export default function MessagesEditor() {
         });
       }
       if (mode === "send") {
-        setAttachment(null);
+        setAttachments([]);
         setAttachmentError("");
         if (attachmentInputRef.current) attachmentInputRef.current.value = "";
       }
@@ -896,7 +930,7 @@ export default function MessagesEditor() {
                 </div>
                 <div className="mt-2 max-h-60 overflow-auto rounded-[12px] border border-ink/8 bg-stone/20">
                   {manualCandidates.map((member) => {
-                    const name = fullName(member.firstName, member.lastName) || "Adhérent";
+                    const name = fullName(member.firstName, member.lastName) || "Personne sans nom";
                     const email = firstEmail(member) || "-";
                     const checked = draft.selectedMemberIds.includes(member.id);
                     return (
@@ -912,7 +946,10 @@ export default function MessagesEditor() {
                         />
                         <div className="min-w-0">
                           <p className="truncate text-xs font-semibold text-ink">{name}</p>
-                          <p className="truncate text-[11px] text-ink/55">{email}</p>
+                          <p className="truncate text-[11px] text-ink/55">
+                            {email} · {memberRoleLabel(member.role)}
+                            {isInactive(member.membershipStatus) ? " · Inactif" : ""}
+                          </p>
                         </div>
                       </label>
                     );
@@ -1017,40 +1054,51 @@ export default function MessagesEditor() {
               <div className="mt-4 rounded-[16px] border border-ink/8 bg-white p-4">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
-                    <p className="text-xs font-semibold text-ink/55">Piece jointe</p>
+                    <p className="text-xs font-semibold text-ink/55">Pièces jointes</p>
                     <p className="mt-0.5 text-[11px] text-ink/45">
-                      Un fichier maximum, {formatFileSize(MAX_ATTACHMENT_BYTES)} max.
+                      Jusqu&apos;à {MAX_ATTACHMENT_COUNT} fichiers, {formatFileSize(MAX_ATTACHMENT_BYTES)} au total.
                     </p>
                   </div>
                   <label className="cursor-pointer rounded-full border border-ink/15 px-4 py-2 text-xs font-semibold text-ink/65 transition-colors hover:border-forest/40 hover:text-forest">
-                    Choisir un fichier
+                    Ajouter des fichiers
                     <input
                       ref={attachmentInputRef}
                       className="sr-only"
                       type="file"
+                      multiple
                       onChange={handleAttachmentChange}
                       disabled={sending}
                     />
                   </label>
                 </div>
-                {attachment ? (
-                  <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-[12px] bg-stone/35 px-3 py-2">
-                    <span className="min-w-0 truncate text-sm font-semibold text-ink/70">
-                      {attachment.name}{" "}
-                      <span className="font-normal text-ink/45">({formatFileSize(attachment.size)})</span>
-                    </span>
-                    <button
-                      type="button"
-                      className="rounded-full border border-ink/15 px-3 py-1 text-xs font-semibold text-ink/55 transition-colors hover:border-ink/30 hover:text-ink disabled:opacity-40"
-                      onClick={() => {
-                        setAttachment(null);
-                        setAttachmentError("");
-                        if (attachmentInputRef.current) attachmentInputRef.current.value = "";
-                      }}
-                      disabled={sending}
-                    >
-                      Retirer
-                    </button>
+                {attachments.length ? (
+                  <div className="mt-3 flex flex-col gap-2">
+                    {attachments.map((attachment, index) => (
+                      <div
+                        key={`${attachment.name}-${attachment.size}-${index}`}
+                        className="flex items-center justify-between gap-2 rounded-[12px] bg-stone/35 px-3 py-2"
+                      >
+                        <span className="min-w-0 truncate text-sm font-semibold text-ink/70">
+                          {attachment.name}{" "}
+                          <span className="font-normal text-ink/45">({formatFileSize(attachment.size)})</span>
+                        </span>
+                        <button
+                          type="button"
+                          className="shrink-0 rounded-full border border-ink/15 px-3 py-1 text-xs font-semibold text-ink/55 transition-colors hover:border-ink/30 hover:text-ink disabled:opacity-40"
+                          onClick={() => {
+                            setAttachments((current) => current.filter((_, itemIndex) => itemIndex !== index));
+                            setAttachmentError("");
+                          }}
+                          disabled={sending}
+                        >
+                          Retirer
+                        </button>
+                      </div>
+                    ))}
+                    <p className="text-right text-[11px] text-ink/45">
+                      {attachments.length} fichier(s) ·{" "}
+                      {formatFileSize(attachments.reduce((sum, item) => sum + item.size, 0))}
+                    </p>
                   </div>
                 ) : null}
                 {attachmentError ? <p className="mt-2 text-xs font-semibold text-red-700">{attachmentError}</p> : null}
@@ -1649,6 +1697,11 @@ export default function MessagesEditor() {
                 const isExpanded = expandedMessageId === item.id;
                 const archivedRecipients = item.stats?.recipientsList ?? item.stats?.recipientsPreview ?? [];
                 const hasFullRecipientList = Array.isArray(item.stats?.recipientsList);
+                const archivedAttachments = item.attachments?.length
+                  ? item.attachments
+                  : item.attachment?.name
+                    ? [item.attachment]
+                    : [];
                 return (
                   <div key={item.id} className="rounded-[20px] border border-clay/50 bg-white/90 p-5 shadow-card">
                     <div className="flex flex-wrap items-start justify-between gap-3">
@@ -1669,12 +1722,21 @@ export default function MessagesEditor() {
                           <span className="font-semibold text-forest">
                             {item.stats?.recipients ?? 0} destinataires
                           </span>
-                          {item.attachment?.name ? (
+                          {archivedAttachments.length ? (
                             <>
-                              <span>Â·</span>
+                              <span>·</span>
                               <span>
-                                Piece jointe : {item.attachment.name}
-                                {typeof item.attachment.size === "number" ? ` (${formatFileSize(item.attachment.size)})` : ""}
+                                {archivedAttachments.length} pièce{archivedAttachments.length > 1 ? "s" : ""} jointe
+                                {archivedAttachments.length > 1 ? "s" : ""} :{" "}
+                                {archivedAttachments
+                                  .map((attachment) =>
+                                    `${attachment.name ?? "Fichier"}${
+                                      typeof attachment.size === "number"
+                                        ? ` (${formatFileSize(attachment.size)})`
+                                        : ""
+                                    }`,
+                                  )
+                                  .join(", ")}
                               </span>
                             </>
                           ) : null}

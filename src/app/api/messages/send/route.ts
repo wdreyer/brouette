@@ -29,6 +29,7 @@ type SendPayload = {
   templateId?: string | null;
   templateName?: string | null;
   attachment?: MessageAttachmentPayload | null;
+  attachments?: MessageAttachmentPayload[];
 };
 
 type MessageAttachmentPayload = {
@@ -45,6 +46,7 @@ type Recipient = {
 };
 
 const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
+const MAX_ATTACHMENT_COUNT = 10;
 
 function normalizeEmail(value: unknown) {
   return String(value ?? "").trim().toLowerCase();
@@ -89,24 +91,46 @@ function sanitizeAttachment(input: unknown) {
 
   if (!name && !content) return null;
   if (!name || !content) {
-    throw new Error("Piece jointe incomplete.");
+    throw new Error("Pièce jointe incomplète.");
   }
   if (size !== null && size > MAX_ATTACHMENT_BYTES) {
-    throw new Error("Piece jointe trop lourde.");
+    throw new Error("Pièce jointe trop lourde.");
   }
   if (content.length > Math.ceil((MAX_ATTACHMENT_BYTES * 4) / 3) + 1000) {
-    throw new Error("Piece jointe trop lourde.");
+    throw new Error("Pièce jointe trop lourde.");
   }
   if (!/^[A-Za-z0-9+/=]+$/.test(content)) {
-    throw new Error("Piece jointe invalide.");
+    throw new Error("Pièce jointe invalide.");
+  }
+
+  const actualSize = Buffer.from(content, "base64").byteLength;
+  if (actualSize > MAX_ATTACHMENT_BYTES) {
+    throw new Error("Pièce jointe trop lourde.");
   }
 
   return {
     name: name.replace(/[\\/\r\n]/g, "_").slice(0, 180),
     content,
     type,
-    size,
+    size: actualSize,
   };
+}
+
+function sanitizeAttachments(input: unknown, legacyAttachment: unknown) {
+  const rows = Array.isArray(input) ? input : legacyAttachment ? [legacyAttachment] : [];
+  if (rows.length > MAX_ATTACHMENT_COUNT) {
+    throw new Error(`Maximum ${MAX_ATTACHMENT_COUNT} pièces jointes par message.`);
+  }
+
+  const attachments = rows
+    .map((row) => sanitizeAttachment(row))
+    .filter((row): row is NonNullable<typeof row> => Boolean(row));
+  const totalSize = attachments.reduce((sum, attachment) => sum + attachment.size, 0);
+
+  if (totalSize > MAX_ATTACHMENT_BYTES) {
+    throw new Error("L'ensemble des pièces jointes est trop lourd.");
+  }
+  return attachments;
 }
 
 async function sendBrevoEmail(params: {
@@ -114,7 +138,7 @@ async function sendBrevoEmail(params: {
   subject: string;
   content: string;
   mode: SendMode;
-  attachment: ReturnType<typeof sanitizeAttachment>;
+  attachments: ReturnType<typeof sanitizeAttachments>;
 }) {
   const apiKey = process.env.BREVO_API_KEY;
   const senderEmail = process.env.BREVO_SENDER_EMAIL;
@@ -143,14 +167,12 @@ async function sendBrevoEmail(params: {
       htmlContent,
       textContent,
       tags: ["brouette", "admin-message"],
-      ...(params.attachment
+      ...(params.attachments.length
         ? {
-            attachment: [
-              {
-                name: params.attachment.name,
-                content: params.attachment.content,
-              },
-            ],
+            attachment: params.attachments.map((attachment) => ({
+              name: attachment.name,
+              content: attachment.content,
+            })),
           }
         : {}),
     };
@@ -269,7 +291,7 @@ async function listMembersRecipients(options: {
     const selected = options.selectedMemberIds
       .map((id) => memberById.get(id))
       .filter((row): row is NonNullable<typeof row> => Boolean(row))
-      .filter((row) => row.role === "member" && canUseMember(row));
+      .filter((row) => canUseMember(row));
     return uniqueRecipients(
       selected.flatMap((row) =>
         row.emails.map((email) => ({
@@ -360,7 +382,7 @@ function targetLabel(target: TargetKind, listName?: string) {
   if (target === "coop-only") return "Membres coop";
   if (target === "contact-list") return listName ? `Liste : ${listName}` : "Liste de diffusion";
   if (target === "producers") return "Producteurs";
-  return "Sélection d'adhérents";
+  return "Sélection manuelle";
 }
 
 export async function POST(request: Request) {
@@ -379,7 +401,7 @@ export async function POST(request: Request) {
     const includeInactive = body.includeInactive === true;
     const testEmail = normalizeEmail(body.testEmail);
     const contactListId = String(body.contactListId ?? "").trim();
-    const attachment = sanitizeAttachment(body.attachment);
+    const attachments = sanitizeAttachments(body.attachments, body.attachment);
 
     if (!subject || !content) {
       return NextResponse.json({ ok: false, error: "Objet et message obligatoires." }, { status: 400 });
@@ -409,7 +431,7 @@ export async function POST(request: Request) {
       subject,
       content,
       mode,
-      attachment,
+      attachments,
     });
 
     let archiveWarning: string | null = null;
@@ -431,11 +453,16 @@ export async function POST(request: Request) {
           id: body.templateId ?? null,
           name: body.templateName ?? null,
         },
-        attachment: attachment
+        attachments: attachments.map((attachment) => ({
+          name: attachment.name,
+          size: attachment.size,
+          type: attachment.type,
+        })),
+        attachment: attachments[0]
           ? {
-              name: attachment.name,
-              size: attachment.size,
-              type: attachment.type,
+              name: attachments[0].name,
+              size: attachments[0].size,
+              type: attachments[0].type,
             }
           : null,
         stats: {
