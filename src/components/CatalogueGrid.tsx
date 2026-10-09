@@ -494,7 +494,7 @@ export default function CatalogueGrid({ hideWhenClosed = false }: { hideWhenClos
 
   return (
     <div className="grid gap-6 lg:grid-cols-[220px_1fr]">
-      <aside className="sticky top-6 h-fit rounded-xl border border-clay/70 bg-white/90 p-4 shadow-card">
+      <aside className="h-fit lg:sticky lg:top-6 rounded-xl border border-clay/70 bg-white/90 p-4 shadow-card">
         <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-ink/60">
           Filtres
         </p>
